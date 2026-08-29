@@ -3,6 +3,13 @@
 所有值得记录的变更都在这里。格式：[Keep a Changelog](https://keepachangelog.com/)；0.1.0 之后遵循 SemVer。
 
 ## [Unreleased]
+### 新增（M3，进行中）
+- `kernels/attention.py` 改为 `torch.library.custom_op` 前向/反向 + `register_fake`：`cu_seq` 以张量传入、D2H 在算子内部，`torch.compile(fullgraph=True)` 可追踪（OURS-8 关闭）；数值与 golden 逐位不变。
+- `kernels/rms_norm.py`：RMSNorm → `torch_npu.npu_rms_norm`（drop-in，Meta/autograd 齐全）；recipe 变体 `qwen3_debugmodel_npu_fused_norm`；`npu_baseline` 默认启用。
+- `ascend-titan-provenance`：按节点列出实际生效的实现（ascend / upstream-override / upstream），P7 要求的审计表。
+- `npu_baseline` 在上游 override 已 claim attention 块时跳过 RoPE override（OURS-9）。
+- 归因：`DEP-INDUCTOR`（inductor 在 NPU 上需要 Triton-Ascend/torchair）。
+
 ### 新增
 - 包骨架：无副作用的 import、`setup()` 引导、`python -m ascend_titan.train` 入口。
 - shim 注册表，支持 `wrap` / `replace` / `polyfill` 三种类型；P3/P4 在 import 时强制。

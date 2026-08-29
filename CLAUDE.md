@@ -10,10 +10,10 @@
 |---|---|---|
 | `ascend_titan/_bootstrap.py`、`train.py` | 入口 | `setup()` = 唯一的副作用点；必须先于任何 `import torchtitan` |
 | `ascend_titan/compat/` | L0 | shim 注册表 + `shims/`（受治理的 monkeypatch；数量 → 0） |
-| `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention、rope） |
+| `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention = custom_op、rope、rms_norm） |
 | `ascend_titan/parallel/`、`graph/` | L2 | 并行策略、torchair |
 | `ascend_titan/recipes/` | L3 | `Trainer.Config` = 上游 registry 函数 + 增量；`transforms.npu_baseline`；`matrix.py` 动态 recipe |
-| `ascend_titan/tools/` | L4 | `doctor`（环境探测）、`matrix`（扫描 + 归因）、provenance |
+| `ascend_titan/tools/` | L4 | `doctor`（环境探测）、`matrix`（扫描 + 归因）、`provenance`（实际实现审计） |
 | `constraints/` | — | 固定的 torchtitan SHA + pip 约束（**版本的唯一事实来源**） |
 | `docs/capability-matrix.md` | — | 每个特性 🟢/🔴/⚪，带归因 |
 | `docs/upstream-tracking.md` | — | shim ↔ issue 表、上游 ask |
@@ -36,6 +36,7 @@ MODULE=ascend_titan.recipes.qwen3 CONFIG=qwen3_debugmodel_npu NPU=8 ./scripts/ru
 COMM_MODE=fake_backend NPU=8 ./scripts/run_train.sh   # 单设备，fake 进程组（目前 🔴 NPU-2）
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu   # 确定性运行 vs golden
 python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4   # 把上游测试配置搬到 NPU 上扫描（docs/matrix/）
+ascend-titan-provenance --module ascend_titan.recipes.qwen3 --config qwen3_debugmodel_npu   # 每个节点实际用的实现
 # tyro：`activation-checkpoint:none` 之类的子命令必须放在所有 --flag 之后
 ```
 
@@ -50,6 +51,7 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4   # 把上游测试配�
 7. **版本升级走带矩阵结果的 PR**（P5）。绝不随手改 `constraints/torchtitan.sha`。
 8. **不加投机性的兜底。** 与上游同一标准：只校验显式契约。
 9. **pip 安装永远带 `-c constraints/<track>.txt`**——否则 torch 被升级、torch_npu ABI 损坏。
+10. **改 `matrix.py` 的 `TRIAGE` 表或任何被 ruff 重排过的多行元组时，用行定位插入，不要用整行字符串 replace**（本仓已因此丢过三次编辑）。
 
 ## 失败归因（经常用）
 

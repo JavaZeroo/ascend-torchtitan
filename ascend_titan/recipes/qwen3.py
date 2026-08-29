@@ -20,6 +20,7 @@ from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
 from torchtitan.trainer import Trainer
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
+RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
 
 
 def qwen3_debugmodel_npu() -> Trainer.Config:
@@ -78,4 +79,12 @@ def qwen3_debugmodel_npu_chunked_loss() -> Trainer.Config:
     """Matrix cell loss/chunked: upstream ChunkedLossWrapper (the upstream default)."""
     config = qwen3_debugmodel_npu()
     config.loss = qwen3_debugmodel().loss
+    return config
+
+
+def qwen3_debugmodel_npu_fused_norm() -> Trainer.Config:
+    """Matrix cell norm/npu_rms_norm: M1 recipe + the fused RMSNorm override.
+    Kept out of ``qwen3_debugmodel_npu`` so the frozen golden curve stays valid."""
+    config = qwen3_debugmodel_npu()
+    config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
     return config

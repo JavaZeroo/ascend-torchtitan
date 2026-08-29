@@ -20,3 +20,7 @@
 
 ## TORCH-6 FSDP2 与 spmd_types 的集成仅在 nightly —— `info`
 - 见 torchtitan TT-5：nightly `_fsdp_param.py` 读取 spmd_types 注解构建 DTensor；2.12/2.13 要求调用方自己给 DTensor。下游 torchtitan 默认 `spmd_types` 后端因此在正式版 torch 上跑不了 CP。
+
+## TORCH-7 `torch.library.opcheck` 的 autograd 注册检查只支持 CPU/CUDA/XPU —— `draft`
+- `torch/testing/_internal/optests/autograd_registration.py:89`：`NotImplementedError: autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {'npu'}`。privateuse1 设备的自定义算子无法用 opcheck 完整校验；本仓的 NPU 测试跳过 `test_autograd_registration`，反向用数值对比覆盖。
+- 诉求：把 privateuse1 加入允许的设备集合（检查本身与设备无关）。

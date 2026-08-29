@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from torchtitan.components.loss import ChunkedLossWrapper
 from torchtitan.models.common.attention import FlexAttention, VarlenAttention
+from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.rope import ComplexRoPE
 from torchtitan.trainer import Trainer
 
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
 ROPE_OVERRIDE = "ascend_titan.kernels.rope.real_cache_rope"
+RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
+# Upstream overrides that replace a whole attention block (which owns the RoPE node);
+# adding our RoPE override on top would be a per-node conflict (OURS-9).
+_ATTENTION_BLOCK_OVERRIDES = ("torchtitan.overrides.fused_mla.",)
 
 
 @dataclass
@@ -28,6 +33,7 @@ class Applied:
     flex_to_varlen: int = 0
     attention_override: bool = False
     rope_override: bool = False
+    rms_norm_override: bool = False
     spmd_backend: str | None = None
     chunked_loss_unwrapped: bool = False
     notes: list[str] = field(default_factory=list)
@@ -40,6 +46,8 @@ class Applied:
             parts.append("override:npu_fusion_attention")
         if self.rope_override:
             parts.append("override:real_cache_rope")
+        if self.rms_norm_override:
+            parts.append("override:npu_rms_norm")
         if self.spmd_backend:
             parts.append(f"spmd_backend:{self.spmd_backend}")
         if self.chunked_loss_unwrapped:
@@ -73,9 +81,21 @@ def npu_baseline(config: Trainer.Config) -> Applied:
     has_complex_rope = any(
         type(c) is ComplexRoPE.Config for _f, c, _p, _a in config.traverse(ComplexRoPE.Config)
     )
-    if has_complex_rope and ROPE_OVERRIDE not in config.override.imports:
+    block_override = any(
+        str(imp if isinstance(imp, str) else imp[0]).startswith(_ATTENTION_BLOCK_OVERRIDES)
+        for imp in config.override.imports
+    )
+    if block_override:
+        a.notes.append("rope override skipped: an upstream override claims the attention block")
+    elif has_complex_rope and ROPE_OVERRIDE not in config.override.imports:
         config.override.imports = [*config.override.imports, ROPE_OVERRIDE]
-    a.rope_override = has_complex_rope
+    a.rope_override = has_complex_rope and not block_override
+
+    # 2c. RMSNorm -> npu_rms_norm (fused kernel; pure drop-in).
+    has_rms = any(type(c) is RMSNorm.Config for _f, c, _p, _a in config.traverse(RMSNorm.Config))
+    if has_rms and RMSNORM_OVERRIDE not in config.override.imports:
+        config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
+    a.rms_norm_override = has_rms
 
     # 3. spmd_types requires DTensor params under dp_mesh_dims on NPU (TT-5).
     if config.parallelism.spmd_backend != "partial_dtensor":

@@ -46,6 +46,7 @@ def test_npu_baseline_transform_on_upstream_recipes():
     assert any(True for _ in cfg.traverse(VarlenAttention.Config))
     assert ATTENTION_OVERRIDE in cfg.override.imports
     assert "ascend_titan.kernels.rope.real_cache_rope" in cfg.override.imports
+    assert "ascend_titan.kernels.rms_norm.npu_rms_norm" in cfg.override.imports
     assert cfg.parallelism.spmd_backend == "partial_dtensor"
     assert not isinstance(cfg.loss, ChunkedLossWrapper.Config)
     # idempotent
@@ -64,3 +65,15 @@ def test_matrix_module_resolves_upstream_recipe():
     assert stock.override.imports == []
     with pytest.raises(AttributeError):
         _ = m.nonsense
+
+
+@pytest.mark.titan
+def test_npu_baseline_skips_rope_when_upstream_block_override_present():
+    from torchtitan.models.llama3.config_registry import llama3_debugmodel
+
+    from ascend_titan.recipes.transforms import ROPE_OVERRIDE, npu_baseline
+
+    cfg = llama3_debugmodel()
+    cfg.override.imports = ["torchtitan.overrides.fused_mla.fused_mla"]
+    a = npu_baseline(cfg)
+    assert ROPE_OVERRIDE not in cfg.override.imports and not a.rope_override

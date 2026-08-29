@@ -12,6 +12,7 @@ import pytest
 def _reload(monkeypatch, fake_npu: bool):
     """Import ascend_titan.kernels.attention fresh, with or without a fake torch_npu."""
     monkeypatch.delitem(sys.modules, "ascend_titan.kernels.attention", raising=False)
+    monkeypatch.delitem(sys.modules, "ascend_titan.kernels.rms_norm", raising=False)
     if fake_npu:
         fake = types.ModuleType("torch_npu")
 
@@ -19,10 +20,14 @@ def _reload(monkeypatch, fake_npu: bool):
             raise AssertionError("kernel called")
 
         fake.npu_fusion_attention = _boom
+        fake.npu_rms_norm = _boom
         monkeypatch.setitem(sys.modules, "torch_npu", fake)
     else:
         monkeypatch.setitem(sys.modules, "torch_npu", None)  # makes `import torch_npu` fail
-    return importlib.import_module("ascend_titan.kernels.attention")
+    mod = importlib.import_module("ascend_titan.kernels.attention")
+    if fake_npu:
+        importlib.import_module("ascend_titan.kernels.rms_norm")
+    return mod
 
 
 def test_import_without_torch_npu_is_safe_and_loud(monkeypatch, caplog):

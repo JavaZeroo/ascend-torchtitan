@@ -23,6 +23,7 @@ dev = ["pytest", "pytest-cov", "pre-commit", "ruff"]
 
 [project.scripts]
 ascend-titan-doctor = "ascend_titan.tools.doctor:main"
+ascend-titan-provenance = "ascend_titan.tools.provenance:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "ascend_titan.__version__"}

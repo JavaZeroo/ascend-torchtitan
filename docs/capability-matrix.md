@@ -17,7 +17,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | 根因 | 用例数（NEXT） | 归因 | 谁来修 |
 |---|---|---|---|
 | `spmd_types` 后端需要 nightly 的 FSDP2（CP、muse_glimmer、validation_tp_cp_pp、qwen3/llama3/deepseek/gpt_oss 的所有 CP 组合） | 14 | TT-5 / TORCH-6 | torch 2.14+ 或 torchtitan 给 CP 一条不依赖 spmd_types 的路径 |
-| `torch.compile`：我们的注意力模块在 `fullgraph=True` 下 graph break | 6 | OURS-8 | 本仓 M3（custom_op + register_fake） |
+| `torch.compile`：inductor 后端需要 Triton-Ascend（M3 已解决我们自己的 graph break） | 6 | DEP-INDUCTOR | M5：Triton-Ascend / torchair |
 | CUDA-only 依赖缺失：`fla`（qwen3_5 GDN）、`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1（fla-npu 已在路线图） |
 | 上游树内 CUDA-only 组件：`fused_swiglu`/`fused_grouped_experts` Triton 内核、DistMuon | 4 | TT-KERNEL / TT-CUDA | 上游按设计为 CUDA；昇腾替代属 L1 |
 | 注意力 LSE 尾部（gpt_oss attention sinks） | 2 | OURS-2 | 本仓 M4 |
@@ -85,6 +85,13 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | ComplexRoPE（stock） | 🔴 | NPU-3：torch_npu 不能对复数张量做高级索引（aclnnIndex 161002） |
 | CosSinRoPE（qwen3 等） | 🟢 | |
 
+## 归一化
+
+| 实现 | 状态 | 归因 / 备注 |
+|---|---|---|
+| npu_rms_norm（RMSNorm 节点上的 override，`kernels/rms_norm.py`） | 🟢 | `qwen3_debugmodel_npu_fused_norm` 10 步：loss 5.10306（golden 5.10304）、grad_norm 3.3061 一致；**tps 72k vs 55k（+30%），显存 1.96 vs 2.38 GiB**；op 级对上游 bf16/fp32 对齐测试通过 |
+| torch.rms_norm（stock） | 🟢 | M1 默认（golden 基于它） |
+
 ## 损失
 
 | loss | 状态 | 归因 / 备注 |
@@ -106,7 +113,8 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | 模式 | 状态 | 归因 / 备注 |
 |---|---|---|
 | eager | 🟢 | |
-| inductor（`1d_compile`、`1d_compile_sac_op`、`2d_compile`、`3d_compile`、gpt_oss compile） | 🔴 | OURS-8：我们的注意力模块在 `fullgraph=True` 下 graph break；M3 改 custom_op 后重测，届时才能看到 inductor 在 NPU 上本身的状态 |
+| dynamo + AOTAutograd（`aot_eager`） | 🟢 | M3：注意力 custom_op + `register_fake`，`fullgraph=True` 通过（`tests/npu/test_kernel_attention.py`） |
+| inductor（`1d_compile`、`1d_compile_sac_op`、`2d_compile`、`3d_compile`、gpt_oss compile） | 🔴 | DEP-INDUCTOR：torch_npu 的 inductor 后端要求 Triton-Ascend（`triton.language.extra.ascend`），当前只装了纯 Python 的 `triton`；M5 与 torchair 一起处理 |
 | torchair | ⚪ | M5 |
 | CUDA graphs | 🔴 | TT-by-design：上游在非 CUDA 上自动退回 eager 并警告。不是 bug。 |
 

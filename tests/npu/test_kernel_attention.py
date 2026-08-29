@@ -47,3 +47,34 @@ def test_fwd_bwd_matches_reference(hq, hkv):
     _reference(q2, k2, v2, cu.tolist(), hq, hkv).sum().backward()
     for a, b in ((q.grad, q2.grad), (k.grad, k2.grad), (v.grad, v2.grad)):
         torch.testing.assert_close(a.float(), b.float(), atol=5e-2, rtol=5e-2)
+
+
+def test_custom_op_opcheck_and_compile():
+    """opcheck validates fake/autograd registration; compile must not graph-break."""
+    from ascend_titan.kernels import attention as A
+
+    dev = torch.device("npu:0")
+    torch.manual_seed(0)
+    T, hq, hkv, D = 96, 4, 2, 32
+    q = torch.randn(T, hq, D, device=dev, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.randn(T, hkv, D, device=dev, dtype=torch.bfloat16, requires_grad=True)
+    v = torch.randn(T, hkv, D, device=dev, dtype=torch.bfloat16, requires_grad=True)
+    cu = torch.tensor([0, 40, 96], device=dev, dtype=torch.int32)
+    # torch.testing.opcheck's autograd-registration check is CPU/CUDA/XPU-only (TORCH-7);
+    # the autograd path is covered by the gradient comparison above.
+    torch.library.opcheck(
+        A._fa_fwd,
+        (q, k, v, cu, cu, D**-0.5, 3, A._INT_MAX),
+        test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
+    )
+
+    # aot_eager: proves dynamo + AOTAutograd trace the op without graph breaks; the
+    # inductor backend needs Triton-Ascend / torchair on NPU (matrix: compile/inductor).
+    fn = torch.compile(
+        lambda a, b, c: A.fusion_attention_varlen(a, b, c, cu, cu, scale=D**-0.5),
+        fullgraph=True,
+        backend="aot_eager",
+    )
+    out = fn(q, k, v)
+    ref = A.fusion_attention_varlen(q, k, v, cu, cu, scale=D**-0.5)
+    torch.testing.assert_close(out, ref, atol=0, rtol=0)

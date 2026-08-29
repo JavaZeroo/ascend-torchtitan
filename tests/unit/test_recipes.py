@@ -23,7 +23,7 @@ def test_qwen3_npu_recipes_build():
     cfg = qwen3_debugmodel_npu()
     assert cfg.training.steps == 10
     assert cfg.checkpoint.enable is False
-    assert cfg.override.imports == [ATTENTION_OVERRIDE]
+    assert cfg.override.imports[0] == ATTENTION_OVERRIDE
     assert cfg.parallelism.spmd_backend == "partial_dtensor"
     assert type(cfg.loss).__qualname__ == "CrossEntropyLoss.Config"
 

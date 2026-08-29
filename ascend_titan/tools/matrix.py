@@ -68,6 +68,11 @@ TRIAGE: list[tuple[str, str, str]] = [
     ("DEP", r"`helion` is not installed|helion_rope", "helion (CUDA-only kernel DSL) missing"),
     ("DEP", r"No module named 'torchvision'", "torchvision missing (installable)"),
     (
+        "DEP-INDUCTOR",
+        r"0 active drivers|No module named 'triton\.backends|triton\.language\.extra' has no attribute 'ascend'|torchair",
+        "inductor needs Triton-Ascend / torchair on NPU (M5)",
+    ),
+    (
         "OURS-8",
         r"Skip inlining function <function AscendFusionAttention|fake tensor call.*npu_fusion_attention|npu_fusion_attention\(\*\(FakeTensor",
         "dynamo hit the Ascend attention kernel (graph break under fullgraph / unbacked SymInts)",
