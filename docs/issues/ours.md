@@ -10,5 +10,5 @@
 | OURS-6 | shim 的 `upstream` 链接在 issue 提交前是 `draft:` 指针。 | 提交 TT-1、TT-2、TT-8、TT-9、NPU-1、NPU-2、NPU-3、TORCH-1；替换指针。 |
 | OURS-8 | ~~`torch.compile` 下 dynamo 追踪进 `npu_fusion_attention`……~~ **已解决（M3）**：前向/反向封装为 `custom_op` + `register_fake`，`cu_seq` 张量入参、D2H 在算子内；`fullgraph=True` + `aot_eager` 通过。`*_compile` 用例现在停在 inductor 后端（`DEP-INDUCTOR`：需要 Triton-Ascend/torchair，M5）。 | 关闭 |
 | OURS-9 | ~~`npu_baseline` 无条件加 RoPE override，与上游 `fused_mla` 冲突~~ **已解决（M3）**：检测到 `torchtitan.overrides.fused_mla.*` 时跳过 RoPE override。 | 关闭 |
-| OURS-10 | `gpt_oss_fsdp+tp+ep`（tp2+ep4）在 M3 的 LSE 尾部之后走到 backward，报 `softmax_backward` 形状 `[512, 8]` vs `[256, 8]`；不带 TP 的 gpt_oss（pp+ep+sacop）🟢。怀疑 TP 下 sinks 参数（DTensor `to_local(grad_placements=)`）或路由 softmax 的 token 数在前后向不一致。 | 待查：先在 tp2 无 ep 下复现，再 bisect 我们的三个 override。 |
+| OURS-10 | gpt_oss + **TP** 失败（已 bisect）：tp1/ep4 🟢（loss 3.82）、pp+ep+sacop 🟢；tp2/ep4 → `softmax_backward` 形状 `[512, 8]` vs `[256, 8]`；tp2/ep1 → `HcclReduceScatter` 内部错误在 `CosSinRoPE._reshape_cache` 的同步点暴露。llama3/qwen3 的 TP2 用例均 🟢，所以是 gpt_oss 在 TP 下特有：候选是 sinks 参数的 DTensor `to_local(grad_placements=)` 与我们返回的 LSE（非 DTensor、(T,N)）的交互，或 gpt_oss 的 SP 分片下 T 不一致。 | 待查：tp2 下把三个 override 逐个换回 stock 二分；取 plog 里 ReduceScatter 的错误码。 |
 | OURS-7 | 矩阵扫描要求扫描期间没有其它 HCCL 作业占用同一张卡（EI0020 端口冲突记为 `HARNESS`）。 | nightly 用专用卡；或按用例设置 `HCCL_IF_BASE_PORT`。 |
