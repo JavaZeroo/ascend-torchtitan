@@ -37,6 +37,7 @@ ruff check . && ruff format --check .
 MODULE=ascend_titan.recipes.qwen3 CONFIG=qwen3_debugmodel_npu NPU=8 ./scripts/run_train.sh
 COMM_MODE=fake_backend NPU=8 ./scripts/run_train.sh   # 1 device, fake PG (currently 🔴 NPU-2)
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu   # deterministic vs golden
+python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4   # sweep upstream test configs on NPU (docs/matrix/)
 # tyro: subcommands like `activation-checkpoint:none` must come LAST, after all --flags
 ```
 

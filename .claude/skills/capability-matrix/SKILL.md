@@ -14,6 +14,13 @@ description: Record the result of an NPU run in docs/capability-matrix.md with a
    - **CANN** → note the error code; no further work.
    - **DEP** → note the package; if it is a kernel, an L1 replacement is an M3+ task.
 
+## Run a sweep
+`python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4 --out outputs/matrix/<date>` (see `docs/matrix/README.md`).
+It applies `npu_baseline` to each upstream test config and auto-triages reds via the `TRIAGE`
+regex table. An `UNKNOWN` code means a new failure signature: read the log, decide the code,
+add a regex row to `TRIAGE` and an entry to `docs/issues/<owner>.md`, then re-triage
+(`results.json` keeps the log paths).
+
 ## Triage a red cell quickly
 ```
 grep -m1 -nE "torch_npu/|torchtitan/|attn_gym|helion|deep_ep|cutlass|EZ[0-9]{4}|EI[0-9]{4}" <log>

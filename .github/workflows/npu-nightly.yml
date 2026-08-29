@@ -30,6 +30,17 @@ jobs:
           . .venv/bin/activate
           ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
           ASCEND_RT_VISIBLE_DEVICES=0,1 NPU=2 ./scripts/check_golden.sh qwen3_debugmodel_npu_fsdp2
+      - name: matrix sweep
+        if: matrix.titan == 'pinned'
+        run: |
+          . .venv/bin/activate
+          TITAN_DIR=$RUNNER_TEMP/torchtitan python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4 --out outputs/matrix/nightly
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: "${{ matrix.track }}-${{ matrix.titan }}", path: "doctor.json\nprobe.txt"}
+        with:
+          name: ${{ matrix.track }}-${{ matrix.titan }}
+          path: |
+            doctor.json
+            probe.txt
+            outputs/matrix/nightly/report.md
+            outputs/matrix/nightly/results.json
