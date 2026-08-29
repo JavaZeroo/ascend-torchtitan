@@ -25,6 +25,11 @@ from pathlib import Path
 # ---- attribution ------------------------------------------------------------
 # (code, regex, note). First match wins; keep the specific ones first.
 TRIAGE: list[tuple[str, str, str]] = [
+    (
+        "HARNESS",
+        r"EI0020|have already been bound|hcclCommInitRootInfoConfig",
+        "HCCL port conflict: another job on the same NPU (rerun)",
+    ),
     ("NPU-2", r"No backend type associated with device type npu", "fake PG lacks npu"),
     ("NPU-1", r"aten::_flash_attention_forward", "no NPU kernel for _flash_attention_forward"),
     ("TORCH-1", r"FlexAttention is only supported on", "flex device whitelist"),
