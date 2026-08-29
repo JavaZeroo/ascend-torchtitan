@@ -90,6 +90,10 @@ if _AVAILABLE:
                     f"(W, 0) [sliding causal]; got {self.window_size}"
                 )
 
+        # Opaque to dynamo: the kernel takes host-side offsets (a D2H .tolist()),
+        # which dynamo turns into unbacked SymInts and then fails the fake call
+        # (matrix: compile/inductor). Everything around the attention still compiles.
+        @torch.compiler.disable
         def forward(
             self,
             q_TNH: torch.Tensor,

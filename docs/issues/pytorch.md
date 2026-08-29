@@ -14,3 +14,9 @@
 
 ## TORCH-4 `PipelineSchedule.step(arg_mbs=...)` 预切分输入契约仅在 nightly —— `info`
 - 正式版 ≤ 2.13 的 `step` 没有 `arg_mbs/kwarg_mbs/target_mbs`，但 `_step_microbatches` 参数完全相同。已在 `compat/shims/pp_step_presplit.py` 用 wrap 转发；torch 2.12 连 `loss_kwargs` 也没有，shim 在该步期间把它们绑定到 loss 函数上。
+
+## TORCH-5 torch 2.12 的 pipelining `fork_rng` 默认 cuda —— `fixed@2.13`
+- `torch/distributed/pipelining/schedules.py:426`（2.12）对 stage 设备调用 `torch.random.fork_rng(devices=...)` 而未传 `device_type`，NPU 上抛 `AssertionError: Torch not compiled with CUDA enabled`。2.13 已改写。影响 STABLE track 上所有 PP 用例；NEXT track 不受影响。
+
+## TORCH-6 FSDP2 与 spmd_types 的集成仅在 nightly —— `info`
+- 见 torchtitan TT-5：nightly `_fsdp_param.py` 读取 spmd_types 注解构建 DTensor；2.12/2.13 要求调用方自己给 DTensor。下游 torchtitan 默认 `spmd_types` 后端因此在正式版 torch 上跑不了 CP。
