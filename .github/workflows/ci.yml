@@ -1,0 +1,27 @@
+name: cpu
+on: [push, pull_request]
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        titan: [pinned, main]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: install torchtitan (${{ matrix.titan }})
+        run: |
+          git clone https://github.com/pytorch/torchtitan.git ../torchtitan
+          if [ "${{ matrix.titan }}" = pinned ]; then
+            git -C ../torchtitan checkout $(grep '^torchtitan_sha=' constraints/npu.txt | cut -d= -f2)
+          fi
+          pip install --no-deps -e ../torchtitan
+          pip install -r constraints/titan-deps.txt
+          pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ascend-titan-doctor
+      - run: pytest tests/unit -x
+      # The `main` leg is allowed to fail: it is the drift probe, not a gate.
+    continue-on-error: ${{ matrix.titan == 'main' }}

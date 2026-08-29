@@ -1,0 +1,43 @@
+[project]
+name = "ascend-torchtitan"
+description = "Out-of-tree Ascend NPU extension for torchtitan: compat shims, fused-kernel overrides, parallel strategies and recipes."
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["pytorch", "torchtitan", "ascend", "npu", "llm", "training"]
+dynamic = ["version"]
+# torchtitan itself is deliberately NOT listed here: it is pinned by commit SHA
+# (see constraints/npu.txt and docs/upstream-tracking.md), which pyproject
+# cannot express for a PyPI dependency. Install it with scripts/install.sh.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "pre-commit", "ruff"]
+
+[project.scripts]
+ascend-titan-doctor = "ascend_titan.tools.doctor:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "ascend_titan.__version__"}
+
+[tool.setuptools.packages.find]
+where = [""]
+include = ["ascend_titan*"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+addopts = ["--showlocals", "-ra"]
+testpaths = ["tests"]
+markers = [
+    "npu: tests that require an Ascend NPU",
+    "titan: tests that import torchtitan (need it installed at the pinned SHA)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

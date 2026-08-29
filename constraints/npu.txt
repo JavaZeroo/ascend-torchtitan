@@ -1,0 +1,14 @@
+# Pin file for the Ascend environment. This is a deliverable (design F1-F3):
+# it is the physical record of the four-way version tuple.
+#
+# torchtitan is pinned by commit, not release: the last release (v0.2.2,
+# 2026-02-20) predates both the override mechanism (2026-06) and kimi_k3 (2026-08).
+# Bumping this SHA is a PR that must attach a full capability-matrix run (P5).
+torchtitan_sha=13da2d77c0f4e8756d43107d22ce7863719e2785
+#
+# Below: pip constraints. Fill in after M0 (compat probe) establishes the tuple.
+# torch==<torch_npu-supported release>
+# torch_npu==<matching>
+spmd_types==0.2.5
+attn-gym==0.0.5
+grain==0.2.18

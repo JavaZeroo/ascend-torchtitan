@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(ascend-titan-doctor:*)",
+      "Bash(python -m ascend_titan.tools.doctor:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git -C ../torchtitan log:*)",
+      "Bash(git -C ../torchtitan show:*)",
+      "Bash(git -C ../torchtitan diff:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(sed -n:*)",
+      "Bash(./scripts/probe_compat.sh:*)"
+    ],
+    "deny": [
+      "Edit(../torchtitan/**)",
+      "Write(../torchtitan/**)",
+      "Bash(git -C ../torchtitan checkout:*)",
+      "Bash(git -C ../torchtitan reset:*)"
+    ]
+  }
+}

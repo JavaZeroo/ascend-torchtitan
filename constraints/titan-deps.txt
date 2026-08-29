@@ -1,0 +1,14 @@
+# torchtitan's requirements.txt minus CUDA-only extras (attn-gym[linear]).
+# Keep in sync with <torchtitan>/.ci/docker/requirements.txt at the pinned SHA.
+grain
+torch_checkpointing>=0.1.0
+datasets>=3.6.0,<4.8.0
+tokenizers>=0.15.0
+safetensors
+tyro>=1.0.5
+tensorboard
+wandb
+einops
+pillow
+spmd_types
+attn-gym
