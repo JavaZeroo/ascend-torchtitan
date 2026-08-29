@@ -6,18 +6,18 @@
 | 编号 | 问题 | 状态 | 方案 / 位置 | 验证 |
 |---|---|---|---|---|
 | NPU-1 | `_flash_attention_forward` 无 NPU 内核 | 已确认 | 计划：在 torch_npu 内以 `npu_fusion_attention` 实现 aten `_flash_attention_forward/_backward` 的 PrivateUse1 内核 | 待做 |
-| NPU-2 | fake 进程组未注册 `npu` | 已确认 | 计划：torch_npu 导入时向 `Backend.backend_capability["fake"]` 注册 `npu` | 待做 |
+| NPU-2 | fake 进程组未注册 `npu` | 已修复（本地补丁，待提交 torch_npu） | `patches/torch_npu/0001-distributed-register-npu-with-the-fake-process-group-backend.patch`（3 行，`_init/registry/distributed.py`） | ✅ 在已安装的 torch_npu 2.13.0rc1 上应用后 `--comm.mode=fake_backend` 干跑 exit=0 |
 | NPU-3 | 复数张量高级索引失败（aclnnIndex 161002） | 已确认 | 计划：op-plugin 对 complex 输入回退 `view_as_real` 索引 | 待做 |
 | NPU-4 | ArgSort int 回退 AiCpu（性能警告） | 无需处理 | 记录 | — |
 | NPU-5 | torch_npu 2.13.0rc1 拉入 attn-gym 0.0.6？ | 待确认 | 查 `pip show torch_npu` Requires | 待做 |
-| TORCH-1 | FlexAttention 设备白名单 | 已确认 | 本地补丁（放行 privateuse1）；NPU 上 flex 还需 inductor + Triton-Ascend | 待做 |
+| TORCH-1 | FlexAttention 设备白名单 | 上游处理中 | torch_npu **main** 已有 `utils/patch_flexattention.py::_patch_flex_attention_device`（2026-08-13），2.13.0rc1 未包含；无需我们再补 torch 侧补丁 | 等 torch_npu 发版后复测 flex |
 | TORCH-2 | fake 后端不可扩展 | 已确认 | 与 NPU-2 一并处理（torch_npu 侧注册即可，无需改 torch） | — |
 | TORCH-3 | `set_timeout` 仅 nightly | 无需处理 | 本仓 polyfill；nightly 已有 | ✅ |
 | TORCH-4 | PP `step(arg_mbs=)` 仅 nightly | 无需处理 | 本仓 shim；nightly 已有 | ✅ |
 | TORCH-5 | 2.12 pipelining `fork_rng` 默认 cuda | 无需处理 | 2.13 已修 | ✅ |
 | TORCH-6 | FSDP2 × spmd_types 仅 nightly | 阻塞 | 等 torch ≥ 2.14 | — |
 | TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已修复（本地补丁） | `patches/pytorch/0001-TORCH-7-*.patch` | 见下方验证记录 |
-| TT-1 | core 无条件 `import triton` | 已确认 | 本地补丁：懒加载 | 待做 |
+| TT-1 | core 无条件 `import triton` | 已修复（本地补丁） | `patches/torchtitan/0004-TT-1-*.patch` | ✅ `sys.modules['triton']=None` 下 `import torchtitan.trainer` 成功；有 triton 时内核不变 |
 | TT-2 | `set_timeout` 无特性检查 | 已修复（本地补丁） | `patches/torchtitan/0002-TT-2-*.patch` | ✅ 关闭全部 shim，qwen3 golden 在 2.12/2.13 逐位匹配 |
 | TT-3 | `separate_full_blocks` 仅 nightly | 无需处理 | 2.13 已有 | ✅ |
 | TT-4 | ChunkedLossWrapper backward "not allocated" | 已确认 | 根因排查中 | 待做 |
