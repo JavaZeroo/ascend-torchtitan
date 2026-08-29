@@ -14,8 +14,12 @@ Measured 2026-08-29 on torch 2.12.0 / torch_npu 2.12.0 **and** torch 2.13.0 / to
 - Impact: every fake-PG based tool (config dry runs, upstream `fake_pg` integration suite, pipeline dry runs) is unusable on NPU.
 - Ask: on `import torch_npu`, register `"npu"` in `Backend.backend_capability["fake"]` (and the functional-collective device mapping) so the fake backend accepts npu tensors.
 
-## NPU-3 `ArgSort` int32/int64 falls back to AiCpu (perf warning) — `note`
+## NPU-3 `aclnnIndex` fails (error 161002) in MoE token dispatch — `draft`
+- `RuntimeError: index_high_dims_op_api: .../op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp:40 NPU function error: call aclnnIndex failed, error code is 161002` on `deepseek_v3` debugmodel with EP (upstream `deepseek_v3_fsdp+ep` case, `npu_baseline` applied). Torch 2.12.0 / torch_npu 2.12.0.
+- Impact: every MoE model with expert parallel (deepseek_v3, qwen3-MoE, gpt_oss, kimi) is blocked at the same op. Needs a minimal repro of the advanced-indexing pattern used by `token_dispatcher`.
+
+## NPU-4 `ArgSort` int32/int64 falls back to AiCpu (perf warning) — `note`
 - `Warning: kernel [ArgSort] can not support dtype int32 or int64 on AiCore, Now this kernel is running on AiCpu` during `torch.distributed`/mesh setup. Not a correctness issue; recorded so it is not re-investigated.
 
-## NPU-4 `torch_npu==2.13.0rc1` pins `attn-gym` ≥0.0.6 transitively? — `check`
+## NPU-5 `torch_npu==2.13.0rc1` pins `attn-gym` ≥0.0.6 transitively? — `check`
 - Installing torch_npu 2.13.0rc1 pulled `attn-gym 0.0.6`, conflicting with torchtitan's `==0.0.5`. Needs confirmation of which package requested it; pinned back to 0.0.5 in `constraints/titan-deps.txt`.

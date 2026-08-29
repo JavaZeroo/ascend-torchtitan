@@ -14,17 +14,20 @@ from dataclasses import dataclass, field
 
 from torchtitan.components.loss import ChunkedLossWrapper
 from torchtitan.models.common.attention import FlexAttention, VarlenAttention
+from torchtitan.models.common.rope import ComplexRoPE
 from torchtitan.trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
+ROPE_OVERRIDE = "ascend_titan.kernels.rope.real_cache_rope"
 
 
 @dataclass
 class Applied:
     flex_to_varlen: int = 0
     attention_override: bool = False
+    rope_override: bool = False
     spmd_backend: str | None = None
     chunked_loss_unwrapped: bool = False
     notes: list[str] = field(default_factory=list)
@@ -35,6 +38,8 @@ class Applied:
             parts.append(f"flex->varlen x{self.flex_to_varlen}")
         if self.attention_override:
             parts.append("override:npu_fusion_attention")
+        if self.rope_override:
+            parts.append("override:real_cache_rope")
         if self.spmd_backend:
             parts.append(f"spmd_backend:{self.spmd_backend}")
         if self.chunked_loss_unwrapped:
@@ -63,6 +68,14 @@ def npu_baseline(config: Trainer.Config) -> Applied:
     if has_varlen and ATTENTION_OVERRIDE not in config.override.imports:
         config.override.imports = [*config.override.imports, ATTENTION_OVERRIDE]
     a.attention_override = has_varlen
+
+    # 2b. ComplexRoPE nodes -> real-valued cache (torch_npu cannot index complex, NPU-3).
+    has_complex_rope = any(
+        type(c) is ComplexRoPE.Config for _f, c, _p, _a in config.traverse(ComplexRoPE.Config)
+    )
+    if has_complex_rope and ROPE_OVERRIDE not in config.override.imports:
+        config.override.imports = [*config.override.imports, ROPE_OVERRIDE]
+    a.rope_override = has_complex_rope
 
     # 3. spmd_types requires DTensor params under dp_mesh_dims on NPU (TT-5).
     if config.parallelism.spmd_backend != "partial_dtensor":

@@ -30,11 +30,42 @@ TRIAGE: list[tuple[str, str, str]] = [
     ("TORCH-1", r"FlexAttention is only supported on", "flex device whitelist"),
     ("TT-2", r"has no attribute 'set_timeout'", "nightly-only set_timeout"),
     ("TT-1", r"No module named 'triton'", "unconditional import triton"),
-    ("TT-8", r"Dimension specified as 0 but tensor has no dimensions", "PP step(arg_mbs=) nightly-only contract"),
+    (
+        "TT-8",
+        r"Dimension specified as 0 but tensor has no dimensions",
+        "PP step(arg_mbs=) nightly-only contract",
+    ),
     (
         "DEP",
         r"No module named '(helion|fla|deep_ep|torchao|cutlass|deepep|hybridep)",
         "CUDA-only dependency missing",
+    ),
+    (
+        "DEP",
+        r"torchao is not installed",
+        "torchao missing (float8/mx/nvfp4 need it; CUDA-only formats anyway)",
+    ),
+    (
+        "NPU-OP",
+        r"NPU function error: call (aclnn\w+) failed, error code is (\d+)",
+        "torch_npu op-plugin kernel failure (see note)",
+    ),
+    (
+        "TT-9",
+        r"'torch\._C\.Tag' has no attribute",
+        "upstream override uses a nightly-only torch.Tag (fused_mla)",
+    ),
+    (
+        "TT-5",
+        r"only supports spmd_backend='spmd_types'",
+        "model requires spmd_types, which fails on NPU (TT-5)",
+    ),
+    ("DEP", r"`helion` is not installed|helion_rope", "helion (CUDA-only kernel DSL) missing"),
+    ("DEP", r"No module named 'torchvision'", "torchvision missing (installable)"),
+    (
+        "COMPILE",
+        r"when making fake tensor call|torch\._dynamo\.exc\.",
+        "torch.compile path failed (see note)",
     ),
     ("TT-4", r"data is not allocated yet", "ChunkedLossWrapper / manual unshard backward"),
     ("TT-5", r"all parameters must be\s+DTensors", "spmd_types + fully_shard(dp_mesh_dims)"),
@@ -69,14 +100,21 @@ TRIAGE: list[tuple[str, str, str]] = [
         "CLI / tyro parse error (harness)",
     ),
 ]
-_ERR_LINE = re.compile(r"^\S*(?:Error|Exception)[^\n]*$", re.M)
+_ERR_LINE = re.compile(r"([A-Za-z_.]*(?:Error|Exception)): ([^\n]*)")
 
 
 def triage(log: str) -> tuple[str, str]:
     for code, pat, note in TRIAGE:
-        if re.search(pat, log):
+        m = re.search(pat, log)
+        if m:
+            if code == "NPU-OP":
+                note = f"torch_npu op-plugin: {m.group(1)} failed, error {m.group(2)}"
             return code, note
-    errs = [line.strip() for line in _ERR_LINE.findall(log) if "error_file" not in line]
+    errs = [
+        f"{name}: {msg.strip()}"
+        for name, msg in _ERR_LINE.findall(log)
+        if "ChildFailedError" not in name and "error_file" not in msg
+    ]
     return "UNKNOWN", (errs[-1][:200] if errs else "no error line found")
 
 

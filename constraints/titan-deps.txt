@@ -17,3 +17,6 @@ attn-gym==0.0.5
 # Attribution TT: upstream ask = lazy import. Plain `triton` is a pure-Python package on
 # aarch64; it is NOT Triton-Ascend (which is installed separately for L1 kernels).
 triton
+
+# multimodal recipes (kimi_k2_5, muse_glimmer): optional upstream dep; CPU wheel is fine on NPU
+torchvision

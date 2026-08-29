@@ -20,6 +20,7 @@ docs/issues/torchtitan.md#pp-step).
 
 from __future__ import annotations
 
+import functools
 import inspect
 
 from ascend_titan.compat import shim
@@ -81,9 +82,22 @@ def _wrap_step(original):
         for stage in stages:
             stage.clear_runtime_states()
         # --- pre-split path: what nightly's _get_microbatch_inputs would hand over ---
-        self._step_microbatches(
-            arg_mbs, kwarg_mbs, target_mbs, losses, return_outputs, loss_kwargs=loss_kwargs
-        )
+        step_mbs = self._step_microbatches
+        if loss_kwargs and "loss_kwargs" not in inspect.signature(step_mbs).parameters:
+            # torch 2.12: no loss_kwargs plumbing at all -> bind them onto the loss fn
+            # for the duration of this step (that is all nightly does with them).
+            saved = self._loss_fn
+            self._loss_fn = functools.partial(saved, **loss_kwargs)
+            try:
+                step_mbs(arg_mbs, kwarg_mbs, target_mbs, losses, return_outputs)
+            finally:
+                self._loss_fn = saved
+        elif "loss_kwargs" in inspect.signature(step_mbs).parameters:
+            step_mbs(
+                arg_mbs, kwarg_mbs, target_mbs, losses, return_outputs, loss_kwargs=loss_kwargs
+            )
+        else:
+            step_mbs(arg_mbs, kwarg_mbs, target_mbs, losses, return_outputs)
         if return_outputs:
             for stage in stages:
                 if stage.is_last:

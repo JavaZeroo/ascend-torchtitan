@@ -18,8 +18,12 @@ def test_triage_priority_and_unknown():
     assert triage("something\n__TIMEOUT__\n")[0] == "HANG"
     assert triage("ERR99999 UNKNOWN applicaiton exception\nRuntimeError: x")[0] != "CANN"
     assert triage("[ERROR] EZ9999 op failed")[0] == "CANN"
-    code, note = triage("Traceback\nZeroDivisionError: division by zero")
-    assert code == "UNKNOWN" and "ZeroDivisionError" in note
+    code, note = triage("NPU function error: call aclnnIndex failed, error code is 161002")
+    assert code == "NPU-OP" and "aclnnIndex" in note and "161002" in note
+    code, note = triage(
+        "[rank0]:[rank0]: ZeroDivisionError: division by zero\nChildFailedError: \n"
+    )
+    assert code == "UNKNOWN" and note.startswith("ZeroDivisionError")
 
 
 def test_parse_cards():
@@ -41,6 +45,7 @@ def test_npu_baseline_transform_on_upstream_recipes():
     assert not any(True for _ in cfg.traverse(FlexAttention.Config))
     assert any(True for _ in cfg.traverse(VarlenAttention.Config))
     assert ATTENTION_OVERRIDE in cfg.override.imports
+    assert "ascend_titan.kernels.rope.real_cache_rope" in cfg.override.imports
     assert cfg.parallelism.spmd_backend == "partial_dtensor"
     assert not isinstance(cfg.loss, ChunkedLossWrapper.Config)
     # idempotent

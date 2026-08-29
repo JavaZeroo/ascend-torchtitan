@@ -63,6 +63,32 @@ def test_wrapper_routes_presplit_and_passes_through():
         s.step("x", arg_mbs=[("a",)])
 
 
+def test_loss_kwargs_bound_when_step_microbatches_lacks_them():
+    from ascend_titan.compat.shims.pp_step_presplit import _wrap_step
+
+    class Old(_Sched):
+        def __init__(self):
+            super().__init__()
+            self._loss_fn = lambda out, tgt, **kw: ("loss", kw)
+            self.seen = None
+
+        def _step_microbatches(self, arg_mbs, kwarg_mbs, target_mbs, losses, return_outputs):
+            self.seen = self._loss_fn("o", "t")
+
+    Old.step = _wrap_step(_Sched.__dict__["step"])
+    s = Old()
+    s.step(
+        arg_mbs=[()],
+        kwarg_mbs=[{}],
+        target_mbs=["t"],
+        losses=[],
+        loss_kwargs={"g": 7},
+        return_outputs=False,
+    )
+    assert s.seen == ("loss", {"g": 7})
+    assert s._loss_fn("o", "t") == ("loss", {})  # restored
+
+
 def test_wrap_is_noop_when_torch_already_supports_it():
     from ascend_titan.compat.shims.pp_step_presplit import _wrap_step
 
