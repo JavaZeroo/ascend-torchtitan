@@ -415,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     out = Path(
         a.out or repo / "outputs" / "matrix" / f"{time.strftime('%Y%m%d-%H%M')}_{tuple_tag()}"
-    )
+    ).resolve()
     out.mkdir(parents=True, exist_ok=True)
     print(f"{len(cases)} cases -> {out}", flush=True)
     results = sweep(cases, parse_cards(a.cards), out, repo, a.timeout, a.jobs)
