@@ -78,3 +78,25 @@ def test_custom_op_opcheck_and_compile():
     out = fn(q, k, v)
     ref = A.fusion_attention_varlen(q, k, v, cu, cu, scale=D**-0.5)
     torch.testing.assert_close(out, ref, atol=0, rtol=0)
+
+
+def test_lse_matches_reference():
+    """LSE reconstructed from softmax_max/softmax_sum equals logsumexp of scaled scores."""
+    from ascend_titan.kernels import attention as A
+
+    dev = torch.device("npu:0")
+    torch.manual_seed(0)
+    T, H, D = 64, 2, 32
+    q = torch.randn(T, H, D, device=dev, dtype=torch.bfloat16)
+    k = torch.randn(T, H, D, device=dev, dtype=torch.bfloat16)
+    v = torch.randn(T, H, D, device=dev, dtype=torch.bfloat16)
+    cu = torch.tensor([0, 24, 64], device=dev, dtype=torch.int32)
+    _, lse = A.fusion_attention_varlen(q, k, v, cu, cu, scale=D**-0.5, return_lse=True)
+    ref = []
+    for s, e in ((0, 24), (24, 64)):
+        sc = torch.einsum("thd,shd->hts", q[s:e].float(), k[s:e].float()) * D**-0.5
+        mask = torch.triu(torch.ones(e - s, e - s, device=dev, dtype=torch.bool), 1)
+        sc = sc.masked_fill(mask, float("-inf"))
+        ref.append(torch.logsumexp(sc, dim=-1).transpose(0, 1))  # (t, h)
+    ref = torch.cat(ref)
+    torch.testing.assert_close(lse.float(), ref, atol=3e-2, rtol=3e-2)

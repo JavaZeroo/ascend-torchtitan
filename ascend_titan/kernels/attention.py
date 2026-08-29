@@ -76,6 +76,27 @@ if _AVAILABLE:
         """Cumulative end offsets as host ints (what the kernel wants)."""
         return [int(x) for x in cu[1:].tolist()]
 
+    def _lse_from_stats(
+        smax: torch.Tensor, ssum: torch.Tensor, n_heads: int, ends: list[int]
+    ) -> torch.Tensor:
+        """(T, N) log-sum-exp from the kernel's softmax statistics.
+
+        The kernel reports the statistics as ``(T, N, 8)`` but stores them
+        *per document, head-major*: document i occupies rows ``[s_i*N, e_i*N)`` as
+        ``(N, e_i - s_i, 8)`` (measured, see tests/npu). The 8 lanes are replicas.
+        """
+        flat_max = smax.reshape(-1, _SOFTMAX_STAT_WIDTH)[:, 0]
+        flat_sum = ssum.reshape(-1, _SOFTMAX_STAT_WIDTH)[:, 0]
+        pieces = []
+        start = 0
+        for end in ends:
+            length = end - start
+            m = flat_max[start * n_heads : end * n_heads].reshape(n_heads, length)
+            z = flat_sum[start * n_heads : end * n_heads].reshape(n_heads, length)
+            pieces.append((m + torch.log(z)).transpose(0, 1))
+            start = end
+        return torch.cat(pieces, dim=0)
+
     @torch.library.custom_op("ascend_titan::fusion_attention_varlen", mutates_args=())
     def _fa_fwd(
         q: torch.Tensor,
@@ -86,7 +107,8 @@ if _AVAILABLE:
         scale: float,
         sparse_mode: int,
         pre_tokens: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        ends_q = _offsets(cu_q)
         out, smax, ssum, *_ = torch_npu.npu_fusion_attention(
             q,
             k,
@@ -97,17 +119,18 @@ if _AVAILABLE:
             scale=scale,
             pre_tockens=pre_tokens,
             next_tockens=0,
-            actual_seq_qlen=_offsets(cu_q),
+            actual_seq_qlen=ends_q,
             actual_seq_kvlen=_offsets(cu_k),
             sparse_mode=sparse_mode,
         )
-        return out, smax, ssum
+        lse = _lse_from_stats(smax, ssum, q.shape[1], ends_q)
+        return out, smax, ssum, lse
 
     @_fa_fwd.register_fake
     def _(q, k, v, cu_q, cu_k, scale, sparse_mode, pre_tokens):
         t, n, _ = q.shape
         stat = q.new_empty((t, n, _SOFTMAX_STAT_WIDTH), dtype=torch.float32)
-        return torch.empty_like(q), stat, stat.clone()
+        return torch.empty_like(q), stat, stat.clone(), q.new_empty((t, n), dtype=torch.float32)
 
     @torch.library.custom_op("ascend_titan::fusion_attention_varlen_bwd", mutates_args=())
     def _fa_bwd(
@@ -150,11 +173,13 @@ if _AVAILABLE:
 
     def _setup_context(ctx, inputs, output):
         q, k, v, cu_q, cu_k, scale, sparse_mode, pre_tokens = inputs
-        out, smax, ssum = output
+        out, smax, ssum, lse = output
         ctx.save_for_backward(q, k, v, out, smax, ssum, cu_q, cu_k)
+        # Like upstream flash-attention's LSE aux output: statistics are not differentiable.
+        ctx.mark_non_differentiable(smax, ssum, lse)
         ctx.scale, ctx.sparse_mode, ctx.pre_tokens = scale, sparse_mode, pre_tokens
 
-    def _backward(ctx, dout, _dsmax, _dssum):
+    def _backward(ctx, dout, _dsmax, _dssum, _dlse):
         q, k, v, out, smax, ssum, cu_q, cu_k = ctx.saved_tensors
         dq, dk, dv = _fa_bwd(
             q, k, v, out, dout.contiguous(), smax, ssum, cu_q, cu_k,
@@ -174,9 +199,18 @@ if _AVAILABLE:
         scale: float,
         sparse_mode: int = 3,
         pre_tokens: int = _INT_MAX,
-    ) -> torch.Tensor:
-        """Packed varlen causal attention on NPU (public functional entry)."""
-        return _fa_fwd(q, k, v, cu_q, cu_k, scale, sparse_mode, pre_tokens)[0]
+        return_lse: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Packed varlen causal attention on NPU (public functional entry).
+
+        With ``return_lse`` also returns the per-(token, head) log-sum-exp of the
+        scaled scores, ``(T, N)`` fp32, reconstructed from the kernel's softmax
+        statistics (``max + log(sum)``; the kernel replicates them 8x on the last
+        dim). This is what upstream's ``out_transform`` epilogues (attention sinks,
+        context parallel) consume.
+        """
+        out, _smax, _ssum, lse = _fa_fwd(q, k, v, cu_q, cu_k, scale, sparse_mode, pre_tokens)
+        return (out, lse) if return_lse else out
 
     class AscendFusionAttention(VarlenAttention):
         """``VarlenAttention`` backed by ``torch_npu.npu_fusion_attention``."""
@@ -210,10 +244,6 @@ if _AVAILABLE:
             assert isinstance(attention_masks, VarlenMetadata), (
                 f"attention_masks must be VarlenMetadata, got {type(attention_masks)}"
             )
-            if out_transform is not None:
-                # LSE epilogue (context parallel / attention sinks). npu_fusion_attention
-                # returns softmax_max/softmax_sum instead of LSE; wiring that up is M4.
-                raise NotImplementedError("AscendFusionAttention: out_transform (LSE) unsupported")
             head_dim = q_TNH.shape[-1]
             if scale is None:
                 scale = head_dim**-0.5
@@ -221,7 +251,7 @@ if _AVAILABLE:
             # sparse_mode 3: causal, right-aligned; 4: band (pre/next tokens) with mask.
             sparse_mode = 3 if left == -1 else 4
             pre_tokens = _INT_MAX if left == -1 else left
-            out = fusion_attention_varlen(
+            result = fusion_attention_varlen(
                 q_TNH.to(torch.bfloat16),
                 k_TNH.to(torch.bfloat16),
                 v_TNH.to(torch.bfloat16),
@@ -230,8 +260,14 @@ if _AVAILABLE:
                 scale=scale,
                 sparse_mode=sparse_mode,
                 pre_tokens=pre_tokens,
+                return_lse=out_transform is not None,
             )
-            return out.to(q_TNH.dtype)
+            if out_transform is None:
+                assert isinstance(result, torch.Tensor)
+                return result.to(q_TNH.dtype)
+            # Same contract as upstream VarlenAttention: epilogue gets (out_TNH, lse_TN).
+            out, lse_TN = result
+            return out_transform(out.to(q_TNH.dtype), lse_TN)
 
     @override(
         target=VarlenAttention.Config,

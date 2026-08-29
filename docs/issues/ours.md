@@ -3,7 +3,7 @@
 | 编号 | 缺口 | 计划 |
 |---|---|---|
 | OURS-1 | `AscendFusionAttention` 每步做一次 D2H 同步把 `cu_seq_*` 转成 host 整数（`_host_offsets`）。 | 请上游在 inner attention 声明需要 host offsets 时于 `get_attention_masks` 传 `include_host_offsets=True`；或按 positions 张量缓存。 |
-| OURS-2 | `AscendFusionAttention` 拒绝 `out_transform`（LSE 尾部）→ 暂不支持 context parallel / attention sinks（gpt_oss）。 | M4：由 `softmax_max/softmax_sum` 还原 LSE。 |
+| OURS-2 | ~~拒绝 `out_transform`（LSE 尾部）~~ **已实现（M3）**：LSE = `softmax_max + log(softmax_sum)`，NPU 测试对 `logsumexp` 参考对齐；attention sinks（gpt_oss）待矩阵复测；CP 仍被 TT-5 挡。 | 复测 gpt_oss |
 | OURS-3 | 滑窗（`window_size=(W,0)`）路径使用 `sparse_mode=4`，未测试。 | 启用任何需要它的模型前先加 NPU 测试。 |
 | OURS-4 | ~~还没有 provenance 表~~ **已解决（M3）**：`ascend-titan-provenance --module … --config …` 输出每个节点的实际实现。 | 关闭；后续接入 matrix 报告 |
 | OURS-5 | NPU golden 已冻结（`tests/assets/losses/npu/`，NEXT/STABLE 逐位一致），但**尚未与同一 recipe 的 GPU 运行对比**；上游的 `qwen3_a10g.txt` 对应不同配置（MoE param-groups，fsdp2+tp2+cp2+ep8）。 | 在 GPU 机器上跑一次 `qwen3_debugmodel_npu` 的增量并记录宽容差对比。 |
