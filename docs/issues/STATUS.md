@@ -37,4 +37,4 @@
 | OURS-6 | issue 未提交 | 按新规则关闭 | torchtitan/pytorch 不提；torch_npu 待修复后提 | — |
 | OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | 归因 HARNESS | — |
 | OURS-10 | gpt_oss × TP | 已确认 | 排查中 | 待做 |
-| OURS-11 | fla-npu 需要 Triton-Ascend | 进行中 | wheel 源已找到（osinfra），安装方式排查中 | 待做 |
+| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 进行中 | wheel：`pip install triton-ascend==3.2.2 --extra-index-url https://triton-ascend.osinfra.cn/pypi/simple`（它自带完整 triton 3.5 发行版，**不能再装 PyPI 的 triton**）。已装到隔离 venv `/opt/venv_ta`。发现 torch_npu **2.13.0rc1** 的 `_inductor/runtime/triton_helpers.py:12` 只认 `tl.extra.ascend`，而 triton-ascend 3.2.2 提供的是 `tl.extra.cann`；torch_npu main / `v26.2.0-beta.1-pytorch2.13.0` 已改为先试 cann 再回退 ascend（无需我们写补丁，等新版 torch_npu 发布）。 | 用 main 的 triton_helpers.py 覆盖 venv_ta 后复测 compile / kimi_k3 |
