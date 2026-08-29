@@ -1,0 +1,33 @@
+From 04e007bc346f4ffc8da91da8547932061f49e5db Mon Sep 17 00:00:00 2001
+From: ascend-torchtitan <maintainers@ascend-torchtitan>
+Date: Sat, 29 Aug 2026 23:30:12 +0800
+Subject: [PATCH 2/3] TT-2: set_pg_timeouts: fall back to _set_pg_timeout when
+ torch.distributed.set_timeout is missing
+
+---
+ torchtitan/distributed/utils.py | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/torchtitan/distributed/utils.py b/torchtitan/distributed/utils.py
+index cd7489e18..5e350666b 100644
+--- a/torchtitan/distributed/utils.py
++++ b/torchtitan/distributed/utils.py
+@@ -563,8 +563,14 @@ def set_pg_timeouts(
+         mesh.get_group()
+         for mesh in parallel_dims.get_all_one_dimensional_meshes().values()
+     ] + [None]
++    # torch.distributed.set_timeout is the public name introduced in nightly;
++    # released torch (<= 2.13) only has the private predecessor.
++    set_timeout = getattr(torch.distributed, "set_timeout", None)
++    if set_timeout is None:
++        from torch.distributed.distributed_c10d import _set_pg_timeout as set_timeout
++
+     for group in groups:
+-        torch.distributed.set_timeout(timeout, group)
++        set_timeout(timeout, group)
+ 
+ 
+ @torch.no_grad()
+-- 
+2.34.1
+

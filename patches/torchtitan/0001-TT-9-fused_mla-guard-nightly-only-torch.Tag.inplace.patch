@@ -1,0 +1,26 @@
+From 19d07cd326beed4f6ef000f3236fbf33d74a2ca1 Mon Sep 17 00:00:00 2001
+From: ascend-torchtitan <maintainers@ascend-torchtitan>
+Date: Sat, 29 Aug 2026 23:30:12 +0800
+Subject: [PATCH 1/3] TT-9: fused_mla: guard nightly-only torch.Tag.inplace
+
+---
+ torchtitan/overrides/fused_mla.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/torchtitan/overrides/fused_mla.py b/torchtitan/overrides/fused_mla.py
+index a68717136..384bf0c70 100644
+--- a/torchtitan/overrides/fused_mla.py
++++ b/torchtitan/overrides/fused_mla.py
+@@ -402,7 +402,8 @@ def _fused_kv_backward_kernel(
+     "torchtitan::fused_mla_q_rope_",
+     mutates_args={"q"},
+     device_types="cuda",
+-    tags=torch.Tag.inplace,
++    # torch.Tag.inplace is nightly-only; released torch (<= 2.13) has no such tag.
++    tags=getattr(torch.Tag, "inplace", ()),
+ )
+ def _fused_mla_q_rope_op(
+     q: torch.Tensor,
+-- 
+2.34.1
+

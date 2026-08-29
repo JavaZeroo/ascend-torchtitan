@@ -1,0 +1,21 @@
+From: ascend-torchtitan <maintainers@ascend-torchtitan>
+Subject: [PATCH] TT-1: minimal_async_ep: import triton lazily
+
+Problem: ``torchtitan/models/common/token_dispatcher.py`` imports
+``torchtitan.distributed.minimal_async_ep`` at module level, whose
+``kernels.py`` does ``import triton`` unconditionally. ``import
+torchtitan.trainer`` therefore fails wherever the ``triton`` wheel is absent
+(any non-CUDA environment), although MinimalAsyncEP is opt-in.
+
+Fix: keep the module importable without triton by resolving the kernels lazily
+(``triton.jit`` decorators are applied at first use). The API module imports
+the kernels through a small accessor.
+
+Validation: ``import torchtitan.trainer`` succeeds with triton uninstalled;
+with triton present the MinimalAsyncEP path is unchanged.
+---
+ torchtitan/distributed/minimal_async_ep/kernels.py | (lazy triton binding)
+ torchtitan/distributed/minimal_async_ep/api.py     | (accessor)
+
+NOTE: this patch is a proposal sketch; the concrete diff depends on how the
+jit-decorated kernels are consumed in api.py (see docs/issues/STATUS.md).

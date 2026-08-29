@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 
@@ -107,10 +108,21 @@ def setup(*, apply_shims: bool = True, require_npu: bool = False) -> SetupReport
 
     report.device_type = _get_available_device_type()
 
-    if apply_shims:
-        from ascend_titan.compat import apply_all
+    # ASCEND_TITAN_SKIP_SHIMS=1 disables every shim (used to validate upstream
+    # patches that make a shim unnecessary); ASCEND_TITAN_SKIP_SHIMS=a,b skips some.
+    skip = os.environ.get("ASCEND_TITAN_SKIP_SHIMS", "")
+    if apply_shims and skip != "1":
+        from ascend_titan.compat import apply_all, list_shims
 
-        report.shims_applied = [a.name for a in apply_all()]
+        only = None
+        if skip:
+            from ascend_titan.compat.registry import _discover
+
+            _discover()
+            only = {s.name for s in list_shims()} - set(skip.split(","))
+        report.shims_applied = [a.name for a in apply_all(only=only)]
+    elif apply_shims:
+        report.warnings.append("all shims skipped (ASCEND_TITAN_SKIP_SHIMS=1)")
 
     logger.info(report.summary())
     _STATE = report
