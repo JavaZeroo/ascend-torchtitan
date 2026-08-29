@@ -1,0 +1,17 @@
+# TRITON track: NEXT + Triton-Ascend（inductor 图模式、attn_gym/fla 的 Triton 内核）
+# 安装顺序很关键：triton-ascend 自带完整的 triton 3.5 发行版（含 _C/libtriton.so 与
+# backends/ascend），之后**不能**再装 PyPI 的 triton（会覆盖 _C）。
+#   pip install -c constraints/npu-triton.txt torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install --pre -c constraints/npu-triton.txt torch_npu
+#   pip install triton-ascend==3.2.2 --extra-index-url https://triton-ascend.osinfra.cn/pypi/simple
+#   pip install --no-deps -e ../torchtitan
+#   grep -v '^triton$' constraints/titan-deps.txt > /tmp/deps.txt && pip install -c constraints/npu-triton.txt -r /tmp/deps.txt torchvision --extra-index-url https://download.pytorch.org/whl/cpu
+# 已知：torch_npu 2.13.0rc1 的 _inductor/runtime/triton_helpers.py 只认 tl.extra.ascend，
+# triton-ascend 3.2.2 提供 tl.extra.cann；torch_npu main 已改为先试 cann（见 docs/issues/STATUS.md OURS-11）。
+# 验证前先用 torch_npu main 的该文件覆盖（或等新版 torch_npu）。
+torch==2.13.0
+torch_npu==2.13.0rc1
+triton-ascend==3.2.2
+spmd_types==0.2.5
+attn-gym==0.0.5
+grain==0.2.18

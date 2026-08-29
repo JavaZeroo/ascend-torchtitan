@@ -16,6 +16,8 @@ attn-gym==0.0.5
 # torchtitan/distributed/minimal_async_ep/kernels.py (reached via models/common/token_dispatcher.py).
 # Attribution TT: upstream ask = lazy import. Plain `triton` is a pure-Python package on
 # aarch64; it is NOT Triton-Ascend (which is installed separately for L1 kernels).
+# NEXT/STABLE track 装 PyPI 的纯 Python triton（仅为 import）；TRITON track 由 triton-ascend 提供，
+# 安装时用 `grep -v '^triton$' constraints/titan-deps.txt` 排除这一行。
 triton
 
 # multimodal recipes (kimi_k2_5, muse_glimmer): optional upstream dep; CPU wheel is fine on NPU
