@@ -30,7 +30,7 @@
 | **stock llama3**（`ascend_titan.recipes.stock.llama3_debugmodel_stock_npu`：stock VarlenAttention + 复数缓存 ComplexRoPE + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
 | `pp_1f1b`（矩阵，无 shim） | 🟢 |
 | `cp`、`fsdp+cp`、`deepseek_v3_fused_mla_swiglu`、stock flex 模型级 | 🔴 DEP-INDUCTOR：Triton-Ascend 未装（NPU-7 修复后 lowering 已通过） |
-| `--comm.mode=fake_backend`（NPU-2） | 见 `docs/issues/STATUS.md`（最终 wheel） |
+| `--comm.mode=fake_backend`（NPU-2，最终 wheel） | 🟢 单卡模拟 8 卡干跑 `step: 1  loss: 7.66238` |
 
 ## 生效中的 shim
 NIGHTLY 上 **0**：`dist_set_timeout`（polyfill）与 `pp_step_presplit_*`（wrap）在 torch 2.15 上探测到原生实现后自动 no-op；文件保留到 RELEASE track 退役。

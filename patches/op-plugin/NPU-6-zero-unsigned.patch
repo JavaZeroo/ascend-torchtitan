@@ -20,6 +20,9 @@ and shape are preserved by the view, so non-contiguous tensors work too.
 
 Test: test/test_base_ops/test_zero_unsigned.py (zero_, zeros, non-contiguous
 for uint16/uint32/uint64).
+
+Upstream-PR: https://gitcode.com/Ascend/op-plugin/merge_requests/5801
+Upstream-Issue: https://gitcode.com/Ascend/op-plugin/issues/467
 ---
  .../ops/opapi/ZerosLikeKernelNpuOpApi.cpp     | 24 +++++++++++++
  test/test_base_ops/test_zero_unsigned.py      | 36 +++++++++++++++++++

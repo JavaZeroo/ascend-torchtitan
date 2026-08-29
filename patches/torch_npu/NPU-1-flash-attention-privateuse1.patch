@@ -1,4 +1,4 @@
-From 0061302aaab56a92f3e07793d78be5626a8791d3 Mon Sep 17 00:00:00 2001
+From 6fab15e32bc3041d7fe65b9900617fd92aa9a3c0 Mon Sep 17 00:00:00 2001
 From: JavaZeroo <2487163254@qq.com>
 Date: Sun, 30 Aug 2026 01:44:30 +0800
 Subject: [PATCH] fix: implement aten::_flash_attention_forward/_backward on
@@ -30,6 +30,9 @@ trains.
 Test: test/npu/test_flash_attention_privateuse1.py (registration, dense
 causal forward vs reference, varlen MHA/GQA forward + backward vs
 reference, unsupported features raise).
+
+Upstream-PR: https://gitcode.com/Ascend/pytorch/merge_requests/45527
+Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4439
 ---
  test/npu/test_flash_attention_privateuse1.py |  98 +++++++++
  torch_npu/_init/patches/npu_patches.py       |   7 +
@@ -40,7 +43,7 @@ reference, unsupported features raise).
 
 diff --git a/test/npu/test_flash_attention_privateuse1.py b/test/npu/test_flash_attention_privateuse1.py
 new file mode 100644
-index 000000000..877d49c0b
+index 000000000..75d580509
 --- /dev/null
 +++ b/test/npu/test_flash_attention_privateuse1.py
 @@ -0,0 +1,98 @@
@@ -129,7 +132,7 @@ index 000000000..877d49c0b
 +                start += length
 +            ref_out = torch.cat(ref_outs)
 +            ref_out.backward(grad_out.float().cpu())
-+            self.assertRtolEqual(out.float().cpu().numpy(), ref_out.detach().numpy(), prec=2e-2)
++            self.assertRtolEqual(out.detach().float().cpu().numpy(), ref_out.detach().numpy(), prec=2e-2)
 +            for got, ref in ((q.grad, qr.grad), (k.grad, kr.grad), (v.grad, vr.grad)):
 +                self.assertRtolEqual(got.float().cpu().numpy(), ref.numpy(), prec=5e-2)
 +

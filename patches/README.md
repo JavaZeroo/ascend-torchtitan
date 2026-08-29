@@ -12,12 +12,12 @@
 
 | 补丁 | 问题 | 状态 |
 |---|---|---|
-| `torch_npu/NPU-1-flash-attention-privateuse1.patch` | `aten::_flash_attention_forward/_backward` 无 NPU 内核 → stock `varlen_attn` 不可用 | 见 `docs/issues/STATUS.md` |
-| `torch_npu/NPU-2-fake-process-group-npu.patch` | fake 进程组不接受 npu 张量 | 同上 |
-| `torch_npu/NPU-7-inductor-make-reduction-strict.patch` | torch_npu 的 `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` 关键字 → 含多维 sum 的 compile 图 lowering 失败 | 同上 |
-| `torch_npu/NPU-8-dtensor-public-imports.patch` | torch_npu 自动加载时经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → 先 `import spmd_types` 再 `import torch` 的程序循环导入 | 同上 |
-| `op-plugin/NPU-3-index-complex.patch` | `aclnnIndex` 不支持复数 → 复数张量高级索引失败（ComplexRoPE） | 同上 |
-| `op-plugin/NPU-6-zero-unsigned.patch` | `aclnnInplaceZero` 不支持 uint16/32/64 → `varlen_attn` 的 uint64 rng_state 占位失败 | 同上 |
+| `torch_npu/NPU-1-flash-attention-privateuse1.patch` | `aten::_flash_attention_forward/_backward` 无 NPU 内核 → stock `varlen_attn` 不可用 | 已提交：issue [4439](https://gitcode.com/Ascend/pytorch/issues/4439) · PR [!45527](https://gitcode.com/Ascend/pytorch/merge_requests/45527) |
+| `torch_npu/NPU-2-fake-process-group-npu.patch` | fake 进程组不接受 npu 张量 | 已提交：issue [4438](https://gitcode.com/Ascend/pytorch/issues/4438) · PR [!45526](https://gitcode.com/Ascend/pytorch/merge_requests/45526) |
+| `torch_npu/NPU-7-inductor-make-reduction-strict.patch` | torch_npu 的 `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` 关键字 → 含多维 sum 的 compile 图 lowering 失败 | 已提交：issue [4440](https://gitcode.com/Ascend/pytorch/issues/4440) · PR [!45528](https://gitcode.com/Ascend/pytorch/merge_requests/45528) |
+| `torch_npu/NPU-8-dtensor-public-imports.patch` | torch_npu 自动加载时经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → 先 `import spmd_types` 再 `import torch` 的程序循环导入 | 已提交：issue [4441](https://gitcode.com/Ascend/pytorch/issues/4441) · PR [!45529](https://gitcode.com/Ascend/pytorch/merge_requests/45529) |
+| `op-plugin/NPU-3-index-complex.patch` | `aclnnIndex` 不支持复数 → 复数张量高级索引失败（ComplexRoPE） | 已提交：issue [466](https://gitcode.com/Ascend/op-plugin/issues/466) · PR [!5800](https://gitcode.com/Ascend/op-plugin/merge_requests/5800) |
+| `op-plugin/NPU-6-zero-unsigned.patch` | `aclnnInplaceZero` 不支持 uint16/32/64 → `varlen_attn` 的 uint64 rng_state 占位失败 | 已提交：issue [467](https://gitcode.com/Ascend/op-plugin/issues/467) · PR [!5801](https://gitcode.com/Ascend/op-plugin/merge_requests/5801) |
 | `evidence/pytorch/0001-TORCH-7-*.patch` | `opcheck` autograd 检查不认 privateuse1 | 证据；本仓 NPU 测试用数值梯度代替 |
 | `evidence/pytorch/0002-TORCH-8-*.patch` | `varlen.py` 用 uint64 占位 | 证据；昇腾侧正解是 NPU-6（op-plugin） |
 | `evidence/torchtitan/0004-TT-1-*.patch` | core 无条件 `import triton` | 证据；本仓装纯 Python `triton` |

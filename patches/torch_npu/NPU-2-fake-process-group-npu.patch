@@ -27,6 +27,9 @@ delegates to the runtime patch.
 
 Test: test/distributed/test_fake_process_group_npu.py runs the check in a
 subprocess that never imports torch_npu.testing.
+
+Upstream-PR: https://gitcode.com/Ascend/pytorch/merge_requests/45526
+Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4438
 ---
  .../test_fake_process_group_npu.py            | 39 ++++++++++++++++++
  .../_init/patches/distributed_patches.py      | 40 +++++++++++++++++++

@@ -169,8 +169,8 @@
 | `import torch` 足迹 | fsdp / checkpoint 不再被自动加载拖入；`import spmd_types` 先行 OK；`ShardedGradScaler` 仍被替换 |
 | 矩阵工具（先导入 torchtitan） | 可运行：`pp_1f1b` 🟢（无 shim）；`cp` / `fsdp+cp` / `fused_mla` 🔴 **DEP-INDUCTOR**（需要 Triton-Ascend，与 NPU 无关） |
 | stock flex 模型级 | lowering 通过（NPU-7 生效），停在 `0 active drivers`——Triton-Ascend 依赖（DEP-INDUCTOR） |
-| UT | `test_autoload.py` 4 OK；op-plugin `test_index_complex.py` 6 OK；inductor 签名测试 1 passed；`test_fake_process_group_npu.py`、`test_flash_attention_privateuse1.py`、`test_zero_unsigned.py` 在最终 wheel 上的结果见 `docs/issues/STATUS.md` |
-| `fake_backend` | NPU-2 第一版（改 `_init/registry/distributed.py`）在 master 上是**死代码**；第二版（init 时追加）被 nightly 的**懒注册**（entry point 首次 `BackendConfig("fake")` 覆盖 `backend_capability`）冲掉；第三版包装 `Backend.register_backend`（torch_npu.testing 本来就这么做，只是没放到运行时）——最终结果见 STATUS |
+| UT（最终 wheel） | fake PG 1 OK；flash-attention 4 OK；autoload 4 OK；op-plugin index-complex 6 OK；zero-unsigned 3 OK；inductor 签名 1 passed |
+| `fake_backend` | 🟢（最终 wheel：单卡模拟 8 卡 `step: 1  loss: 7.66238`）。过程：NPU-2 第一版（改 `_init/registry/distributed.py`）在 master 上是**死代码**；第二版（init 时追加）被 nightly 的**懒注册**（entry point 首次 `BackendConfig("fake")` 覆盖 `backend_capability`）冲掉；第三版包装 `Backend.register_backend`（torch_npu.testing 本来就这么做，只是没放到运行时） |
 
 ### 6.3 结论
 - nightly-first 成立：切换后本仓 **0 条生效 shim、0 个 torchtitan 版本差补丁**，golden 逐位不变。
@@ -203,12 +203,12 @@
 
 | 优先级 | 动作 | 交付物 |
 |---|---|---|
-| P0 | NIGHTLY track 落地：`constraints/nightly.txt`、`torch_npu.sha`、`scripts/build_torch_npu.sh`、`install.sh` 支持本地 wheel、NIGHTLY golden | 本评审 §6 的环境即为原型 |
-| P0 | 删除 STABLE track 与两条 shim、`patches/torchtitan/000{1,2,3}`；`npu_baseline` 去掉第 3 步 | 单测 + golden |
-| P0 | TT-4 在 NIGHTLY 复现并归因；确认 NPU 后走 P9 | `tests/repro/TT-4_*.py`、torch_npu PR |
-| P1 | NPU-1 / NPU-2 / NPU-3 在 master 上重验 → gitcode issue + PR；NPU-6 → op-plugin issue | PR 链接进 `STATUS.md` |
+| ~~P0~~ 已完成 | NIGHTLY track 落地：`constraints/nightly.txt`、`torch_npu.sha`、`scripts/build_torch_npu.sh`、`install.sh` 支持本地 wheel、NIGHTLY golden、`tests/unit/test_nightly_gate.py` | 本仓 |
+| P0（部分完成） | 版本差补丁 TT-2/8/9 已删；`npu_baseline` 第 3 步改特性探测、第 4 步删除；**待做**：删除 `npu-stable.txt`、STABLE golden 与两条 shim 文件（RELEASE 退役时） | 单测 + golden |
+| ~~P0~~ 已完成 | TT-4 在 NIGHTLY 不复现（单卡 + FSDP2×2 通过）；baseline 的展开已删除 | `docs/issues/STATUS.md` |
+| ~~P1~~ 已完成 | NPU-1/2/3/6/7/8 在 master 上重验并修复 → gitcode issue + PR（Ascend/pytorch !45526–!45529、Ascend/op-plugin !5800–!5801；CLA ✅，CI 运行中） | `STATUS.md` |
 | P1 | `docs/issues/issues.toml` + 生成器；`TRIAGE` 迁出 `matrix.py` | `STATUS.md` 由生成 |
-| P1 | `PRINCIPLES.md` P8–P13、`ADR-006`、`CLAUDE.md` 工作流、`AGENTS.md` 合并 | 文档 |
+| ~~P1~~ 已完成 | `PRINCIPLES.md` P8–P13、`ADR-006`、`CLAUDE.md` 工作流、skill `torch-npu-fix` | 文档 |
 | P2 | `npu_baseline` → `npu_minimal` + `npu_fused`；`kernels/_probe.py`；`train.py require_npu=True` | 代码 + 测试 |
 | P2 | `constraints/workspace.lock` + `scripts/workspace.sh`；`outputs/*.py` → `tests/repro/` | 环境可复现 |
 | P3 | `tools/matrix/` 拆分；provenance 接入报告；`npu-nightly.yml` 落到真实 runner 或 cron | 工具 |

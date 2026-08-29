@@ -47,7 +47,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 |---|---|---|---|
 | 单卡 eager，10 步 | 🟢 | 🟢 | golden `tests/assets/losses/npu/qwen3_debugmodel_npu__*.txt` |
 | FSDP2 ×2，10 步 | 🟢 | 🟢 | golden `..._fsdp2__*.txt` |
-| fake_backend（单卡模拟 8 卡） | 🔴 | 🔴 | NPU-2：fake 进程组没有 `npu`；NIGHTLY + NPU-2 补丁的结果见 `docs/issues/STATUS.md` |
+| fake_backend（单卡模拟 8 卡） | 🔴 | 🔴 | NPU-2：fake 进程组没有 `npu`；**NIGHTLY + NPU-2 补丁 🟢**（step 1 loss 7.66238） |
 
 ## 并行（上游 `features` 套件，llama3 debugmodel）
 

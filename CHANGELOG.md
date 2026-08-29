@@ -8,7 +8,7 @@
 - 架构评审 `docs/design/2026-08-30-architecture-review.md`；原则 P8–P13（`docs/PRINCIPLES.md`）；`CLAUDE.md` 重写为 nightly-first 工作流。
 - `npu_baseline`：spmd_types 步骤改为特性探测（nightly 保留上游默认）；**删除 ChunkedLossWrapper 展开**（TT-4 在 NIGHTLY 不复现；此前是 P1 违规）。
 - `patches/` 重组：`torch_npu/`、`op-plugin/` = 在途修复（须带 PR 链接），`evidence/` = torchtitan / pytorch 只读证据；删除版本差补丁 TT-2 / TT-8 / TT-9。
-- torch_npu / op-plugin 修复（含 UT，NIGHTLY 验证）：NPU-1 `_flash_attention_forward/_backward` PrivateUse1 内核、NPU-2 fake 进程组、NPU-3 复数索引（op-plugin C++）、NPU-6 uint16/32/64 `zero_`（op-plugin C++）、NPU-7 inductor `make_reduction` 签名、NPU-8 DTensor 公开导入（spmd_types 循环导入）。
+- torch_npu / op-plugin 修复（含 UT，NIGHTLY 验证；已提交 gitcode：Ascend/pytorch !45526–!45529 / issue #4438–#4441，Ascend/op-plugin !5800–!5801 / issue #466–#467）：NPU-1 `_flash_attention_forward/_backward` PrivateUse1 内核、NPU-2 fake 进程组、NPU-3 复数索引（op-plugin C++）、NPU-6 uint16/32/64 `zero_`（op-plugin C++）、NPU-7 inductor `make_reduction` 签名、NPU-8 DTensor 公开导入（spmd_types 循环导入）。
 - `ascend_titan/recipes/stock.py`（零 override 的上游 llama3 配置）、`tests/repro/`（最小复现 / 探测脚本）。
 - 文档：`docs/issues/STATUS.md` 成为唯一状态来源；`baseline.md`、`upstream-tracking.md`、`capability-matrix.md`、ADR-003 / 设计文档 §4 更正"torch_npu 面向正式版"的错误前提。
 

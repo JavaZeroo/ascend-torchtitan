@@ -23,6 +23,9 @@ complex. Conjugate-bit tensors are resolved first so view_as_real is valid.
 Test: test/test_base_ops/test_index_complex.py (index tensor, two index
 tensors, tensor + slices, boolean mask, non-contiguous, complex64/128) all
 match CPU.
+
+Upstream-PR: https://gitcode.com/Ascend/op-plugin/merge_requests/5800
+Upstream-Issue: https://gitcode.com/Ascend/op-plugin/issues/466
 ---
  op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp | 10 ++++
  test/test_base_ops/test_index_complex.py    | 54 +++++++++++++++++++++

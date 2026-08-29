@@ -25,10 +25,10 @@ shim 数量：**2 个文件，NIGHTLY 上生效 0**。健康目标：0（P8 之�
 ## 上游 issue / PR（P10：只提 gitcode.com/Ascend/*）
 | 仓库 | 编号 | 内容 | 状态 |
 |---|---|---|---|
-| Ascend/pytorch（torch_npu） | NPU-1 | `_flash_attention_forward/_backward` 的 PrivateUse1 内核 | 见 `docs/issues/STATUS.md` |
-| Ascend/pytorch（torch_npu） | NPU-2 | 为 `fake` 进程组后端注册 `npu` | 同上 |
-| Ascend/pytorch（torch_npu） | NPU-7 | inductor `make_reduction` 覆盖缺 `strict_reduction`（torch 2.15） | 同上 |
-| Ascend/pytorch（torch_npu） | NPU-8 | 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp（spmd_types 循环导入） | 同上 |
-| Ascend/op-plugin | NPU-3 | `index.Tensor` 支持复数（经实数视图） | 同上 |
-| Ascend/op-plugin | NPU-6 | `zero_` 支持 uint16/32/64 | 同上 |
+| Ascend/pytorch（torch_npu） | NPU-1 | `_flash_attention_forward/_backward` 的 PrivateUse1 内核 | 已提交：issue [4439](https://gitcode.com/Ascend/pytorch/issues/4439) · PR [!45527](https://gitcode.com/Ascend/pytorch/merge_requests/45527) |
+| Ascend/pytorch（torch_npu） | NPU-2 | 为 `fake` 进程组后端注册 `npu` | 已提交：issue [4438](https://gitcode.com/Ascend/pytorch/issues/4438) · PR [!45526](https://gitcode.com/Ascend/pytorch/merge_requests/45526) |
+| Ascend/pytorch（torch_npu） | NPU-7 | inductor `make_reduction` 覆盖缺 `strict_reduction`（torch 2.15） | 已提交：issue [4440](https://gitcode.com/Ascend/pytorch/issues/4440) · PR [!45528](https://gitcode.com/Ascend/pytorch/merge_requests/45528) |
+| Ascend/pytorch（torch_npu） | NPU-8 | 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp（spmd_types 循环导入） | 已提交：issue [4441](https://gitcode.com/Ascend/pytorch/issues/4441) · PR [!45529](https://gitcode.com/Ascend/pytorch/merge_requests/45529) |
+| Ascend/op-plugin | NPU-3 | `index.Tensor` 支持复数（经实数视图） | 已提交：issue [466](https://gitcode.com/Ascend/op-plugin/issues/466) · PR [!5800](https://gitcode.com/Ascend/op-plugin/merge_requests/5800) |
+| Ascend/op-plugin | NPU-6 | `zero_` 支持 uint16/32/64 | 已提交：issue [467](https://gitcode.com/Ascend/op-plugin/issues/467) · PR [!5801](https://gitcode.com/Ascend/op-plugin/merge_requests/5801) |
 | pytorch/pytorch、pytorch/torchtitan | TORCH-1/7/8、TT-1/4/5/11 | **不提**（P10）；NIGHTLY 上仍存在的记录在 `docs/issues/`，修复方案在 `patches/evidence/` | — |

@@ -6,12 +6,12 @@
 
 | 编号 | 问题 | 状态 | 方案 / 位置 | NIGHTLY 验证 |
 |---|---|---|---|---|
-| NPU-1 | `_flash_attention_forward/_backward` 无 NPU 内核 | 已修复（本地补丁） | `patches/torch_npu/NPU-1-flash-attention-privateuse1.patch`（`torch_npu/utils/patch_flash_attention.py` + UT） | 复现 ✅（`probe_npu_gaps.py`：`Could not run 'aten::_flash_attention_forward'`）；修复验证：见 §NIGHTLY 第二轮 |
-| NPU-2 | fake 进程组未注册 `npu` | 已修复（本地补丁） | `patches/torch_npu/NPU-2-fake-process-group-npu.patch`（7 行 + UT） | 复现 ✅（`--comm.mode=fake_backend` → `No backend type associated with device type npu`）；修复验证：第二轮 |
-| NPU-3 | 复数张量高级索引失败（aclnnIndex 161002） | 已修复（本地补丁，**op-plugin C++**） | `patches/op-plugin/NPU-3-index-complex.patch`（`op_api::index` 经实数视图 + UT；取代旧的 torch_npu Python 层 `__getitem__` 绕行） | 复现 ✅；修复验证：第二轮 |
-| NPU-6 | uint16/32/64 `zero_` / `zeros` 无内核（aclnnInplaceZero 161002） | 已修复（本地补丁，**op-plugin C++**） | `patches/op-plugin/NPU-6-zero-unsigned.patch`（同宽有符号视图 + UT）；取代 torch 侧的 TORCH-8 补丁 | 复现 ✅；修复验证：第二轮 |
-| NPU-7 | torch_npu inductor `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` | 已修复（本地补丁） | `patches/torch_npu/NPU-7-inductor-make-reduction-strict.patch` | 复现 ✅（stock flex：`LoweringException: TypeError: make_reduction() got an unexpected keyword argument 'strict_reduction'`）；修复验证：第二轮 |
-| NPU-8 | torch_npu 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → `spmd_types` 循环导入 | 已修复（本地补丁） | `patches/torch_npu/NPU-8-dtensor-public-imports.patch` | 复现 ✅（`python -c "import spmd_types"` → `Failed to load the backend extension: torch_npu`）；修复验证：第二轮 |
+| NPU-1 | `_flash_attention_forward/_backward` 无 NPU 内核 | 已提交：issue [4439](https://gitcode.com/Ascend/pytorch/issues/4439) · PR [!45527](https://gitcode.com/Ascend/pytorch/merge_requests/45527)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-1-flash-attention-privateuse1.patch`（`torch_npu/utils/patch_flash_attention.py` + UT） | 复现 ✅（`probe_npu_gaps.py`：`Could not run 'aten::_flash_attention_forward'`）；修复验证：见 §NIGHTLY 第二轮 |
+| NPU-2 | fake 进程组未注册 `npu` | 已提交：issue [4438](https://gitcode.com/Ascend/pytorch/issues/4438) · PR [!45526](https://gitcode.com/Ascend/pytorch/merge_requests/45526)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-2-fake-process-group-npu.patch`（7 行 + UT） | 复现 ✅（`--comm.mode=fake_backend` → `No backend type associated with device type npu`）；修复验证 ✅（见下表） |
+| NPU-3 | 复数张量高级索引失败（aclnnIndex 161002） | 已提交：issue [466](https://gitcode.com/Ascend/op-plugin/issues/466) · PR [!5800](https://gitcode.com/Ascend/op-plugin/merge_requests/5800)（CLA ✅，CI 运行中） | `patches/op-plugin/NPU-3-index-complex.patch`（`op_api::index` 经实数视图 + UT；取代旧的 torch_npu Python 层 `__getitem__` 绕行） | 复现 ✅；修复验证 ✅（见下表） |
+| NPU-6 | uint16/32/64 `zero_` / `zeros` 无内核（aclnnInplaceZero 161002） | 已提交：issue [467](https://gitcode.com/Ascend/op-plugin/issues/467) · PR [!5801](https://gitcode.com/Ascend/op-plugin/merge_requests/5801)（CLA ✅，CI 运行中） | `patches/op-plugin/NPU-6-zero-unsigned.patch`（同宽有符号视图 + UT）；取代 torch 侧的 TORCH-8 补丁 | 复现 ✅；修复验证 ✅（见下表） |
+| NPU-7 | torch_npu inductor `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` | 已提交：issue [4440](https://gitcode.com/Ascend/pytorch/issues/4440) · PR [!45528](https://gitcode.com/Ascend/pytorch/merge_requests/45528)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-7-inductor-make-reduction-strict.patch` | 复现 ✅（stock flex：`LoweringException: TypeError: make_reduction() got an unexpected keyword argument 'strict_reduction'`）；修复验证 ✅（见下表） |
+| NPU-8 | torch_npu 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → `spmd_types` 循环导入 | 已提交：issue [4441](https://gitcode.com/Ascend/pytorch/issues/4441) · PR [!45529](https://gitcode.com/Ascend/pytorch/merge_requests/45529)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-8-dtensor-public-imports.patch` | 复现 ✅（`python -c "import spmd_types"` → `Failed to load the backend extension: torch_npu`）；修复验证 ✅（见下表） |
 | NPU-4 | ArgSort int 回退 AiCpu（性能警告） | 无需处理 | 记录 | — |
 | NPU-5 | torch_npu 2.13.0rc1 拉入 attn-gym 0.0.6？ | 无需处理（RELEASE track 事项） | — | — |
 | TORCH-1 | FlexAttention 设备白名单 | 已确认（torch 侧仍在）；**torch_npu master 已绕开** | torch_npu master `utils/patch_flexattention.py`；NIGHTLY 上 `flex_attention` eager 前反向 ✅。模型级 stock flex 走 `torch.compile` → inductor：NPU-7 + Triton-Ascend（`DEP-INDUCTOR`） | eager ✅；compile 见第二轮 |
@@ -33,7 +33,7 @@
 | OURS-2/4/8/9 | LSE / provenance / compile graph break / override 冲突 | 已修复（本仓） | 见 CHANGELOG | ✅ |
 | OURS-3 | 滑窗 `sparse_mode=4` 未测 | 待确认 | 补 NPU 测试 | 待做 |
 | OURS-5 | 未与 GPU golden 对比 | 阻塞 | 需 GPU 机器 | — |
-| OURS-6 | issue 未提交 | 进行中 | torch_npu / op-plugin 六项按 P9 提交；torchtitan / pytorch 按 P10 不提 | — |
+| OURS-6 | issue 未提交 | 已关闭 | torch_npu / op-plugin 六项已按 P9 提交（见 NPU-* 行）；torchtitan / pytorch 按 P10 不提 | — |
 | OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | HARNESS | — |
 | OURS-10 | gpt_oss × TP | 已确认 | 排查中（NIGHTLY 上复测待做） | 待做 |
 | OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 进行中 | `constraints/npu-triton.txt` → 待改 `extras/triton.txt`；torch_npu master 已先试 `tl.extra.cann` | 待做 |
@@ -52,4 +52,5 @@
 | `cp` / `fsdp+cp` / `deepseek_v3_fused_mla_swiglu` | 🔴 DEP-INDUCTOR（Triton-Ascend） |
 | stock flex 模型级 | lowering 通过（NPU-7）→ `0 active drivers`：DEP-INDUCTOR |
 | UT：`test_autoload.py` / op-plugin `test_index_complex.py` / inductor 签名 | 4 OK / 6 OK / 1 passed |
-| UT：`test_fake_process_group_npu.py` / `test_flash_attention_privateuse1.py` / `test_zero_unsigned.py`；`--comm.mode=fake_backend` | 最终 wheel 结果：FINAL_PENDING |
+| UT（最终 wheel）：`test_fake_process_group_npu.py` 1 OK / `test_flash_attention_privateuse1.py` 4 OK / `test_autoload.py` 4 OK / op-plugin `test_index_complex.py` 6 OK / `test_zero_unsigned.py` 3 OK / inductor 签名 1 passed | 🟢 |
+| `--comm.mode=fake_backend`（单卡模拟 8 卡干跑，NPU-2 第三版：包装 `Backend.register_backend`） | 🟢 `step: 1  loss: 7.66238`，exit 0 |

@@ -24,6 +24,9 @@ override keeps torch's call contract on every supported torch line.
 
 Test: test/_inductor/test_sum_strict_reduction.py (signature + compiled
 multi-dim sum vs eager).
+
+Upstream-PR: https://gitcode.com/Ascend/pytorch/merge_requests/45528
+Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4440
 ---
  test/_inductor/test_sum_strict_reduction.py | 36 +++++++++++++++++++++
  torch_npu/_inductor/lowering.py             | 18 ++++++++++-

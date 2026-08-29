@@ -40,6 +40,9 @@ Test: test/test_autoload.py::AutoloadImportFootprintTest asserts that
 `import torch` (with autoload) does not load torch.distributed.checkpoint
 or torch.distributed.fsdp, and that ShardedGradScaler is still replaced
 once the module is imported.
+
+Upstream-PR: https://gitcode.com/Ascend/pytorch/merge_requests/45529
+Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4441
 ---
  test/test_autoload.py                         | 23 ++++++
  .../_init/patches/distributed_patches.py      | 13 +++-
