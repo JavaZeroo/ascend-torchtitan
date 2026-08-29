@@ -14,3 +14,8 @@ torchtitan with `--no-deps` and then this list.
 attn_gym's KDA has a pure-torch `naive` fallback, so kimi_k3 still runs (slowly) without the extra.
 
 Both tracks are validated nightly; a change that is green on one and red on the other is a torch-version issue by definition (see docs/baseline.md).
+
+**Always install with `-c`.** `pip install torchvision` without `-c constraints/<track>.txt` upgrades
+`torch` and breaks the torch_npu ABI (`undefined symbol ... deleteNode`; "Failed to load the backend
+extension: torch_npu"). `scripts/install.sh` does this right; if you install by hand, pass the
+constraints file every time.
