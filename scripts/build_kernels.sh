@@ -4,6 +4,8 @@
 #   ./scripts/build_kernels.sh ops-transformer  # AscendC：block_attn_res_update（Kimi-K3 attn_res）
 #   ./scripts/build_kernels.sh fla-npu       # 需要 triton-ascend（见 docs/issues/ours.md OURS-11）
 # 环境变量：SOC（默认 ascend910b；A3 用 ascend910_93）、JOBS（默认 nproc）、SRC（默认 ../）
+# 注意：ops-nn 的代码生成用 flock 文件锁，在 NFS（local_lock=none）上会轮询超时（"[ES-GEN] Polling timeout"）。
+# 源码在 NFS 上时先拷到本地盘：SRC=/opt/build（rsync --exclude build --exclude build_out）。还需要 pip install build ninja。
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SRC=${SRC:-"$HERE/.."}

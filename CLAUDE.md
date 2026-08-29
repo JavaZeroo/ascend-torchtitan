@@ -68,7 +68,7 @@ ascend-titan-provenance --module ascend_titan.recipes.qwen3 --config qwen3_debug
 与上游同一标准：非计算类改动在 `--debug.seed=42 --debug.deterministic` 下 loss 必须**完全一致**；计算类改动（算子）需要对上游 eager 路径的对齐测试加 `torch.library.opcheck`。绝不使用 `--debug.deterministic_warn_only`。
 
 ## 开发容器
-NPU 主机上的 `ascend-titan-dev`（镜像 cann:9.1.0-910b-ubuntu22.04-py3.12-devel）：系统 python = STABLE track（torch 2.12.0），`/opt/venv213` = NEXT track（torch 2.13.0 / torch_npu 2.13.0rc1）。`/data` 是共享 NFS；仓库在容器内路径相同。8 张卡通常与其它作业共享——用 `ASCEND_RT_VISIBLE_DEVICES` 选卡；同一张卡上不能并发两个 HCCL 作业（EI0020）。
+NPU 主机上的 `ascend-titan-dev`（镜像 cann:9.1.0-910b-ubuntu22.04-py3.12-devel）：系统 python = STABLE track（torch 2.12.0），`/opt/venv213` = NEXT track（torch 2.13.0 / torch_npu 2.13.0rc1）。`/data` 是共享 NFS；仓库在容器内路径相同。8 张卡通常与其它作业共享——用 `ASCEND_RT_VISIBLE_DEVICES` 选卡；同一张卡上不能并发两个 HCCL 作业（EI0020）。AscendC 算子库（ops-nn 等）**不能在 NFS 上构建**（flock 拿不到锁 → ES-GEN 轮询超时），先 rsync 到 `/opt/build/`。
 
 ## Skill
 `.claude/skills/`：`compat-probe`（M0）、`shim-authoring`、`override-authoring`、`capability-matrix`（记录格子 + 归因、跑扫描）、`upstream-sync`（升级 SHA）。`.claude/rules/` 里的规则按路径生效。
