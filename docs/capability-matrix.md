@@ -106,7 +106,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 |---|---|---|
 | ops-nn `situ_glu` / `situ_glu_grad`（Kimi-K3 SiTU-GLU） | 🟢 op 级 | `scripts/build_kernels.sh ops-nn`（本地盘构建，`--force` 安装：proto 库引用了 CANN 9.1.0 没有的 `aclsysGetVersionNum`，运行正常）；`kernels/situ_glu.py` 封装为可微 custom_op；前向对 fp32 参考误差 0，反向对齐 |
 | kimi_k3 模型接入 | 🔴 | TT-11：`import torchtitan.models.kimi_k3` 需要 `cutlass`（attn_gym cute 后端），无 CUDA 环境不可导入 |
-| ops-transformer `block_attn_res_update`（attn_res） | ⚪ | 同样受 TT-11 挡；算子级验证待做 |
+| ops-transformer `block_attn_res_update`（attn_res） | 🟡 已构建、已注册 | run 包 + `cann_ops_transformer_ascend_titan` 均安装成功，`torch.ops.cann_ops_transformer.block_attn_res_update` 可见。接入推迟：该算子是**前向、原地、流式**的 online-softmax 形式（partial_block/numerator/logit_max/exp_sum 逐块更新），与上游 `_apply_attention_residual` 的一次性拼接形式不同，且无反向算子；训练接入需要重写 block 循环并自写反向。加之 TT-11。M4。 |
 | fla-npu（KDA / causal_conv1d） | 🔴 | OURS-11：需要 `triton-ascend`，无可用 wheel |
 
 ## 损失

@@ -7,6 +7,7 @@
 - `kernels/swiglu.py`：复用上游 `FusedSwiGLU`（融合 w13、TP 交错布局、checkpoint hook），激活换成 `torch_npu.npu_swiglu`；`kernels/rope.py` 新增 `npu_rotary_cossin`（CosSinRoPE 旋转用 `npu_rotary_mul`），ComplexRoPE 在 NPU 上也走该内核。
 - `qwen3_debugmodel_npu_fused`：RMSNorm + SwiGLU + rotary 三个零构建融合内核，**tps 55k → 77k（+40%）**，显存 2.38 → 1.89 GiB。
 - `scripts/build_kernels.sh`：ops-nn / ops-transformer / fla-npu 源码构建入口（ops-nn 需在本地盘构建，NFS 上 flock 超时）。
+- ops-transformer `block_attn_res_update` 已从源码构建并注册（算子级），训练接入推迟到 M4（前向流式算子，无反向；见矩阵）。
 - `kernels/situ_glu.py`：Kimi-K3 SiTU-GLU 走 ops-nn AscendC 算子（`aclnnSituGlu` 前向 + `situ_glu_grad` 反向，封装为可微 custom_op）；op 级前向与上游 fp32 参考误差 0。kimi_k3 模型本身在无 `cutlass` 环境下不可导入（TT-11）。
 - `kernels/attention.py` 改为 `torch.library.custom_op` 前向/反向 + `register_fake`：`cu_seq` 以张量传入、D2H 在算子内部，`torch.compile(fullgraph=True)` 可追踪（OURS-8 关闭）；数值与 golden 逐位不变。
 - `kernels/rms_norm.py`：RMSNorm → `torch_npu.npu_rms_norm`（drop-in，Meta/autograd 齐全）；recipe 变体 `qwen3_debugmodel_npu_fused_norm`；`npu_baseline` 默认启用。

@@ -26,6 +26,9 @@ case "${1:-}" in
     cd "$SRC/ops-transformer"
     bash build.sh --pkg --soc="$SOC" --ops=block_attn_res_update --vendor_name=ascend_titan -j"$JOBS"
     ls build_out/*.run
+    echo "  ./build_out/cann-ops-transformer-*linux*.run --force"
+    echo "  TORCH_EXTENSION_OPS=block_attn_res_update TORCH_EXTENSION_VENDOR=ascend_titan pip install ./torch_extension"
+    echo "  export LD_LIBRARY_PATH=\$ASCEND_HOME_PATH/opp/vendors/ascend_titan_transformer/op_api/lib:\$LD_LIBRARY_PATH"
     ;;
   fla-npu)
     cd "$SRC/flash-linear-attention-npu"
