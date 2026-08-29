@@ -16,7 +16,9 @@ case "${1:-}" in
     cd "$SRC/ops-nn"
     bash build.sh --pkg --soc="$SOC" --ops=situ_glu,situ_glu_grad --vendor_name=ascend_titan -j"$JOBS"
     ls build_out/*.run
-    echo "install: ./build_out/cann-ops-nn-*linux*.run && source \$ASCEND_HOME_PATH/opp/vendors/ascend_titan/bin/set_env.bash"
+    echo "install the run package, then the python side:"
+    echo "  ./build_out/cann-ops-nn-*linux*.run && source \$ASCEND_HOME_PATH/opp/vendors/ascend_titan/bin/set_env.bash"
+    echo "  pip install ninja && TORCH_EXTENSION_OPS=situ_glu,situ_glu_grad TORCH_EXTENSION_VENDOR=ascend_titan pip install ./torch_extension"
     ;;
   ops-transformer)
     cd "$SRC/ops-transformer"
