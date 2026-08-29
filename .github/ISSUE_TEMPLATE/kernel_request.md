@@ -1,12 +1,12 @@
 ---
-name: Fused kernel / override request
-about: Replace an upstream Configurable node with an Ascend kernel
+name: 融合算子 / override 需求
+about: 用昇腾算子替换一个上游 Configurable 节点
 labels: kernels
 ---
-**Upstream node** (`torchtitan/.../file.py:line`, `X.Config`):
+**上游节点**（`torchtitan/.../file.py:line`，`X.Config`）：
 
-**Kernel** (package + op, e.g. ops-nn `situ_glu`):
+**算子**（包 + op，例如 ops-nn `situ_glu`）：
 
-**Does the computation have its own `Configurable` node?** (if not, this is an upstream ask — P6)
+**该计算有自己的 `Configurable` 节点吗？**（没有的话就是一个上游 ask——P6）
 
-**Numerics reference** (upstream eager path to align against):
+**数值参考**（用来对齐的上游 eager 路径）：

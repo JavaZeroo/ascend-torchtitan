@@ -1,15 +1,12 @@
 ---
-description: Rules for the L0 shim layer
+description: L0 shim 层规则
 globs: ascend_titan/compat/**
 ---
-# Shim rules
-- Before writing a shim, grep `../torchtitan/torchtitan/config/configs.py` for a switch (P0).
-  If one exists, the fix is a recipe delta, not a shim.
-- Attribute first (CLAUDE.md table). Only `TT` failures may become shims. `NPU` never (P1).
-- `kind="wrap"` by default. `kind="replace"` needs `why_not_wrap=` and a note in
-  `docs/upstream-tracking.md` explaining what upstream change would let us delete it.
-- One shim per file in `shims/`; file name = shim function name.
-- Every shim gets a CPU unit test that patches a fake target and asserts the wrapper still
-  calls the original.
-- Update the table in `docs/upstream-tracking.md` in the same PR.
-- Deleting a shim is a celebrated PR. Do it as soon as the upstream issue closes.
+# shim 规则
+- 写 shim 前先在 `../torchtitan/torchtitan/config/configs.py` 里 grep 有没有开关（P0）。有开关就写 recipe 增量，不写 shim。
+- 先归因（CLAUDE.md 的表）。只有 `TT`/`TORCH` 类失败可以变成 shim。`NPU` 永远不行（P1）。
+- 默认 `kind="wrap"`；缺失的 API 用 `kind="polyfill"`（属性已存在时自动跳过）。`kind="replace"` 需要 `why_not_wrap=`，并在 `docs/upstream-tracking.md` 说明什么上游改动能让我们删掉它。
+- `shims/` 下一个文件一条 shim（或一组紧密相关的）；文件名 = shim 函数名。
+- 每条 shim 配一个 CPU 单测：patch 一个假目标，断言包装后仍调用原函数。
+- 同一个 PR 里更新 `docs/upstream-tracking.md` 的表。
+- 删 shim 是值得庆祝的 PR。上游 issue 一关就删。

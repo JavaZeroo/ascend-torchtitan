@@ -1,17 +1,17 @@
-## What
-<!-- one paragraph -->
+## 做了什么
+<!-- 一段话 -->
 
-## Attribution / matrix
-<!-- cells flipped in docs/capability-matrix.md, with codes -->
+## 归因 / 矩阵
+<!-- docs/capability-matrix.md 中翻转的格子，附代码 -->
 
-## Shims
-<!-- added / removed, with upstream links (P4). "none" is the best answer -->
+## shim
+<!-- 新增 / 删除，附上游链接（P4）。"无"是最好的答案 -->
 
-## Validated on
-<!-- torch / torch_npu / CANN / torchtitan sha; command used -->
+## 验证环境
+<!-- torch / torch_npu / CANN / torchtitan sha；使用的命令 -->
 
-## Checklist
-- [ ] `pytest tests/unit` green on CPU
-- [ ] NPU tests / smoke run for touched paths
-- [ ] no edits under `../torchtitan`
-- [ ] docs updated (matrix / upstream-tracking / CHANGELOG)
+## 检查项
+- [ ] CPU 上 `pytest tests/unit` 通过
+- [ ] 涉及路径的 NPU 测试 / 冒烟运行
+- [ ] 没有改动 `../torchtitan`
+- [ ] 文档已更新（矩阵 / upstream-tracking / CHANGELOG）

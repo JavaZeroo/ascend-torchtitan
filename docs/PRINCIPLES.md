@@ -1,14 +1,14 @@
-# Principles
+# 原则
 
-These are cited in code review. Number them when you argue.
+评审时按编号引用。
 
-| # | Principle | Why |
+| # | 原则 | 理由 |
 |---|---|---|
-| **P0** | **Configuration before patching.** If torchtitan exposes a switch (`--compile.backend`, `--training.disable_cuda_graphs`, `attn_backend=`), use it. A shim is only for code with no switch. | Every shim is a liability; a config line is not. Static analysis of upstream showed most "CUDA hard-coding" is already behind a switch. |
-| **P1** | **Never work around torch_npu.** A failure attributed to torch_npu gets an issue link and a 🔴 cell in the capability matrix. No in-repo bypass. | Bypasses outlive the bug they hide, and hide the demand signal from torch_npu. This is the project's red line. |
-| **P2** | **Scope cuts are scheduling, not exclusion.** Multimodal, low precision, more models are on the roadmap. The matrix is three-state: 🟢 / 🔴 (with attribution) / ⚪ not evaluated. | "Not yet tested" and "tested, doesn't work" must never share a cell. |
-| **P3** | **Wrap, don't replace.** A shim should call the original and add behaviour around it so upstream changes are inherited. `kind="replace"` requires `why_not_wrap`. | Replacement shims silently drop upstream improvements; wrappers don't. |
-| **P4** | **Every shim carries an upstream issue.** Enforced by the registry at import time. A shim is debt with a due date; delete it when upstream lands the fix. | Shim count is a health metric that should trend to zero. |
-| **P5** | **Versions are commit SHAs; bumps are PRs.** `constraints/torchtitan.sha` holds the torchtitan commit. A bump PR attaches a full matrix run. | Upstream releases lag main by 6+ months and lack the features we depend on. |
-| **P6** | **Only target upstream `Configurable` nodes.** A fused kernel replaces an existing `Config` node via `@override`. If the computation has no node, ask upstream to extract one; do not replace the parent block. | Replacing a parent block is a fork of that block, and every upstream change to it becomes our merge. |
-| **P7** | **Degrade loudly, record provenance.** Missing kernel deps fall back to upstream eager with a WARNING and a provenance entry. Benchmarks without a provenance table are not accepted. | Silent degradation corrupts performance data; loud degradation keeps everything runnable. |
+| **P0** | **先用配置，再打补丁。** torchtitan 已有开关（`--compile.backend`、`--training.disable_cuda_graphs`、`attn_backend=`）就用开关；shim 只留给没有开关的代码。 | 每条 shim 都是负债，一行配置不是。对上游的静态分析表明大部分"写死 CUDA"的地方本来就有开关。 |
+| **P1** | **绝不绕过 torch_npu 的缺陷。** 归因为 torch_npu 的失败 → 提 issue + 矩阵标 🔴。本仓不做 workaround。 | 绕过会比它所掩盖的 bug 活得更久，还会让 torch_npu 看不到真实需求。这是项目红线。 |
+| **P2** | **范围收缩是排期，不是排除。** 多模态、低精度、更多模型都在路线图上。矩阵三态：🟢 / 🔴（附归因）/ ⚪ 未评估。 | "还没测"和"测了不行"绝不能混成一格。 |
+| **P3** | **包装，不替换。** shim 应调用原函数、在外层加行为，从而自动继承上游变更。`kind="replace"` 必须写 `why_not_wrap`。 | 替换型 shim 会静默丢掉上游的改进，包装型不会。 |
+| **P4** | **每条 shim 必须挂上游 issue。** 注册表在 import 时强制。shim 是有到期日的债务：上游修好即删。 | shim 数量是健康度指标，应趋近于零。 |
+| **P5** | **版本以 commit SHA 为单位，升级走 PR。** `constraints/torchtitan.sha` 保存 torchtitan commit；升级 PR 必须附带全量矩阵结果。 | 上游 release 落后 main 半年以上，且缺少我们依赖的特性。 |
+| **P6** | **只 override 上游已有的 `Configurable` 节点。** 融合算子通过 `@override` 替换现有 `Config` 节点；计算没有节点时，请上游抽一个出来，而不是替换父块。 | 替换父块等于 fork 了那个块，上游每次改动都变成我们的合并。 |
+| **P7** | **响亮降级，记录 provenance。** 算子依赖缺失时退回上游 eager，打 WARNING 并记 provenance。没有 provenance 表的 benchmark 不收。 | 静默降级会污染性能数据；响亮降级保证一切可跑。 |

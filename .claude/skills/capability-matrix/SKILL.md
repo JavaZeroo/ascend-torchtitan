@@ -1,32 +1,27 @@
 ---
 name: capability-matrix
-description: Record the result of an NPU run in docs/capability-matrix.md with a correct attribution (TT / NPU / CANN / DEP). Use after any training run, matrix sweep, or CI nightly, and when triaging a red cell.
+description: 把一次 NPU 运行的结果记入 docs/capability-matrix.md 并给出正确归因（TT / NPU / CANN / DEP / TORCH），或运行整套矩阵扫描。用于任何训练运行、矩阵扫描、CI nightly 之后，以及排查红格时。
 ---
 # capability-matrix
 
-## Flip a cell
-1. Identify the row (feature/axis) and the validated tuple (`constraints/npu.txt`).
-2. 🟢: write the date and the command. 🔴: attribution is mandatory (table in CLAUDE.md), plus the
-   issue link. ⚪ → never go back to ⚪ once measured.
-3. Attribution decides the owner:
-   - **TT** → upstream issue; consider a wrap-shim (skill `shim-authoring`).
-   - **NPU** → torch_npu issue; **no workaround** (P1). Link it in `docs/upstream-tracking.md`.
-   - **CANN** → note the error code; no further work.
-   - **DEP** → note the package; if it is a kernel, an L1 replacement is an M3+ task.
+## 跑一次扫描
+`python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4 --out outputs/matrix/<日期>`（见 `docs/matrix/README.md`）。
+它对每个上游测试配置施加 `npu_baseline`，并用 `TRIAGE` 正则表自动归因。`UNKNOWN` 表示新的失败特征：读日志、定代码、在 `TRIAGE` 加一行正则、在 `docs/issues/<owner>.md` 加条目，然后 `--retriage`（`results.json` 保留日志路径）。扫描期间同一张卡上不能有其它 HCCL 作业（EI0020 → `HARNESS`）。
 
-## Run a sweep
-`python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4 --out outputs/matrix/<date>` (see `docs/matrix/README.md`).
-It applies `npu_baseline` to each upstream test config and auto-triages reds via the `TRIAGE`
-regex table. An `UNKNOWN` code means a new failure signature: read the log, decide the code,
-add a regex row to `TRIAGE` and an entry to `docs/issues/<owner>.md`, then re-triage
-(`results.json` keeps the log paths).
+## 翻转一个格子
+1. 确定行（特性/轴）和验证元组（`constraints/`）。
+2. 🟢：写日期和命令。🔴：归因必填（CLAUDE.md 的表），附 issue 链接。⚪ → 一旦测过绝不改回 ⚪。
+3. 归因决定负责人：
+   - **TT / TORCH** → 上游 issue；考虑包装型/polyfill shim（skill `shim-authoring`）。
+   - **NPU / NPU-OP** → torch_npu issue；**不 workaround**（P1）。在 `docs/upstream-tracking.md` 链接。若上游有等价实现能绕开缺失的 op（如 varlen 替代 flex、实数 RoPE 替代复数 RoPE），那是 L1 override，不是 workaround。
+   - **CANN** → 记录错误码；不再投入。
+   - **DEP** → 记录包名；若是内核，昇腾替代是 M3+ 任务。
 
-## Triage a red cell quickly
+## 快速排查红格
 ```
 grep -m1 -nE "torch_npu/|torchtitan/|attn_gym|helion|deep_ep|cutlass|EZ[0-9]{4}|EI[0-9]{4}" <log>
 ```
-The first hit usually gives the attribution. Same failure across many cells ⇒ one root cause;
-attribute once, reference it from the others.
+第一个命中通常就是归因。多个格子同一失败 ⇒ 同一根因；归因一次，其余引用。
 
-## Batch, don't stream
-When sweeping, run everything first, then attribute together: red cells cluster by root cause.
+## 批处理，不要流水线
+扫描时先全部跑完，再一起归因：红格按根因聚类。

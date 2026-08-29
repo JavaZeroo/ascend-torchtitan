@@ -1,13 +1,13 @@
-# ADR-005: This repository is Ascend-only; device-agnostic seams go upstream
+# ADR-005：本仓只面向昇腾；设备无关的接缝去上游
 
-## Status
-Accepted (2026-08-29)
+## 状态
+已采纳（2026-08-29）
 
-## Context
-Other hardware vendors will want the same kind of package. Should this repo host a vendor-agnostic skeleton?
+## 背景
+其他硬件厂商也会想要同类的包。本仓要不要承载一个 vendor 无关的骨架？
 
-## Decision
-No. Code here says `npu`. Anything a second vendor would also need (device capability queries, device-graph abstraction, attention backend registry) belongs in torchtitan core; we propose it there when we hit it. Upstream's per-node override conflict detection already lets multiple vendors' overrides coexist without coordination.
+## 决定
+不要。这里的代码直接写 `npu`。任何第二家 vendor 也需要的东西（设备能力查询、device graph 抽象、attention 后端注册表）都属于 torchtitan core；遇到时向上游提议。上游的 per-node override 冲突检测已经让多家 vendor 的 override 无需协调即可共存。
 
-## Consequences
-- If a second vendor package ever shares code with us, that is a refactor at that time, with two data points instead of one guess.
+## 后果
+- 若将来真有第二家 vendor 包与我们共享代码，届时再重构——那时有两个数据点而不是一个猜测。

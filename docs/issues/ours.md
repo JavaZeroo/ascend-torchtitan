@@ -1,10 +1,11 @@
-# ascend-torchtitan — known gaps (owner: this repo)
+# ascend-torchtitan —— 已知缺口（归属：本仓）
 
-| id | gap | plan |
+| 编号 | 缺口 | 计划 |
 |---|---|---|
-| OURS-1 | `AscendFusionAttention` does one D2H sync per step to turn `cu_seq_*` into host ints (`_host_offsets`). | Ask upstream for `include_host_offsets=True` in `get_attention_masks` when the inner attention declares it needs host offsets; or cache per positions-tensor. |
-| OURS-2 | `AscendFusionAttention` rejects `out_transform` (LSE epilogue) → no context parallel / attention sinks yet. | M4: return LSE from `softmax_max/softmax_sum`. |
-| OURS-3 | Sliding-window (`window_size=(W,0)`) path uses `sparse_mode=4` untested. | Add an NPU test before enabling any model that needs it. |
-| OURS-4 | No provenance table yet; degraded overrides are visible only in logs. | M3. |
-| OURS-5 | NPU golden frozen (`tests/assets/losses/npu/`, bitwise across NEXT/STABLE) but **not yet compared to a GPU run** of the same recipe; upstream's `qwen3_a10g.txt` is for a different config (MoE param-groups, fsdp2+tp2+cp2+ep8). | Run `qwen3_debugmodel_npu` deltas on a GPU box once and record the loose-tolerance comparison. |
-| OURS-6 | Shim `upstream` links are `draft:` pointers until issues are filed. | File TT-1, TT-2, NPU-1, NPU-2, TORCH-1; replace pointers. |
+| OURS-1 | `AscendFusionAttention` 每步做一次 D2H 同步把 `cu_seq_*` 转成 host 整数（`_host_offsets`）。 | 请上游在 inner attention 声明需要 host offsets 时于 `get_attention_masks` 传 `include_host_offsets=True`；或按 positions 张量缓存。 |
+| OURS-2 | `AscendFusionAttention` 拒绝 `out_transform`（LSE 尾部）→ 暂不支持 context parallel / attention sinks（gpt_oss）。 | M4：由 `softmax_max/softmax_sum` 还原 LSE。 |
+| OURS-3 | 滑窗（`window_size=(W,0)`）路径使用 `sparse_mode=4`，未测试。 | 启用任何需要它的模型前先加 NPU 测试。 |
+| OURS-4 | 还没有 provenance 表；降级的 override 只能在日志里看到。 | M3。 |
+| OURS-5 | NPU golden 已冻结（`tests/assets/losses/npu/`，NEXT/STABLE 逐位一致），但**尚未与同一 recipe 的 GPU 运行对比**；上游的 `qwen3_a10g.txt` 对应不同配置（MoE param-groups，fsdp2+tp2+cp2+ep8）。 | 在 GPU 机器上跑一次 `qwen3_debugmodel_npu` 的增量并记录宽容差对比。 |
+| OURS-6 | shim 的 `upstream` 链接在 issue 提交前是 `draft:` 指针。 | 提交 TT-1、TT-2、TT-8、TT-9、NPU-1、NPU-2、NPU-3、TORCH-1；替换指针。 |
+| OURS-7 | 矩阵扫描要求扫描期间没有其它 HCCL 作业占用同一张卡（EI0020 端口冲突记为 `HARNESS`）。 | nightly 用专用卡；或按用例设置 `HCCL_IF_BASE_PORT`。 |

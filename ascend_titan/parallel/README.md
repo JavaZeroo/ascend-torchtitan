@@ -1,4 +1,3 @@
-# parallel (L2) — Ascend parallel strategies
+# parallel（L2）—— 昇腾并行策略
 
-Replacements for `ModelSpec.parallelize_fn` / `pipelining_fn` and EP token
-dispatchers (moonep), CP variants, comm/compute overlap. Nothing here yet (M4).
+`ModelSpec.parallelize_fn` / `pipelining_fn` 的替换实现、EP token dispatcher（moonep）、CP 变体、通信/计算 overlap。目前为空（M4）。

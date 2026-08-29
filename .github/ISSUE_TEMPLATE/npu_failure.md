@@ -1,20 +1,20 @@
 ---
-name: Failure on NPU
-about: A torchtitan run fails or misbehaves on Ascend
+name: NPU 上的失败
+about: torchtitan 在昇腾上运行失败或行为异常
 labels: matrix
 ---
-**Matrix cell** (docs/capability-matrix.md row):
+**矩阵格子**（docs/capability-matrix.md 中的行）：
 
-**Command**:
+**命令**：
 ```
 ```
 
-**Attribution** (TT / NPU / CANN / DEP / TORCH — see CLAUDE.md; leave blank if unsure):
+**归因**（TT / NPU / CANN / DEP / TORCH，见 CLAUDE.md；不确定可留空）：
 
-**First non-framework traceback frame**:
+**traceback 中第一个非框架帧**：
 ```
 ```
 
-**`ascend-titan-doctor --json`**:
+**`ascend-titan-doctor --json`**：
 ```
 ```

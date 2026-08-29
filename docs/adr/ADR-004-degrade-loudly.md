@@ -1,17 +1,17 @@
-# ADR-004: Missing kernel dependencies degrade loudly to upstream eager
+# ADR-004：算子依赖缺失时响亮地退回上游 eager
 
-## Status
-Accepted (2026-08-29)
+## 状态
+已采纳（2026-08-29）
 
-## Context
-Fused kernels depend on separately-installed packages (triton-ascend-kernels, fla-npu, ops-nn, ops-transformer). Options: hard-fail, silent fallback, or explicit three-way impl selection.
+## 背景
+融合算子依赖单独安装的包（triton-ascend-kernels、fla-npu、ops-nn、ops-transformer）。选项：硬失败、静默回退、显式三档 impl 选择。
 
-## Decision
-Fallback = do not register the override, so upstream's own torch implementation runs. Emit a WARNING and a provenance entry. Benchmarks must carry the provenance table (P7).
+## 决定
+回退 = 不注册 override，于是上游自己的 torch 实现运行。打 WARNING 并记 provenance。benchmark 必须附 provenance 表（P7）。
 
-## Alternatives
-- Hard fail: kills runnability in partial environments.
-- Explicit `impl=ascendc|triton|eager` per kernel (MindSpeed-MM style): more code (three implementations each); the eager path already exists upstream for free.
+## 备选
+- 硬失败：在部分环境下完全跑不起来。
+- 每个算子显式 `impl=ascendc|triton|eager`（MindSpeed-MM 风格）：代码更多（每个算子三份实现）；eager 路径上游本来就有，免费。
 
-## Consequences
-- Performance numbers are only trusted with provenance; nightly perf baselines are the second line of defence.
+## 后果
+- 性能数字只有带 provenance 才可信；nightly 性能基线是第二道防线。

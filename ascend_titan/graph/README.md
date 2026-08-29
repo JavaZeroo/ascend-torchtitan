@@ -1,5 +1,3 @@
-# graph (L2) — graph mode
+# graph（L2）—— 图模式
 
-torchair backend integration. torchtitan already exposes
-`--compile.backend=<str>` and `--compile.components`, so most of this is a
-recipe plus a backend registration helper. Nothing here yet (M5).
+torchair 后端接入。torchtitan 已暴露 `--compile.backend=<str>` 与 `--compile.components`，所以这里主要是一个 recipe 加一个后端注册辅助。目前为空（M5）。

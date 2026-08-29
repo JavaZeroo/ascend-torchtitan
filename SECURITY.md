@@ -1,5 +1,3 @@
-# Security
+# 安全
 
-This package runs training jobs; it does not expose network services. Report vulnerabilities
-(e.g. unsafe deserialisation paths, credential leakage in logs) privately to the maintainers rather
-than in a public issue. We aim to acknowledge within 7 days.
+本包用于运行训练任务，不暴露网络服务。发现漏洞（例如不安全的反序列化路径、日志中的凭据泄露）请私下联系维护者，不要发公开 issue。我们争取 7 天内响应。
