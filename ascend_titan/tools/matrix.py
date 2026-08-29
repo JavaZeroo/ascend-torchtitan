@@ -72,6 +72,22 @@ TRIAGE: list[tuple[str, str, str]] = [
         r"when making fake tensor call|torch\._dynamo\.exc\.",
         "torch.compile path failed (see note)",
     ),
+    (
+        "TORCH-5",
+        r"Torch not compiled with CUDA enabled",
+        "torch<=2.12 pipelining fork_rng assumes cuda (fixed in 2.13)",
+    ),
+    ("TT-CUDA", r"DistMuon requires one CUDA device per process", "DistMuon hard-codes CUDA"),
+    (
+        "TT-KERNEL",
+        r"Could not run 'torchtitan::\w+'",
+        "upstream in-tree Triton override kernel (CUDA-only by design)",
+    ),
+    (
+        "OURS-9",
+        r"ValueError: Override '[\w.]+' claims",
+        "per-node override conflict between an upstream override and an Ascend override (npu_baseline)",
+    ),
     ("TT-4", r"data is not allocated yet", "ChunkedLossWrapper / manual unshard backward"),
     ("TT-5", r"all parameters must be\s+DTensors", "spmd_types + fully_shard(dp_mesh_dims)"),
     (
