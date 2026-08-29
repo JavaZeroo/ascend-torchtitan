@@ -3,7 +3,15 @@ name = "ascend-torchtitan"
 description = "Out-of-tree Ascend NPU extension for torchtitan: compat shims, fused-kernel overrides, parallel strategies and recipes."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "ascend-torchtitan maintainers" }]
 keywords = ["pytorch", "torchtitan", "ascend", "npu", "llm", "training"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dynamic = ["version"]
 # torchtitan itself is deliberately NOT listed here: it is pinned by commit SHA
 # (see constraints/npu.txt and docs/upstream-tracking.md), which pyproject

@@ -2,11 +2,11 @@
 # commit lives in constraints/torchtitan.sha because pip cannot express it).
 # Together these two files are the four-way version tuple (design §4).
 #
-# NEXT track (default; newest torch_npu incl. pre-releases). validated 2026-08-29 on Ascend 910B2, driver 25.5.1, CANN 9.1.0:
-# qwen3_debugmodel_npu 1-NPU and FSDP2x2, 10 steps, bitwise-identical to the STABLE track.
+# STABLE track (GA torch_npu). validated 2026-08-29 on Ascend 910B2, driver 25.5.1, CANN 9.1.0:
+# qwen3_debugmodel_npu 1-NPU and FSDP2x2, 10 steps, bitwise-identical to the NEXT track.
 # (image swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-910b-ubuntu22.04-py3.12-devel)
-torch==2.13.0
-torch_npu==2.13.0rc1
+torch==2.12.0
+torch_npu==2.12.0
 spmd_types==0.2.5
 attn-gym==0.0.5
 grain==0.2.18

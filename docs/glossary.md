@@ -8,5 +8,7 @@
 | **pinned SHA** | The torchtitan commit in `constraints/npu.txt`. | torchtitan PyPI releases (stale). |
 | **matrix** | `docs/capability-matrix.md`, three-state per cell. | upstream CI's test list. |
 | **provenance** | The table of *which backend actually ran* for each overridable node in a given run. | the override log lines (those are one input to it). |
+| **NEXT / STABLE** | the two validated version tuples (`constraints/npu.txt`, `constraints/npu-stable.txt`). | torchtitan's own nightly/stable wheels. |
+| **golden** | frozen deterministic loss/grad_norm curve in `tests/assets/losses/npu/`, checked by `scripts/check_golden.sh`. | upstream's `tests/assets/losses/*_a10g.txt` (GPU, different configs). |
 | **L0–L4** | compat / kernels / parallel+graph / recipes / tools. See design doc. | |
 | **M0–M5** | milestones. See docs/roadmap.md. | |

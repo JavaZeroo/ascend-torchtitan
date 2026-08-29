@@ -91,3 +91,31 @@ def test_duplicate_name_rejected(clean_registry):
         @shim(target="c:d", reason="r", upstream=UP)  # noqa: F811
         def dup(original):
             return original
+
+
+def test_polyfill_adds_missing_and_skips_existing(clean_registry):
+    _fake_module("fake_target_d", present=lambda: "orig")
+
+    @shim(target="fake_target_d:missing", reason="r", upstream=UP, kind="polyfill")
+    def add_missing(original):
+        assert original is None
+        return lambda: "polyfilled"
+
+    @shim(target="fake_target_d:present", reason="r", upstream=UP, kind="polyfill")
+    def keep_present(original):  # pragma: no cover - must not be called
+        raise AssertionError("polyfill must not run when attr exists")
+
+    applied = clean_registry.apply_all()
+    import fake_target_d
+
+    assert [a.name for a in applied] == ["add_missing"]
+    assert fake_target_d.missing() == "polyfilled"
+    assert fake_target_d.present() == "orig"
+
+
+def test_upstream_must_be_url_or_draft(clean_registry):
+    with pytest.raises(ShimError, match="draft:"):
+
+        @shim(target="a:b", reason="r", upstream="TODO")
+        def bad(original):
+            return original

@@ -15,7 +15,7 @@ jobs:
         run: |
           git clone https://github.com/pytorch/torchtitan.git ../torchtitan
           if [ "${{ matrix.titan }}" = pinned ]; then
-            git -C ../torchtitan checkout $(grep '^torchtitan_sha=' constraints/npu.txt | cut -d= -f2)
+            git -C ../torchtitan checkout $(cat constraints/torchtitan.sha)
           fi
           pip install --no-deps -e ../torchtitan
           pip install -r constraints/titan-deps.txt

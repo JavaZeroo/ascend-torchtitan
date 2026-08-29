@@ -4,14 +4,15 @@ Out-of-tree **Ascend NPU** extension for [torchtitan](https://github.com/pytorch
 Install it next to a pinned torchtitan and torchtitan runs on NPUs; opt into Ascend fused kernels,
 parallel strategies and graph mode per recipe. torchtitan itself is never forked or patched on disk.
 
-> Status: **M0/M1 scaffold**. Nothing has been validated on an NPU yet — see
-> `docs/capability-matrix.md` (all ⚪) and `docs/roadmap.md`.
+> Status: **M1 done (2026-08-29)** — `qwen3_debugmodel` trains on Ascend 910B2 (1 NPU and FSDP2×2) with
+> one fused-attention override and one polyfill shim, on torch 2.12.0/2.13.0 + torch_npu 2.12.0/2.13.0rc1.
+> See `docs/baseline.md`, `docs/capability-matrix.md`, `docs/issues/`.
 
 ## Install
 
 ```bash
 git clone <this repo> ascend-torchtitan && cd ascend-torchtitan
-TITAN_DIR=../torchtitan ./scripts/install.sh    # torchtitan @ pinned SHA, no CUDA-only extras
+WITH_TORCH=1 TITAN_DIR=../torchtitan ./scripts/install.sh   # torch + torch_npu + torchtitan @ pinned SHA
 ascend-titan-doctor                              # prints the version tuple and what is missing
 ```
 

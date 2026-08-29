@@ -13,17 +13,23 @@ pytestmark = pytest.mark.titan
 
 def test_qwen3_npu_recipes_build():
     from ascend_titan.recipes.qwen3 import (
+        ATTENTION_OVERRIDE,
         qwen3_debugmodel_npu,
         qwen3_debugmodel_npu_fsdp2,
-        qwen3_debugmodel_npu_varlen,
+        qwen3_debugmodel_stock_flex,
+        qwen3_debugmodel_stock_varlen,
     )
 
     cfg = qwen3_debugmodel_npu()
     assert cfg.training.steps == 10
     assert cfg.checkpoint.enable is False
+    assert cfg.override.imports == [ATTENTION_OVERRIDE]
+    assert cfg.parallelism.spmd_backend == "partial_dtensor"
+    assert type(cfg.loss).__qualname__ == "CrossEntropyLoss.Config"
 
-    assert qwen3_debugmodel_npu_varlen().model_spec is not cfg.model_spec
     assert qwen3_debugmodel_npu_fsdp2().parallelism.data_parallel_shard_degree == 2
+    assert qwen3_debugmodel_stock_flex().override.imports == []
+    assert qwen3_debugmodel_stock_varlen().override.imports == []
 
 
 def test_upstream_lm_attention_backends_are_what_we_think():

@@ -19,19 +19,25 @@ Read first: `docs/PRINCIPLES.md` (P0–P7, cited in review), `docs/glossary.md`
 | `constraints/` | — | pinned torchtitan SHA + pip constraints (**source of truth for versions**) |
 | `docs/capability-matrix.md` | — | 🟢/🔴/⚪ per feature, with attribution |
 | `docs/upstream-tracking.md` | — | shim ↔ issue table, upstream asks |
+| `docs/issues/` | — | problem lists by owner (torch_npu / pytorch / torchtitan / ours) — paste-ready |
+| `docs/baseline.md` | — | validated version tuples (NEXT / STABLE) and M1 numbers |
+| `tests/assets/losses/npu/` | — | frozen golden loss curves (`scripts/check_golden.sh`) |
 
 The sibling checkout `../torchtitan` is the pinned upstream; read it freely, never edit it.
 
 ## Commands
 
 ```bash
-./scripts/install.sh                      # torchtitan @ pinned SHA, no CUDA extras, + this pkg
+WITH_TORCH=1 ./scripts/install.sh         # torch+torch_npu (NEXT track) + torchtitan @ pinned SHA + this pkg
+CONSTRAINTS=constraints/npu-stable.txt WITH_TORCH=1 ./scripts/install.sh   # STABLE track
 ascend-titan-doctor                       # env probe (works on CPU)
 pytest tests/unit -x                      # CPU unit tests (titan-marked tests need torchtitan)
 ruff check . && ruff format --check .
 ./scripts/probe_compat.sh                 # how far can the pinned SHA move forward
 MODULE=ascend_titan.recipes.qwen3 CONFIG=qwen3_debugmodel_npu NPU=8 ./scripts/run_train.sh
-COMM_MODE=fake_backend NPU=8 ./scripts/run_train.sh   # 1 device, fake PG
+COMM_MODE=fake_backend NPU=8 ./scripts/run_train.sh   # 1 device, fake PG (currently 🔴 NPU-2)
+ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu   # deterministic vs golden
+# tyro: subcommands like `activation-checkpoint:none` must come LAST, after all --flags
 ```
 
 ## Hard rules
@@ -45,7 +51,7 @@ COMM_MODE=fake_backend NPU=8 ./scripts/run_train.sh   # 1 device, fake PG
 5. **Overrides target existing `Configurable` nodes only** (P6). No node ⇒ upstream ask, not a
    parent-block replacement.
 6. **Recipes are deltas** (`tests/unit/test_recipes.py::test_recipe_is_delta_not_copy`).
-7. **Version bumps are PRs with a matrix run** (P5). Never edit `torchtitan_sha=` casually.
+7. **Version bumps are PRs with a matrix run** (P5). Never edit `constraints/torchtitan.sha` casually.
 8. **No speculative fallbacks.** Same rule as upstream: only validate explicit contracts.
 
 ## Attributing a failure (used constantly)
@@ -56,11 +62,15 @@ COMM_MODE=fake_backend NPU=8 ./scripts/run_train.sh   # 1 device, fake PG
 | `torchtitan/...` near `cuda`/`nccl` strings | TT | upstream issue + wrap-shim candidate |
 | CANN error code (`EZ9999`, `EI0002`, …) | CANN | record, stop |
 | `attn_gym`/`helion`/`deep_ep`/`cutlass` | DEP | record; Ascend replacement is an L1 task |
+| `torch/` itself (device whitelist, missing public API) | TORCH | pytorch issue; polyfill shim only for a pure rename/alias |
 
 ## Validating numerics
 Same bar as upstream: non-computation changes must give **identical** loss with
 `--debug.seed=42 --debug.deterministic`; computation changes (kernels) need an alignment test
 against upstream's eager path plus `torch.library.opcheck`. Never use `--debug.deterministic_warn_only`.
+
+## Dev container
+`ascend-titan-dev` on the NPU host (image cann:9.1.0-910b-ubuntu22.04-py3.12-devel): system python = NEXT track, `/opt/venv213` was the probe venv. `/data` is the shared NFS; the repo lives at the same path inside. All 8 cards are usually shared with other jobs — pick cards with `ASCEND_RT_VISIBLE_DEVICES`.
 
 ## Skills
 `.claude/skills/`: `compat-probe` (M0), `shim-authoring`, `override-authoring`,

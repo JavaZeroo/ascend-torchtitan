@@ -8,6 +8,10 @@ export LOG_RANK=${LOG_RANK:-0}
 MODULE=${MODULE:-"ascend_titan.recipes.qwen3"}
 CONFIG=${CONFIG:-"qwen3_debugmodel_npu"}
 COMM_MODE=${COMM_MODE:-""}
+# debugmodel recipes reference upstream test assets by relative path
+# (./tests/assets/tokenizer, ./tests/assets/c4_test), so run from the pinned checkout.
+TITAN_DIR=${TITAN_DIR:-"$(cd "$(dirname "$0")/.." && pwd)/../torchtitan"}
+cd "$TITAN_DIR"
 
 if [ "$COMM_MODE" = "fake_backend" ]; then
   NGPU="$NPU" LOCAL_RANK=0 python -m ascend_titan.train \

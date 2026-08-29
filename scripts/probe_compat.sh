@@ -7,7 +7,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 TITAN_DIR=${TITAN_DIR:-"$HERE/../torchtitan"}
 UPPER=${1:-origin/main}
-PIN=$(grep -E '^torchtitan_sha=' "$HERE/constraints/npu.txt" | cut -d= -f2)
+PIN=$(tr -d '[:space:]' < "$HERE/constraints/torchtitan.sha")
 
 git -C "$TITAN_DIR" fetch -q origin
 COMMITS=$(git -C "$TITAN_DIR" rev-list --reverse "$PIN..$UPPER")

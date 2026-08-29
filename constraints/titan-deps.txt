@@ -11,4 +11,9 @@ wandb
 einops
 pillow
 spmd_types
-attn-gym
+attn-gym==0.0.5
+# Not in upstream requirements.txt but imported unconditionally at module level by
+# torchtitan/distributed/minimal_async_ep/kernels.py (reached via models/common/token_dispatcher.py).
+# Attribution TT: upstream ask = lazy import. Plain `triton` is a pure-Python package on
+# aarch64; it is NOT Triton-Ascend (which is installed separately for L1 kernels).
+triton

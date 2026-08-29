@@ -7,7 +7,7 @@ Accepted (2026-08-29)
 See docs/upstream-tracking.md: releases are stale, main tracks torch nightly, torch_npu tracks torch releases.
 
 ## Decision
-`constraints/npu.txt` holds `torchtitan_sha=`. `scripts/install.sh` checks it out and installs with `--no-deps` plus our dependency list. A bump is a PR carrying a full matrix run. `scripts/probe_compat.sh` reports how far forward we could move.
+`constraints/torchtitan.sha` holds the commit. `scripts/install.sh` checks it out and installs with `--no-deps` plus our dependency list. A bump is a PR carrying a full matrix run. `scripts/probe_compat.sh` reports how far forward we could move.
 
 ## Consequences
 - `pip install ascend-torchtitan` alone is not enough; the install script is part of the product.

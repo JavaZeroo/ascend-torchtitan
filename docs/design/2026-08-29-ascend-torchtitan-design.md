@@ -71,7 +71,7 @@ For every computation we want to fuse: does upstream have a `Configurable.Config
 ### 3.4 Degradation and provenance (ADR-004, P7)
 Missing kernel dependency ⇒ the L1 module logs a WARNING and does not register its override ⇒ upstream eager runs. Provenance (M3) records per node which backend ran; benchmarks must carry it.
 
-## 4. Dependency and version management (F1–F3) — the least-validated part
+## 4. Dependency and version management (F1–F3) — validated by M0 on 2026-08-29 (see docs/baseline.md)
 
 Measured facts:
 - torchtitan main targets PyTorch **nightly**; even releases pin nightly dates (`docs/release.md:10-12`). torch_npu targets torch **releases**.
@@ -80,12 +80,17 @@ Measured facts:
 - nightly-only APIs in use: `torch.nn.attention.varlen`, `torch.distributed._symmetric_memory`.
 
 Mechanisms:
-- `constraints/npu.txt` = the four-way tuple + pinned SHA (a deliverable).
+- `constraints/npu.txt` + `constraints/torchtitan.sha` = the four-way tuple (a deliverable).
 - `scripts/probe_compat.sh` = furthest importable SHA / first breaking commit.
 - CI legs: **pinned** (gate) and **main** (drift probe, may fail). On NPU, the main leg is replaced by the furthest-importable-SHA leg, because main may be red purely for torch-version reasons.
 - Reading the two legs: 🟢/🟢 fine · 🟢/🔴 upstream drift (fix before next bump) · 🔴/🔴 our bug · 🔴/🟢 upstream already fixed it.
 
-**M0 exists to turn this section from measured-on-CPU into validated-on-NPU.** Go/no-go is decided there.
+**M0 outcome (2026-08-29): GO.** Measured on the NPU box:
+- torch_npu is autoloaded by `import torch` (privateuse1 = `npu` before any explicit import), so the F4 ordering risk reduces to shim ordering only.
+- torchtitan main (`13da2d77c`) runs on **released** torch 2.12.0 / 2.13.0 + torch_npu 2.12.0 / 2.13.0rc1 with exactly one nightly-API gap (`torch.distributed.set_timeout`, polyfilled). The other nightly-only usages either sit behind config (`spmd_types`), are unreachable on NPU anyway (Flex), or are a separate open item (ChunkedLossWrapper, TT-4).
+- `import torchtitan.trainer` needs the `triton` wheel (TT-1); `attn-gym[linear]` is avoided with `--no-deps`.
+- Neither upstream attention backend runs on NPU (TORCH-1, NPU-1) → the inner-attention override moved from M3 into M1 and is the reason M1 passes.
+- The fake process group lacks `npu` (NPU-2) → `--comm.mode=fake_backend` is 🔴 by torch_npu, not by us.
 
 ## 5. Testing strategy
 
@@ -107,8 +112,8 @@ One upstream, many independent vendor packages. Ownership test: *would a second 
 
 | risk | likelihood | mitigation |
 |---|---|---|
-| No torch version satisfies both torchtitan@SHA and torch_npu (F1) | medium | M0 probe; fall back to an older SHA; file torch_npu API issues; **no-go if empty intersection** |
-| Neither `flex` nor `varlen` attention runs on NPU (no eager LM attention upstream) | medium-high | inner-attention override becomes the first L1 module, pulled into M1; discovered by the CPU recipe test on day one |
+| No torch version satisfies both torchtitan@SHA and torch_npu (F1) | **closed** (M0: intersection exists, 1 polyfill) | re-check on every SHA bump via the nightly probe leg |
+| Neither `flex` nor `varlen` attention runs on NPU (no eager LM attention upstream) | **realised** | inner-attention override shipped in M1 (`kernels/attention.py`); CP/LSE epilogue still open (OURS-2) |
 | kimi_k3 upstream churn (days old, eager-only) | high | no kimi_k3 overrides before M4; attn_res upstream ask waits for stabilisation |
 | FSDP2/DTensor over HCCL broadly red | unknown | M1 path ③ answers this; if red with NPU attribution, roadmap pauses at M1 (P1) |
 | Silent perf degradation via loud-but-ignored fallback | medium | provenance mandatory in benchmarks; nightly perf thresholds |

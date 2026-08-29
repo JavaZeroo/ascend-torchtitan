@@ -11,7 +11,7 @@ from typing import Literal
 
 logger = logging.getLogger("ascend_titan.compat")
 
-Kind = Literal["wrap", "replace"]
+Kind = Literal["wrap", "replace", "polyfill"]
 
 
 class ShimError(RuntimeError):
@@ -25,6 +25,11 @@ class Shim:
     ``target`` is ``"dotted.module:attr"``. ``fn(original)`` receives the current
     attribute and returns the patched one; for ``kind="wrap"`` it must call
     ``original`` so upstream changes are inherited (P3).
+
+    ``kind="polyfill"`` adds an attribute that the installed torch/torchtitan
+    lacks (typically a nightly-only API): ``fn(None)`` returns the implementation
+    and the shim is skipped entirely when the attribute already exists, so a
+    newer torch makes it a no-op without any code change.
     """
 
     name: str
@@ -77,8 +82,13 @@ def shim(
         )
     if kind == "replace" and not (why_not_wrap and why_not_wrap.strip()):
         raise ShimError(f"shim for {target}: kind='replace' requires why_not_wrap (P3).")
-    if kind not in ("wrap", "replace"):
+    if kind not in ("wrap", "replace", "polyfill"):
         raise ShimError(f"shim for {target}: unknown kind {kind!r}")
+    if not (upstream.startswith("http") or upstream.startswith("draft:")):
+        raise ShimError(
+            f"shim for {target}: upstream must be an issue/PR URL or 'draft:<path#anchor>' "
+            "pointing at the drafted issue text in docs/"
+        )
 
     def deco(fn: Callable[[object], object]) -> Callable[[object], object]:
         name = fn.__name__
@@ -123,6 +133,19 @@ def apply_all(*, only: set[str] | None = None) -> list[Applied]:
             mod = importlib.import_module(s.module)
         except ImportError as e:
             raise ShimError(f"shim {s.name}: cannot import target module {s.module}") from e
+        if s.kind == "polyfill":
+            if hasattr(mod, s.attr):
+                logger.info("[shim] %s: %s already exists, polyfill skipped", s.name, s.target)
+                _APPLIED[s.name] = Applied(name=s.name, target=s.target, kind=s.kind)
+                continue
+            patched = s.fn(None)
+            setattr(mod, s.attr, patched)
+            patched.__ascend_shim__ = s.name  # type: ignore[attr-defined]
+            a = Applied(name=s.name, target=s.target, kind=s.kind)
+            _APPLIED[s.name] = a
+            done.append(a)
+            logger.info("[shim] %s (polyfill) -> %s  [%s]", s.name, s.target, s.upstream)
+            continue
         if not hasattr(mod, s.attr):
             raise ShimError(
                 f"shim {s.name}: {s.target} does not exist. Upstream probably moved or "

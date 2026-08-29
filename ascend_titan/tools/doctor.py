@@ -46,17 +46,19 @@ def _dist_version(name: str) -> str | None:
 
 
 def _cann_version() -> str | None:
+    """CANN toolkit version. Layout (CANN 9.x): $ASCEND_HOME_PATH/compiler/version.info
+    holds ``Version=...``; older toolkits ship version.cfg at the root."""
     home = os.environ.get("ASCEND_HOME_PATH") or os.environ.get("ASCEND_TOOLKIT_HOME")
     if not home:
         return None
-    for cand in ("version.cfg", os.path.join("..", "version.cfg")):
-        p = os.path.join(home, cand)
+    for rel in ("compiler/version.info", "version.cfg", "../version.cfg"):
+        p = os.path.join(home, rel)
         if os.path.exists(p):
             with open(p) as f:
                 for line in f:
-                    if "version" in line.lower():
-                        return line.strip()
-    return f"(ASCEND_HOME_PATH={home}, no version.cfg found)"
+                    if line.lower().startswith("version"):
+                        return line.strip().split("=", 1)[-1]
+    return f"(ASCEND_HOME_PATH={home}, no version file found)"
 
 
 def _git_sha(pkg_name: str) -> str | None:

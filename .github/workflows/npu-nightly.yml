@@ -1,0 +1,35 @@
+name: npu-nightly
+# Runs on a self-hosted runner with Ascend NPUs (labels: self-hosted, npu). Two legs:
+#   pinned  = constraints/torchtitan.sha (gate)
+#   probe   = furthest importable upstream SHA (drift probe, allowed to fail)
+# × two tuples (NEXT / STABLE). Budget: well under 1 card-hour today; grows with the matrix (M2).
+on:
+  schedule: [{cron: "0 18 * * *"}]   # 02:00 CST
+  workflow_dispatch:
+jobs:
+  matrix:
+    runs-on: [self-hosted, npu]
+    strategy:
+      fail-fast: false
+      matrix:
+        track: [npu, npu-stable]
+        titan: [pinned, probe]
+    continue-on-error: ${{ matrix.titan == 'probe' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: environment
+        run: |
+          python -m venv .venv && . .venv/bin/activate
+          CONSTRAINTS=constraints/${{ matrix.track }}.txt WITH_TORCH=1 TITAN_DIR=$RUNNER_TEMP/torchtitan ./scripts/install.sh
+          if [ "${{ matrix.titan }}" = probe ]; then TITAN_DIR=$RUNNER_TEMP/torchtitan ./scripts/probe_compat.sh | tee probe.txt; fi
+          ascend-titan-doctor --json > doctor.json
+      - name: unit + npu tests
+        run: . .venv/bin/activate && pytest tests/unit tests/npu -q
+      - name: golden
+        run: |
+          . .venv/bin/activate
+          ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
+          ASCEND_RT_VISIBLE_DEVICES=0,1 NPU=2 ./scripts/check_golden.sh qwen3_debugmodel_npu_fsdp2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: "${{ matrix.track }}-${{ matrix.titan }}", path: "doctor.json\nprobe.txt"}
