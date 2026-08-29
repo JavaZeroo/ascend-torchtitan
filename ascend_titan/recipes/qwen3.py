@@ -103,3 +103,10 @@ def qwen3_debugmodel_npu_fused() -> Trainer.Config:
         ROPE_COSSIN_OVERRIDE,
     ]
     return config
+
+
+def qwen3_debugmodel_npu_fused_fsdp2() -> Trainer.Config:
+    """Fused perf recipe under FSDP2 x2 (golden-tracked)."""
+    config = qwen3_debugmodel_npu_fused()
+    config.parallelism.data_parallel_shard_degree = 2
+    return config

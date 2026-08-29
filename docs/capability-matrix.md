@@ -99,6 +99,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | `npu_rms_norm` | 🟢 | op 级对齐 | 单独：tps 55k → 72k |
 | `npu_swiglu`（上游 FusedSwiGLU 布局） | 🟢 | 对上游 FeedForward 对齐，checkpoint 布局不变 | 三者合计：**tps 77k（+40%），显存 2.38 → 1.89 GiB** |
 | `npu_rotary_mul`（half / interleave） | 🟢 | 对上游 CosSinRoPE / ComplexRoPE 对齐（bf16 级） | loss 5.0958 vs golden 5.1030 |
+| 融合 recipe golden | 🟢 | `qwen3_debugmodel_npu_fused{,_fsdp2}` 两条 track 逐位一致，已冻结进 `tests/assets/losses/npu/`，nightly 校验 | |
 
 ## AscendC 算子库（源码构建）
 

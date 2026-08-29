@@ -1,0 +1,10 @@
+step:  1  loss:  7.56327  grad_norm:  9.7497
+step:  2  loss:  6.83358  grad_norm:  5.5353
+step:  3  loss:  6.35107  grad_norm:  3.6967
+step:  4  loss:  6.06849  grad_norm:  3.4523
+step:  5  loss:  5.78723  grad_norm:  3.5498
+step:  6  loss:  5.58919  grad_norm:  3.4974
+step:  7  loss:  5.39631  grad_norm:  3.4636
+step:  8  loss:  5.26204  grad_norm:  3.3905
+step:  9  loss:  5.36458  grad_norm:  2.8588
+step: 10  loss:  5.09582  grad_norm:  3.3000
