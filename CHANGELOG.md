@@ -8,6 +8,7 @@
 - `kernels/rms_norm.py`：RMSNorm → `torch_npu.npu_rms_norm`（drop-in，Meta/autograd 齐全）；recipe 变体 `qwen3_debugmodel_npu_fused_norm`；`npu_baseline` 默认启用。
 - `ascend-titan-provenance`：按节点列出实际生效的实现（ascend / upstream-override / upstream），P7 要求的审计表。
 - `npu_baseline` 在上游 override 已 claim attention 块时跳过 RoPE override（OURS-9）。
+- 注意力 LSE 尾部（attention sinks / CP 所需）：从 kernel 的 softmax 统计量按文档还原，NPU 测试对 `logsumexp` 对齐；`gpt_oss_pp+fsdp+ep+sacop` 由 🔴 变 🟢。
 - 归因：`DEP-INDUCTOR`（inductor 在 NPU 上需要 Triton-Ascend/torchair）。
 
 ### 新增

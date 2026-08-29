@@ -7,7 +7,7 @@
 
 | track | torch | torch_npu | 🟢 | 🔴 | ⚪ |
 |---|---|---|---|---|---|
-| **NEXT**（默认） | 2.13.0 | 2.13.0rc1 | **24** | 32 | 5（上游禁用/门控） |
+| **NEXT**（默认） | 2.13.0 | 2.13.0rc1 | **25** | 31 | 5（上游禁用/门控） |
 | STABLE | 2.12.0 | 2.12.0 | 18 | 38 | 5 |
 
 NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng` 默认 cuda（TORCH-5），2.13 已修。
@@ -20,7 +20,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | `torch.compile`：inductor 后端需要 Triton-Ascend（M3 已解决我们自己的 graph break） | 6 | DEP-INDUCTOR | M5：Triton-Ascend / torchair |
 | CUDA-only 依赖缺失：`fla`（qwen3_5 GDN）、`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1（fla-npu 已在路线图） |
 | 上游树内 CUDA-only 组件：`fused_swiglu`/`fused_grouped_experts` Triton 内核、DistMuon | 4 | TT-KERNEL / TT-CUDA | 上游按设计为 CUDA；昇腾替代属 L1 |
-| 注意力 LSE 尾部（gpt_oss attention sinks） | 2 | OURS-2 | 本仓 M4 |
+| gpt_oss + TP：路由 softmax backward 形状不匹配（LSE 尾部已实现后新暴露） | 1 | OURS-10 | 本仓，待查 |
 | 上游 `fused_mla` override 与我们的 RoPE override 节点冲突（该用例本身 CUDA-only） | 1 | OURS-9 / TT-9 | npu_baseline 检测到上游 override 时跳过 RoPE override |
 
 **结论：NPU/CANN 归因的红格为 0。** torch_npu 的三个缺陷（NPU-1 varlen 内核、NPU-2 fake 进程组、NPU-3 复数索引）都已通过上游本就存在的等价实现（varlen 节点 + `npu_fusion_attention`、实数缓存 RoPE）在 L1 层绕开，剩余红格全部归 torch 版本、上游 CUDA-only 组件或本仓自身待办。
@@ -60,8 +60,8 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | deepseek_v3 mtp + compile（helion_rope） | 🔴 | 🔴 | DEP：helion |
 | qwen3 fsdp+tp+cp（含 fused/non-fused qkv、MoE param groups） | 🔴 | 🔴 | TT-5 |
 | qwen3_5（GDN，需要 `fla`） | 🔴 | 🔴 | DEP：fla（昇腾侧对应 fla-npu，M4） |
-| gpt_oss fsdp+tp+ep | 🔴 | 🔴 | OURS-2：attention sinks 需要 LSE 尾部 |
-| gpt_oss pp+fsdp+ep+sacop | 🔴 | 🔴 | NEXT：OURS-2；STABLE：TORCH-5 |
+| gpt_oss fsdp+tp+ep | 🔴 | 🔴 | OURS-10（M3 后新暴露）：TP2+EP4 下某处 softmax backward 形状 [512,8] vs [256,8]，待查；sinks 尾部本身已实现 |
+| gpt_oss pp+fsdp+ep+sacop | 🟢 | 🔴 | NEXT：M3 的 LSE 尾部后通过（PP + EP + attention sinks + per-op SAC）；STABLE：TORCH-5 |
 | kimi_k2_5 muon（fsdp+ep、pp+fsdp+ep） | 🔴 | 🔴 | TT-CUDA：`DistMuon requires one CUDA device per process` |
 | muse_glimmer（text、mm） | 🔴 | 🔴 | TT-5：模型要求 spmd_types |
 | kimi_k3 mm | ⚪ | ⚪ | 上游门控：需要 CUDA 算力 10.0/10.3 |
@@ -75,7 +75,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | flex（stock，上游默认） | 🔴 | TORCH-1：torch 在 `flex_attention` 里拒绝 npu 设备 |
 | flex_flash | 🔴 | TT-by-design：`has_cuda_capability(9,0)` 门控 |
 | sdpa | 🔴 | TT-7：上游已为 LM 移除 |
-| attention sinks（gpt_oss）/ CP 的 LSE 尾部 | 🔴 | OURS-2 |
+| attention sinks（gpt_oss）/ CP 的 LSE 尾部 | 🟢 | M3：LSE = 按文档还原的 `softmax_max + log(softmax_sum)`（统计量为 head-major 布局），与 `logsumexp` 参考对齐；CP 仍被 TT-5 挡 |
 
 ## RoPE
 
