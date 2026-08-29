@@ -18,6 +18,10 @@
 ## TT-10 树内 Triton override 与 DistMuon 写死 CUDA —— `info`
 - `overrides/fused_swiglu.py` / `fused_grouped_experts`：`Could not run 'torchtitan::silu_and_mul'`（Triton 内核只注册了 CUDA）；`kimi_k2_5` 的 `DistMuon requires one CUDA device per process`。这些是上游明确的 CUDA-only 组件（override README 也这么定位），记录为 `TT-KERNEL` / `TT-CUDA`，昇腾替代属于 L1（M3+）。
 
+## TT-11 kimi_k3 在模块导入时就需要 `cutlass`（经 attn_gym 的 cute 后端）—— `draft`
+- `models/kimi_k3/kda.py:15 → attn_gym.linear.kda.short_conv → activations.py:54 import cutlass`。没有 `nvidia-cutlass-dsl`（CUDA-only）的环境连 `import torchtitan.models.kimi_k3` 都失败，任何 kimi_k3 recipe/override 都无法构建；attn_gym 的 `naive` 回退在这里帮不上忙，因为失败发生在 import 期。
+- 诉求：attn_gym 把 cute 后端改为懒加载（或 kimi_k3 用 `find_spec` 门控），让无 CUDA 环境退回 naive 路径。对本仓：SituGLU/KDA override 在此之前只能在 op 级验证（`tests/npu/test_kernel_situ_glu.py`），无法接入 kimi_k3 模型（矩阵：kimi_k3 = 🔴 DEP）。
+
 ## TT-9 `overrides/fused_mla.py` 使用 nightly-only 的 `torch._C.Tag.inplace` —— `draft`
 - `AttributeError: type object 'torch._C.Tag' has no attribute 'inplace'`；影响 `deepseek_v3_fused_mla_swiglu_fsdp+ep`。
 - 诉求：`getattr(torch.Tag, "inplace", None)` 保护，或按 torch 版本门控该 override。
