@@ -1,0 +1,115 @@
+From cf985e18ff34e29cf6ee50ffc4ca99ed34f5408f Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 01:41:51 +0800
+Subject: [PATCH] fix: support advanced indexing on complex tensors in
+ op_api::index
+
+aclnnIndex (index.Tensor) has no kernel for complex dtypes: any advanced
+indexing on a complex NPU tensor fails with
+
+  index_high_dims_op_api: ... NPU function error: call aclnnIndex failed,
+  error code is 161002
+
+while the same expression works on CPU and for real dtypes. This breaks,
+for example, RoPE implementations that keep a complex cache and gather it
+with `freqs_cis[positions]` (torchtitan's ComplexRoPE for llama3 /
+deepseek_v3 / gpt_oss / kimi).
+
+Advanced indexing only gathers whole elements, so gather from the (..., 2)
+real view with the same index list -- one extra trailing undefined entry
+keeps the (real, imag) pair dim intact -- and view the result back as
+complex. Conjugate-bit tensors are resolved first so view_as_real is valid.
+
+Test: test/test_base_ops/test_index_complex.py (index tensor, two index
+tensors, tensor + slices, boolean mask, non-contiguous, complex64/128) all
+match CPU.
+---
+ op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp | 10 ++++
+ test/test_base_ops/test_index_complex.py    | 54 +++++++++++++++++++++
+ 2 files changed, 64 insertions(+)
+ create mode 100644 test/test_base_ops/test_index_complex.py
+
+diff --git a/op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp b/op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp
+index 037a6338d..0096cfcd9 100644
+--- a/op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp
++++ b/op_plugin/ops/opapi/IndexKernelNpuOpApi.cpp
+@@ -43,6 +43,16 @@ at::Tensor index_high_dims_op_api(const at::Tensor& self, std::vector<at::Tensor
+ 
+ at::Tensor index(const at::Tensor& self, const torch::List<c10::optional<at::Tensor>>& orig)
+ {
++    if (self.is_complex()) {
++        // aclnnIndex has no complex kernel (error 161002). Advanced indexing only gathers whole
++        // elements, so gather from the (..., 2) real view with the same indices -- the extra
++        // trailing undefined entry keeps the (real, imag) pair dim intact -- and view the result
++        // back as complex.
++        torch::List<c10::optional<at::Tensor>> real_indices = orig.copy();
++        real_indices.push_back(c10::optional<at::Tensor>());
++        at::Tensor real_self = at::view_as_real(self.resolve_conj());
++        return at::view_as_complex(op_api::index(real_self, real_indices));
++    }
+     DO_COMPATIBILITY(aclnnIndex, acl_op::index(self, orig));
+     bool needCast = op_plugin::AdvanceIndex::checkIndexTensorTypes(orig);
+     auto indices = op_plugin::AdvanceIndex::npu_expand_tensors(self, orig, needCast, true);
+diff --git a/test/test_base_ops/test_index_complex.py b/test/test_base_ops/test_index_complex.py
+new file mode 100644
+index 000000000..2e2d2781d
+--- /dev/null
++++ b/test/test_base_ops/test_index_complex.py
+@@ -0,0 +1,54 @@
++import torch
++import torch_npu
++
++from torch_npu.testing.testcase import TestCase, run_tests
++
++
++class TestIndexComplex(TestCase):
++    """Advanced indexing on complex tensors (aclnnIndex has no complex kernel; op_api::index
++    gathers through the real view instead)."""
++
++    def _check(self, cpu_input, index_fn):
++        npu_input = cpu_input.npu()
++        cpu_output = index_fn(cpu_input)
++        npu_output = index_fn(npu_input)
++        self.assertEqual(npu_output.dtype, cpu_output.dtype)
++        self.assertEqual(npu_output.shape, cpu_output.shape)
++        self.assertRtolEqual(torch.view_as_real(npu_output.cpu()).numpy(),
++                             torch.view_as_real(cpu_output).numpy())
++
++    def test_index_tensor_complex64(self):
++        cpu_input = torch.randn(64, 32, dtype=torch.complex64)
++        idx = torch.randint(0, 64, (128,))
++        self._check(cpu_input, lambda x: x[idx.to(x.device)])
++
++    def test_index_tensor_complex128(self):
++        cpu_input = torch.randn(16, 8, dtype=torch.complex128)
++        idx = torch.randint(0, 16, (32,))
++        self._check(cpu_input, lambda x: x[idx.to(x.device)])
++
++    def test_index_mixed_slice_complex64(self):
++        cpu_input = torch.randn(64, 32, 4, dtype=torch.complex64)
++        idx = torch.randint(0, 64, (8,))
++        self._check(cpu_input, lambda x: x[idx.to(x.device), :, 1:3])
++        self._check(cpu_input, lambda x: x[:, idx.to(x.device) % 32])
++
++    def test_index_bool_mask_complex64(self):
++        cpu_input = torch.randn(64, 32, dtype=torch.complex64)
++        mask = torch.rand(64, 32) > 0.5
++        self._check(cpu_input, lambda x: x[mask.to(x.device)])
++
++    def test_index_two_tensors_complex64(self):
++        cpu_input = torch.randn(64, 32, dtype=torch.complex64)
++        i0 = torch.randint(0, 64, (16,))
++        i1 = torch.randint(0, 32, (16,))
++        self._check(cpu_input, lambda x: x[i0.to(x.device), i1.to(x.device)])
++
++    def test_index_noncontiguous_complex64(self):
++        cpu_input = torch.randn(32, 64, dtype=torch.complex64).transpose(0, 1)
++        idx = torch.randint(0, 64, (16,))
++        self._check(cpu_input, lambda x: x[idx.to(x.device)])
++
++
++if __name__ == "__main__":
++    run_tests()
+-- 
+2.43.0
+

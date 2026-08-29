@@ -1,0 +1,14 @@
+# NIGHTLY track (default): the three mains aligned (docs/adr/ADR-006-nightly-first.md).
+#   torch      = nightly CPU wheel at the date torch_npu master pins in its requirements_<line>.txt
+#                (single source of truth: `grep ^torch== ../ascend-pytorch/requirements_2.15.txt`)
+#   torch_npu  = built from source at constraints/torch_npu.sha (scripts/build_torch_npu.sh);
+#                the wheel is 2.15.0+git<sha>, which `==2.15.0` matches (PEP 440 local labels)
+#   torchtitan = constraints/torchtitan.sha
+# validated 2026-08-30 on Ascend 910B2, driver 25.5.1, CANN 9.1.0, container ascend-titan-dev /opt/venv-nightly
+# (see docs/design/2026-08-30-architecture-review.md §6 for what was measured).
+torch==2.15.0.dev20260812+cpu
+torch_npu==2.15.0
+spmd_types==0.2.5
+attn-gym==0.0.5
+grain==0.2.18
+triton==3.7.1

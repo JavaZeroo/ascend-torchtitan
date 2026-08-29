@@ -5,7 +5,8 @@ description: 在 ascend_titan/compat/shims 里编写、测试并注册一条 L0 
 # shim-authoring
 
 ## 门槛（全部满足才继续）
-- [ ] 归因是 **TT** 或 **TORCH**（不是 NPU/CANN/DEP）。是 NPU 就停：提 torch_npu issue（P1）。
+- [ ] 归因是 **TT** 或 **TORCH**（不是 NPU/CANN/DEP）。是 NPU 就停：走 skill `torch-npu-fix`（P9）。
+- [ ] **在 NIGHTLY 基线上复现过**（P8）：`tests/repro/probe_torch_apis.py` 显示该 API/行为在 nightly 上确实缺失。只在 RELEASE 上缺失 ⇒ 不写 shim，关闭。
 - [ ] 没有配置开关：grep `../torchtitan/torchtitan/config/configs.py` 和相关 `Config` 数据类（P0）。
 - [ ] 这段代码不是 `Configurable` 节点（否则写 override，P6）。
 - [ ] 已起草上游 issue：`docs/issues/<owner>.md` 里有带锚点的条目，`upstream="draft:docs/issues/<owner>.md#<anchor>"`（P4）；提交后换成 URL。

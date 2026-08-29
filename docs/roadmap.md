@@ -17,3 +17,8 @@
 - **SituGLU / KDA / causal_conv1d override 需要源码构建的算子库**：`ops-nn`（AscendC，CMake）、`flash-linear-attention-npu`（fla-npu）、`triton-ascend` + `triton-ascend-kernels` 都不在 pip 源上（`pip index versions` 均无结果），只有本地克隆。下一步在开发容器里从源码构建，并把构建步骤固化为 `scripts/build_kernels.sh`（矩阵 `DEP` 桶里的 fla、inductor 两项也依赖它们）。
 - OURS-10（gpt_oss + TP）二分。
 - provenance 表接入 `tools/matrix.py` 报告。
+
+## 2026-08-30：基线切换（ADR-006）
+- 基线改为 NIGHTLY（torch nightly + torch_npu master 源码构建 + torchtitan main）；两条 shim、三个 torchtitan 补丁、14 个 CP 红格被证实为版本差。
+- 六个昇腾侧问题在 torch_npu / op-plugin 修复并带 UT（`patches/`），按 P9 提 gitcode PR；M3 的后续项（Triton-Ascend、kimi_k3）不变。
+- 行动清单见 `docs/design/2026-08-30-architecture-review.md` §8。

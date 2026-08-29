@@ -1,46 +1,49 @@
 # 基线
 
-建立于 2026-08-29（M0 + M1）。硬件：Ascend 910B2 ×8，驱动 25.5.1，CANN 9.1.0
-（镜像 `swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-910b-ubuntu22.04-py3.12-devel`）。
+2026-08-30 起基线 = **NIGHTLY**（ADR-006）。硬件：Ascend 910B2 ×8，驱动 25.5.1，CANN 9.1.0（镜像 `swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-910b-ubuntu22.04-py3.12-devel`，容器 `ascend-titan-dev`，venv `/opt/venv-nightly`）。
 
-## 版本元组
+## 版本三元组
 
 | track | torch | torch_npu | torchtitan | 文件 | 状态 |
 |---|---|---|---|---|---|
-| **NEXT**（默认） | 2.13.0（+cpu wheel） | 2.13.0rc1 | `13da2d77c`（main，2026-08-29） | `constraints/npu.txt` | 🟢 M1 |
-| STABLE | 2.12.0（+cpu wheel） | 2.12.0 | `13da2d77c` | `constraints/npu-stable.txt` | 🟢 M1 |
+| **NIGHTLY**（默认、唯一门禁） | 2.15.0.dev20260812+cpu（torch_npu master `requirements_2.15.txt` 的 pin） | master `15514cc70` 源码构建（op-plugin `2b02a5aa0`），`ci/build.sh --python=3.12 --torch=2.15.0 --disable_torchair`，256 核 gcc 11.4 **8 分 28 秒** | `13da2d77c` | `constraints/nightly.txt` + `torch_npu.sha` + `torchtitan.sha` | 🟢 |
+| RELEASE（信息性） | 2.13.0（+cpu wheel） | 2.13.0rc1（PyPI） | `13da2d77c` | `constraints/npu.txt` | 🟢（需 2 条 shim） |
+| ~~STABLE~~ | 2.12.0 | 2.12.0 | `13da2d77c` | `constraints/npu-stable.txt` | 废弃 |
 
-两条 track 在 `--debug.seed 42 --debug.deterministic` 下 M1 recipe 的 loss/grad_norm 曲线**逐位一致**（`tests/assets/losses/npu/`）。torch 从 CPU index 安装；torch_npu 提供设备后端，并由 `import torch` 自动加载（`ascend-titan-doctor` 中 `torch_npu autoload True`）。
+为什么是 nightly：torchtitan main 与 torch_npu master 都面向 torch nightly；正式版基线造出的 2 条 shim、5 个 torchtitan 补丁中的 3 个、14 个 CP 红格全是版本差（`docs/design/2026-08-30-architecture-review.md` §2）。
 
-为什么不用 torch nightly：torch_npu 跟随 torch 正式版（最新预发布 2.13.0rc1）；torch nightly 是 2.15.0.dev。差距靠**两条 shim** 弥合（`torch.distributed.set_timeout` polyfill、PP `step(arg_mbs=)` 转发），torchtitan main 需要的其它东西 2.13.0 都有——见 `docs/issues/torchtitan.md`。
+## NIGHTLY 实测（2026-08-30，全部 `ASCEND_TITAN_SKIP_SHIMS=1`，即**不加任何 shim**）
 
-## M1 跑的是什么
-`qwen3_debugmodel_npu` = 上游 `qwen3_debugmodel` + 4 个增量：
-1. inner attention 用 `varlen` 节点 + override `ascend_titan.kernels.attention.npu_fusion_attention`（stock flex/varlen 在 NPU 上跑不了：TORCH-1、NPU-1）；
-2. `parallelism.spmd_backend = partial_dtensor`（TT-5）；
-3. 关闭 checkpoint（DCP 是单独的矩阵格）；
-4. `CrossEntropyLoss` 替代 `ChunkedLossWrapper`（TT-4）。
+| 路径 | 结果 |
+|---|---|
+| `qwen3_debugmodel_npu` 单卡 10 步（seed 42，deterministic） | 🟢 **与 2.13 golden 逐位一致**（step 10 loss 5.10304，grad_norm 3.3061）；golden `tests/assets/losses/npu/qwen3_debugmodel_npu__torch2.15.0.dev20260812_npu2.15.0.txt` |
+| `qwen3_debugmodel_npu_fsdp2` ×2 | 🟢 逐位一致（step 10 loss 5.07792，grad_norm 3.3201） |
+| `qwen3_debugmodel_npu_chunked_loss`（上游默认 ChunkedLossWrapper，TT-4） | 🟢 单卡 step 10 loss 5.10291；FSDP2×2 loss 5.07796（bf16 级差异）——TT-4 在 NIGHTLY 不复现，`npu_baseline` 不再展开 loss |
+| `flex_attention` eager（torch_npu master 自带 `patch_flexattention`） | 🟢 op 级前反向（`tests/repro/probe_npu_gaps.py`） |
+| 原版 torch_npu master 上的 stock 路径 | 🔴 NPU-1（stock varlen）、NPU-2（fake_backend）、NPU-3（复数索引）、NPU-6（uint64）、NPU-7（stock flex → inductor lowering）、NPU-8（先 `import spmd_types`）——**六项全部在 torch_npu / op-plugin 侧修复**（`patches/`），修复后的结果见下节 |
 
-| 路径 | 卡数 | 结果（seed 42，deterministic） |
-|---|---|---|
-| 单卡 eager | 1 | step 1 loss 7.6546 → step 10 loss 5.10304 grad_norm 3.3061，约 55k tps，2.4 GiB |
-| FSDP2 ×2 | 2 | step 10 loss 5.07792 grad_norm 3.3201，约 51k tps，2.2 GiB |
-| fake_backend | 1 | 🔴 NPU-2（fake 进程组没有 npu） |
+### 含六个补丁的 torch_npu（第二轮）
+| 路径 | 结果 |
+|---|---|
+| `probe_npu_gaps.py`：NPU-1 / 2 / 3 / 6 | 全部 `[OK ]`；`_flash_attention_forward` PrivateUse1 内核已注册 |
+| **stock varlen**（qwen3 `qwen3_debugmodel_stock_varlen`，零 override） | 🟢 step 10 loss 5.10302 / grad_norm 3.3060 |
+| **stock llama3**（`ascend_titan.recipes.stock.llama3_debugmodel_stock_npu`：stock VarlenAttention + 复数缓存 ComplexRoPE + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
+| `pp_1f1b`（矩阵，无 shim） | 🟢 |
+| `cp`、`fsdp+cp`、`deepseek_v3_fused_mla_swiglu`、stock flex 模型级 | 🔴 DEP-INDUCTOR：Triton-Ascend 未装（NPU-7 修复后 lowering 已通过） |
+| `--comm.mode=fake_backend`（NPU-2） | 见 `docs/issues/STATUS.md`（最终 wheel） |
 
 ## 生效中的 shim
-| shim | 类型 | 原因 | 何时删除 |
-|---|---|---|---|
-| `dist_set_timeout` | polyfill | torchtitan 在第 1 步后调用 nightly-only 的 `torch.distributed.set_timeout` | torch 自带后自动 no-op；或 torchtitan 加 fallback（TT-2） |
-| `pp_step_presplit_*` | wrap | torchtitan 用 nightly-only 的 `step(arg_mbs=...)` 关键字传预切分的 microbatch | torch 的 `step` 接受 `arg_mbs` 后自动 no-op；或 torchtitan 加 fallback（TT-8） |
-
-注意：torch ≤ 2.13 上 `_set_pg_timeout` 只处理 nccl/gloo，并警告 `Set timeout is now only supported for either nccl or gloo`；HCCL 组的超时在第 1 步后**没有**被缩短（与 CUDA 的行为差异，记为 TORCH-3）。
-
-## M2 扫描结论（同日）
-NEXT 24 🟢 / STABLE 18 🟢（61 用例，5 个上游禁用/门控）。差异全在 PP（TORCH-5，2.13 已修）。剩余红格：TT-5（14，需 nightly FSDP2）、OURS-8（6，compile）、DEP（6）、TT-KERNEL/TT-CUDA（4）、OURS-2（2）、OURS-9（1）。详见 `docs/capability-matrix.md`。
+NIGHTLY 上 **0**：`dist_set_timeout`（polyfill）与 `pp_step_presplit_*`（wrap）在 torch 2.15 上探测到原生实现后自动 no-op；文件保留到 RELEASE track 退役。
 
 ## 复现
 ```bash
-WITH_TORCH=1 ./scripts/install.sh                 # NEXT track
-ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
-ASCEND_RT_VISIBLE_DEVICES=0,1 NPU=2 ./scripts/check_golden.sh qwen3_debugmodel_npu_fsdp2
+# 容器内，一次性
+python3.12 -m venv /opt/venv-nightly && . /opt/venv-nightly/bin/activate
+pip install --pre -c constraints/nightly.txt torch --index-url https://download.pytorch.org/whl/nightly/cpu
+source /usr/local/Ascend/cann-9.1.0/set_env.sh && WITH_PATCHES=1 REQUIRE_PR_LINK=0 ./scripts/build_torch_npu.sh
+TORCH_NPU_WHEEL=$(ls -t /opt/wheels/torch_npu-*.whl | head -1) WITH_TORCH=1 ./scripts/install.sh
+# 验证
+ASCEND_TITAN_SKIP_SHIMS=1 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
+ASCEND_TITAN_SKIP_SHIMS=1 ASCEND_RT_VISIBLE_DEVICES=0,1 NPU=2 ./scripts/check_golden.sh qwen3_debugmodel_npu_fsdp2
+python tests/repro/probe_npu_gaps.py
 ```

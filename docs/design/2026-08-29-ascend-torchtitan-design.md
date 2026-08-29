@@ -74,6 +74,8 @@ python -m ascend_titan.train  ──setup()──►  导入 torch_npu + L0 shim
 
 ## 4. 依赖与版本管理（F1–F3）—— 2026-08-29 由 M0 在 NPU 上验证（见 docs/baseline.md）
 
+> **修订（2026-08-30，ADR-006）**：本节『torch_npu 面向 torch 正式版』的前提是错的——torch_npu master 面向 torch nightly（`requirements_2.15.txt`），源码构建 8.5 分钟即可用。基线已改为 NIGHTLY（三个 main 对齐）；下文的 NEXT/STABLE 结论与两条 shim 保留为历史记录。见 `docs/design/2026-08-30-architecture-review.md`。
+
 实测事实：
 - torchtitan main 面向 PyTorch **nightly**；连 release 也 pin nightly 日期（`docs/release.md:10-12`）。torch_npu 面向 torch **正式版**。
 - 最新 release v0.2.2（2026-02-20）没有 override 机制（2026-06-10）也没有 kimi_k3（2026-08-24）。⇒ 按 SHA 固定（ADR-003）。

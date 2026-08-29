@@ -12,8 +12,8 @@ description: 把一次 NPU 运行的结果记入 docs/capability-matrix.md 并�
 1. 确定行（特性/轴）和验证元组（`constraints/`）。
 2. 🟢：写日期和命令。🔴：归因必填（CLAUDE.md 的表），附 issue 链接。⚪ → 一旦测过绝不改回 ⚪。
 3. 归因决定负责人：
-   - **TT / TORCH** → 上游 issue；考虑包装型/polyfill shim（skill `shim-authoring`）。
-   - **NPU / NPU-OP** → torch_npu issue；**不 workaround**（P1）。在 `docs/upstream-tracking.md` 链接。若上游有等价实现能绕开缺失的 op（如 varlen 替代 flex、实数 RoPE 替代复数 RoPE），那是 L1 override，不是 workaround。
+   - **TT / TORCH** → 先确认 NIGHTLY 上存在（P8）；存在则记入 `docs/issues/` + `patches/evidence/`（不提上游，P10），必要时包装型/polyfill shim（skill `shim-authoring`）。
+   - **NPU / NPU-OP** → skill `torch-npu-fix`（P9：复现 → 修 torch_npu/op-plugin → 构建 → 验证 → gitcode issue + PR）；**不 workaround**（P1）。L1 override 只能作为性能项，不能作为掩盖 NPU 缺陷的手段（P12）。
    - **CANN** → 记录错误码；不再投入。
    - **DEP** → 记录包名；若是内核，昇腾替代是 M3+ 任务。
 

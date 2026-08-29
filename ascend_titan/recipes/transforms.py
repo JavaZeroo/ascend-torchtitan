@@ -1,5 +1,8 @@
 """Config-tree transforms that turn an upstream recipe into an NPU-runnable one.
 
+Every delta here must name the issue that makes it necessary and disappear by feature
+detection once the fix is present (P12: the goal state is the identity transform).
+
 ``npu_baseline`` is the M1 delta set applied generically (by traversal, not by
 rebuilding the model spec), so any upstream recipe — including the 57 upstream
 integration-test configs — can be measured on NPU with the *same* baseline.
@@ -12,7 +15,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from torchtitan.components.loss import ChunkedLossWrapper
 from torchtitan.models.common.attention import FlexAttention, VarlenAttention
 from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.rope import ComplexRoPE
@@ -35,7 +37,6 @@ class Applied:
     rope_override: bool = False
     rms_norm_override: bool = False
     spmd_backend: str | None = None
-    chunked_loss_unwrapped: bool = False
     notes: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -50,9 +51,15 @@ class Applied:
             parts.append("override:npu_rms_norm")
         if self.spmd_backend:
             parts.append(f"spmd_backend:{self.spmd_backend}")
-        if self.chunked_loss_unwrapped:
-            parts.append("loss:chunked->inner")
         return ", ".join(parts) or "no-op"
+
+
+def _torch_fsdp_reads_spmd_types() -> bool:
+    """True when torch's FSDP2 builds DTensor shards from spmd_types annotations
+    (``torch.distributed._is_spmd_types_available`` exists; nightly >= 2.14.0.dev)."""
+    import torch.distributed as dist
+
+    return hasattr(dist, "_is_spmd_types_available")
 
 
 def npu_baseline(config: Trainer.Config) -> Applied:
@@ -97,18 +104,22 @@ def npu_baseline(config: Trainer.Config) -> Applied:
         config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
     a.rms_norm_override = has_rms
 
-    # 3. spmd_types requires DTensor params under dp_mesh_dims on NPU (TT-5).
-    if config.parallelism.spmd_backend != "partial_dtensor":
-        config.parallelism.spmd_backend = "partial_dtensor"
-        a.spmd_backend = "partial_dtensor"
-    if getattr(config.debug, "spmd_typechecking", False):
-        config.debug.spmd_typechecking = False
-        a.notes.append("spmd_typechecking off")
+    # 3. spmd_types needs FSDP2 to read spmd_types annotations, which only torch
+    #    nightly (>= 2.14.0.dev) does (TT-5 / TORCH-6: a torch-version gap, not an
+    #    NPU one). Feature-check, like upstream's check_if_feature_in_pytorch: on a
+    #    torch that has the integration the upstream default is left untouched.
+    if not _torch_fsdp_reads_spmd_types():
+        if config.parallelism.spmd_backend != "partial_dtensor":
+            config.parallelism.spmd_backend = "partial_dtensor"
+            a.spmd_backend = "partial_dtensor"
+        if getattr(config.debug, "spmd_typechecking", False):
+            config.debug.spmd_typechecking = False
+            a.notes.append("spmd_typechecking off")
 
-    # 4. ChunkedLossWrapper backward fails on NPU (TT-4): use its inner loss.
-    if isinstance(config.loss, ChunkedLossWrapper.Config):
-        config.loss = config.loss.loss_fn
-        a.chunked_loss_unwrapped = True
+    # (Removed 2026-08-30: the ChunkedLossWrapper backward failure TT-4 does not exist on the
+    #  NIGHTLY track -- torch 2.15.0.dev + torch_npu master, 1 NPU and FSDP2x2 both pass -- and
+    #  unwrapping the loss here was a P1/P9 violation: it worked around a suspected torch_npu
+    #  defect inside the baseline.)
 
     logger.info("[ascend_titan] npu_baseline: %s", a.summary())
     return a

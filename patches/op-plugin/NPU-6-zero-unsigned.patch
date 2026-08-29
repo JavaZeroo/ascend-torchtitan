@@ -1,0 +1,110 @@
+From f61138d648c86f25b35e3971bb8b1302cf7ddf7b Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 01:41:51 +0800
+Subject: [PATCH] fix: zero_ on uint16/uint32/uint64 tensors (aclnnInplaceZero
+ has no unsigned kernel)
+
+torch.zeros(..., dtype=torch.uint64, device="npu") and Tensor.zero_() on the
+unsigned 16/32/64-bit dtypes fail with
+
+  zero_: ... ZerosLikeKernelNpuOpApi.cpp NPU function error: call
+  aclnnInplaceZero failed, error code is 161002
+
+PyTorch itself creates such tensors: torch.nn.attention.varlen.varlen_attn
+allocates its rng_state placeholder as uint64, so the stock varlen attention
+path cannot run on NPU even when the attention kernel is available.
+
+Zeroing is a pure bit pattern, so for these dtypes zero the same storage
+through the signed dtype of equal width (view(kShort/kInt/kLong)); strides
+and shape are preserved by the view, so non-contiguous tensors work too.
+
+Test: test/test_base_ops/test_zero_unsigned.py (zero_, zeros, non-contiguous
+for uint16/uint32/uint64).
+---
+ .../ops/opapi/ZerosLikeKernelNpuOpApi.cpp     | 24 +++++++++++++
+ test/test_base_ops/test_zero_unsigned.py      | 36 +++++++++++++++++++
+ 2 files changed, 60 insertions(+)
+ create mode 100644 test/test_base_ops/test_zero_unsigned.py
+
+diff --git a/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp b/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp
+index d7967d826..b96e7607c 100644
+--- a/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp
++++ b/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp
+@@ -20,8 +20,32 @@
+ namespace op_api {
+ using npu_preparation = at_npu::native::OpPreparation;
+ 
++namespace {
++// aclnnInplaceZero has no kernel for the unsigned 16/32/64-bit dtypes (error 161002).
++// Zeroing is a pure bit pattern, so the same storage is zeroed through the signed
++// dtype of equal width instead.
++c10::optional<at::ScalarType> signed_alias_dtype(at::ScalarType dtype) {
++  switch (dtype) {
++    case at::kUInt16:
++      return at::kShort;
++    case at::kUInt32:
++      return at::kInt;
++    case at::kUInt64:
++      return at::kLong;
++    default:
++      return c10::nullopt;
++  }
++}
++} // namespace
++
+ at::Tensor& zero_(at::Tensor& self) {
+   DO_COMPATIBILITY(aclnnInplaceZero, acl_op::zero_(self));
++  const auto alias_dtype = signed_alias_dtype(self.scalar_type());
++  if (alias_dtype.has_value()) {
++    at::Tensor alias = self.view(alias_dtype.value());
++    EXEC_NPU_CMD(aclnnInplaceZero, alias);
++    return self;
++  }
+   EXEC_NPU_CMD(aclnnInplaceZero, self);
+   return self;
+ }
+diff --git a/test/test_base_ops/test_zero_unsigned.py b/test/test_base_ops/test_zero_unsigned.py
+new file mode 100644
+index 000000000..6ca97dc6d
+--- /dev/null
++++ b/test/test_base_ops/test_zero_unsigned.py
+@@ -0,0 +1,36 @@
++import torch
++import torch_npu
++
++from torch_npu.testing.testcase import TestCase, run_tests
++
++
++class TestZeroUnsigned(TestCase):
++    """zero_ / zeros on the unsigned 16/32/64-bit dtypes (aclnnInplaceZero has no kernel for
++    them; op_api::zero_ zeroes the storage through the signed dtype of equal width)."""
++
++    dtypes = [torch.uint16, torch.uint32, torch.uint64]
++
++    def test_zero_(self):
++        for dtype in self.dtypes:
++            # inputs are built on CPU: aclnnInplaceOne / fill_ have no unsigned kernels either
++            npu_input = torch.ones(4, 3, dtype=dtype).npu()
++            npu_input.zero_()
++            self.assertEqual(npu_input.dtype, dtype)
++            self.assertTrue(bool((npu_input.cpu() == 0).all()), msg=str(dtype))
++
++    def test_zeros(self):
++        for dtype in self.dtypes:
++            npu_output = torch.zeros((2, 5), dtype=dtype, device="npu")
++            self.assertEqual(npu_output.dtype, dtype)
++            self.assertEqual(npu_output.shape, torch.Size([2, 5]))
++            self.assertTrue(bool((npu_output.cpu() == 0).all()), msg=str(dtype))
++
++    def test_zero_noncontiguous(self):
++        for dtype in self.dtypes:
++            npu_input = torch.ones(6, 4, dtype=dtype).npu().transpose(0, 1)
++            npu_input.zero_()
++            self.assertTrue(bool((npu_input.cpu() == 0).all()), msg=str(dtype))
++
++
++if __name__ == "__main__":
++    run_tests()
+-- 
+2.43.0
+

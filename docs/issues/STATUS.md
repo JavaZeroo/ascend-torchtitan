@@ -1,40 +1,55 @@
-# 问题处理状态（逐条）
+# 问题处理状态（逐条，唯一事实来源 —— P11）
 
-规则：torchtitan / pytorch 的问题 → 本地补丁（`patches/`）供 review，不提上游；torch_npu 的问题 → 解决并验证后提 issue + PR（`gitcode.com/Ascend/pytorch`）。
-状态：`待确认` · `已确认` · `已修复（本地补丁）` · `已修复（本仓）` · `无需处理` · `阻塞` · `待提交（torch_npu）`
+基线：**NIGHTLY**（torch 2.15.0.dev20260812+cpu + torch_npu master `15514cc70` 源码构建 + torchtitan `13da2d77c`），2026-08-30。
+规则：torch_npu / op-plugin 的问题 → 修复 + UT → `patches/` → 验证 → gitcode issue + PR（P9）；torchtitan / pytorch 的问题**不提上游**（P10），只在 NIGHTLY 仍存在时记录，修复方案存 `patches/evidence/`；只在正式版 torch 上出现的问题**关闭**（P8）。
+状态：`已关闭（版本差）` · `已确认` · `已修复（本地补丁）` · `已修复（本仓）` · `无需处理` · `阻塞` · `已提交 <URL>` · `已合入`
 
-| 编号 | 问题 | 状态 | 方案 / 位置 | 验证 |
+| 编号 | 问题 | 状态 | 方案 / 位置 | NIGHTLY 验证 |
 |---|---|---|---|---|
-| NPU-1 | `_flash_attention_forward` 无 NPU 内核 | 已修复（本地补丁，待提交 torch_npu） | `patches/torch_npu/0003-npu-implement-aten-_flash_attention_forward-_backwar.patch`：`torch_npu/utils/patch_flash_attention.py` 用 `npu_fusion_attention(_grad)` 实现 PrivateUse1 内核（dense/varlen、causal、左窗口、GQA；LSE ↔ 统计量互转） | ✅ stock `varlen_attn` 前向与本仓算子误差 0、梯度 ≤1e-3；**stock VarlenAttention（无任何 override）的 qwen3 10 步 🟢，loss 5.10302 vs golden 5.10304**（配合 TORCH-8） |
-| NPU-2 | fake 进程组未注册 `npu` | 已修复（本地补丁，待提交 torch_npu） | `patches/torch_npu/0001-distributed-register-npu-with-the-fake-process-group-backend.patch`（3 行，`_init/registry/distributed.py`） | ✅ 在已安装的 torch_npu 2.13.0rc1 上应用后 `--comm.mode=fake_backend` 干跑 exit=0 |
-| NPU-3 | 复数张量高级索引失败（aclnnIndex 161002） | 已修复（本地补丁，待提交 torch_npu） | `patches/torch_npu/0001-npu-support-advanced-indexing-on-complex-tensors-via-the-real-view.patch`（`Tensor.__getitem__` 经 `view_as_real` 路由；长期解法仍是 aclnnIndex 原生支持 complex） | ✅ 所有索引形式与 CPU 一致；**stock ComplexRoPE 的 llama3（不用 RoPE override）10 步 🟢** |
+| NPU-1 | `_flash_attention_forward/_backward` 无 NPU 内核 | 已修复（本地补丁） | `patches/torch_npu/NPU-1-flash-attention-privateuse1.patch`（`torch_npu/utils/patch_flash_attention.py` + UT） | 复现 ✅（`probe_npu_gaps.py`：`Could not run 'aten::_flash_attention_forward'`）；修复验证：见 §NIGHTLY 第二轮 |
+| NPU-2 | fake 进程组未注册 `npu` | 已修复（本地补丁） | `patches/torch_npu/NPU-2-fake-process-group-npu.patch`（7 行 + UT） | 复现 ✅（`--comm.mode=fake_backend` → `No backend type associated with device type npu`）；修复验证：第二轮 |
+| NPU-3 | 复数张量高级索引失败（aclnnIndex 161002） | 已修复（本地补丁，**op-plugin C++**） | `patches/op-plugin/NPU-3-index-complex.patch`（`op_api::index` 经实数视图 + UT；取代旧的 torch_npu Python 层 `__getitem__` 绕行） | 复现 ✅；修复验证：第二轮 |
+| NPU-6 | uint16/32/64 `zero_` / `zeros` 无内核（aclnnInplaceZero 161002） | 已修复（本地补丁，**op-plugin C++**） | `patches/op-plugin/NPU-6-zero-unsigned.patch`（同宽有符号视图 + UT）；取代 torch 侧的 TORCH-8 补丁 | 复现 ✅；修复验证：第二轮 |
+| NPU-7 | torch_npu inductor `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` | 已修复（本地补丁） | `patches/torch_npu/NPU-7-inductor-make-reduction-strict.patch` | 复现 ✅（stock flex：`LoweringException: TypeError: make_reduction() got an unexpected keyword argument 'strict_reduction'`）；修复验证：第二轮 |
+| NPU-8 | torch_npu 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → `spmd_types` 循环导入 | 已修复（本地补丁） | `patches/torch_npu/NPU-8-dtensor-public-imports.patch` | 复现 ✅（`python -c "import spmd_types"` → `Failed to load the backend extension: torch_npu`）；修复验证：第二轮 |
 | NPU-4 | ArgSort int 回退 AiCpu（性能警告） | 无需处理 | 记录 | — |
-| NPU-6 | uint64 `zero_` 无内核（挡住 stock varlen 的 rng 占位） | 已确认 | op-plugin 侧需支持 uint64；torch 侧本地补丁 TORCH-8 | 见 TORCH-8 |
-| TORCH-8 | `varlen.py` rng_state 占位用 uint64 | 已修复（本地补丁） | `patches/pytorch/0002-TORCH-8-*.patch` | 与 NPU-1 一起验证 |
-| NPU-5 | torch_npu 2.13.0rc1 拉入 attn-gym 0.0.6？ | 待确认 | 查 `pip show torch_npu` Requires | 待做 |
-| TORCH-1 | FlexAttention 设备白名单 | 上游处理中 | torch_npu **main** 已有 `utils/patch_flexattention.py::_patch_flex_attention_device`（2026-08-13），2.13.0rc1 未包含；无需我们再补 torch 侧补丁 | 等 torch_npu 发版后复测 flex |
-| TORCH-2 | fake 后端不可扩展 | 已确认 | 与 NPU-2 一并处理（torch_npu 侧注册即可，无需改 torch） | — |
-| TORCH-3 | `set_timeout` 仅 nightly | 无需处理 | 本仓 polyfill；nightly 已有 | ✅ |
-| TORCH-4 | PP `step(arg_mbs=)` 仅 nightly | 无需处理 | 本仓 shim；nightly 已有 | ✅ |
-| TORCH-5 | 2.12 pipelining `fork_rng` 默认 cuda | 无需处理 | 2.13 已修 | ✅ |
-| TORCH-6 | FSDP2 × spmd_types 仅 nightly | 阻塞 | 等 torch ≥ 2.14 | — |
-| TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已修复（本地补丁） | `patches/pytorch/0001-TORCH-7-*.patch` | 见下方验证记录 |
-| TT-1 | core 无条件 `import triton` | 已修复（本地补丁） | `patches/torchtitan/0004-TT-1-*.patch` | ✅ `sys.modules['triton']=None` 下 `import torchtitan.trainer` 成功；有 triton 时内核不变 |
-| TT-2 | `set_timeout` 无特性检查 | 已修复（本地补丁） | `patches/torchtitan/0002-TT-2-*.patch` | ✅ 关闭全部 shim，qwen3 golden 在 2.12/2.13 逐位匹配 |
-| TT-3 | `separate_full_blocks` 仅 nightly | 无需处理 | 2.13 已有 | ✅ |
-| TT-4 | ChunkedLossWrapper backward "not allocated" | 部分归因 | C++ 栈：`libtorch_npu.so: add_param_to_buf(at::Tensor)` ← `aten::mul.Tensor` 重分发——torch_npu 的 aclnn 参数缓冲在 backward 的某个 `mul` 上读到了存储已释放（FSDP2 reshard）的张量。单独的 ChunkedLossWrapper（含 FSDP2 包装 lm_head、ws=1）可正常前后向，只有接上完整 decoder 图才失败；`fsdp_reshard_after_forward=never` 无效。倾向归因 NPU（torch_npu 与 FSDP2 存储生命周期的交互），需要 torch_npu 侧看 `add_param_to_buf` | 隔离脚本 `outputs/tt4_isolate*.py` |
-| TT-5 | spmd_types 需 nightly FSDP2 | 阻塞 | 同 TORCH-6 | — |
-| TT-6 | kimi_k3 attn_res 无 Configurable 节点 | 已确认 | 本地补丁：抽成 Module（依赖 TT-11） | 待做 |
+| NPU-5 | torch_npu 2.13.0rc1 拉入 attn-gym 0.0.6？ | 无需处理（RELEASE track 事项） | — | — |
+| TORCH-1 | FlexAttention 设备白名单 | 已确认（torch 侧仍在）；**torch_npu master 已绕开** | torch_npu master `utils/patch_flexattention.py`；NIGHTLY 上 `flex_attention` eager 前反向 ✅。模型级 stock flex 走 `torch.compile` → inductor：NPU-7 + Triton-Ascend（`DEP-INDUCTOR`） | eager ✅；compile 见第二轮 |
+| TORCH-2 | fake 后端不可扩展 | 无需处理 | torch_npu 侧追加即可（NPU-2） | — |
+| TORCH-3 / TORCH-4 | `set_timeout` / PP `step(arg_mbs=)` 仅 nightly | 已关闭（版本差） | NIGHTLY 原生存在；两条 shim 自动 no-op | ✅ `ASCEND_TITAN_SKIP_SHIMS=1` golden 逐位一致 |
+| TORCH-5 | 2.12 pipelining `fork_rng` 默认 cuda | 已关闭（版本差） | — | — |
+| TORCH-6 / TT-5 | FSDP2 × spmd_types 仅 nightly | 已关闭（版本差）；CP 用例复测见第二轮 | `npu_baseline` 第 3 步改为特性探测（`_torch_fsdp_reads_spmd_types`） | 第二轮矩阵子集 |
+| TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已确认（NIGHTLY 仍在） | `patches/evidence/pytorch/0001-TORCH-7-*.patch`；本仓 NPU 测试用数值梯度 | — |
+| TORCH-8 | `varlen.py` rng_state 占位用 uint64 | 已确认（NIGHTLY 仍在）；**昇腾侧由 NPU-6 解决** | `patches/evidence/pytorch/0002-TORCH-8-*.patch` 仅作证据 | — |
+| TT-1 | core 无条件 `import triton` | 已确认（NIGHTLY 仍在） | `constraints/titan-deps.txt` 装纯 Python `triton`；`patches/evidence/torchtitan/0004-TT-1-*.patch` | ✅ import OK |
+| TT-2 / TT-8 / TT-9 | `set_timeout` 无特性检查 / PP `step(arg_mbs=)` 无 fallback / fused_mla 用 `torch.Tag.inplace` | 已关闭（版本差） | 补丁已删除 | ✅ |
+| TT-3 | `separate_full_blocks` 仅 nightly | 已关闭（版本差） | — | — |
+| TT-4 | ChunkedLossWrapper backward "not allocated" | **已关闭（NIGHTLY 不复现）** | `npu_baseline` 不再展开 loss（此前是 P1/P9 违规） | ✅ 单卡 step10 loss 5.10291；FSDP2×2 step10 loss 5.07796（与 CE golden 差 bf16 级） |
+| TT-6 | kimi_k3 attn_res 无 Configurable 节点 | 已确认 | 上游 ask（不提），等 kimi_k3 稳定 | — |
 | TT-7 | LM 移除 sdpa | 无需处理 | override 机制已覆盖 | ✅ |
-| TT-8 | PP `step(arg_mbs=)` 无 fallback | 已修复（本地补丁） | `patches/torchtitan/0003-TT-8-*.patch` | ✅ 关闭全部 shim，NEXT 上 `pp_1f1b` 🟢 |
-| TT-9 | fused_mla 用 nightly-only `torch.Tag.inplace` | 已修复（本地补丁） | `patches/torchtitan/0001-TT-9-*.patch` | 模块可导入（该 override 的内核仍是 CUDA-only） |
-| TT-10 | 树内 Triton override / DistMuon 写死 CUDA | 无需处理 | 上游按设计 CUDA-only；昇腾替代在 L1 | ✅（swiglu 已替代） |
-| TT-11 | kimi_k3 导入需要 `cutlass` | 已修复（本地补丁） | `patches/torchtitan/0005-TT-11-*.patch`：`kda.py` 的 short_conv 导入加 try/except，缺 cutlass 时用纯 torch 的按文档 depthwise 因果卷积回退（chunk_kda 走 attn_gym 自带的 naive 回退） | ✅ 无 cutlass 环境 `import torchtitan.models.kimi_k3` 成功；回退卷积与参考逐元素一致 |
-| OURS-1 | attention host offsets D2H | 已修复（本仓） | 已移入 custom_op 内部；每步一次 D2H 仍在 | — |
+| TT-10 | 树内 Triton override / DistMuon 写死 CUDA | 无需处理 | 昇腾替代在 L1 | ✅（swiglu 已替代） |
+| TT-11 | kimi_k3 导入需要 `cutlass` | 已确认（NIGHTLY 仍在；DEP） | `patches/evidence/torchtitan/0005-TT-11-*.patch`；不提上游 ⇒ kimi_k3 保持 🔴 | — |
+| OURS-1 | attention host offsets D2H | 已修复（本仓） | custom_op 内部；每步一次 D2H 仍在 | — |
 | OURS-2/4/8/9 | LSE / provenance / compile graph break / override 冲突 | 已修复（本仓） | 见 CHANGELOG | ✅ |
 | OURS-3 | 滑窗 `sparse_mode=4` 未测 | 待确认 | 补 NPU 测试 | 待做 |
 | OURS-5 | 未与 GPU golden 对比 | 阻塞 | 需 GPU 机器 | — |
-| OURS-6 | issue 未提交 | 按新规则关闭 | torchtitan/pytorch 不提；torch_npu 待修复后提 | — |
-| OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | 归因 HARNESS | — |
-| OURS-10 | gpt_oss × TP | 已确认 | 排查中 | 待做 |
-| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 进行中 | wheel：`pip install triton-ascend==3.2.2 --extra-index-url https://triton-ascend.osinfra.cn/pypi/simple`（它自带完整 triton 3.5 发行版，**不能再装 PyPI 的 triton**）。已装到隔离 venv `/opt/venv_ta`。发现 torch_npu **2.13.0rc1** 的 `_inductor/runtime/triton_helpers.py:12` 只认 `tl.extra.ascend`，而 triton-ascend 3.2.2 提供的是 `tl.extra.cann`；torch_npu main / `v26.2.0-beta.1-pytorch2.13.0` 已改为先试 cann 再回退 ascend（无需我们写补丁，等新版 torch_npu 发布）。 | 用 main 的 triton_helpers.py 覆盖 venv_ta 后复测 compile / kimi_k3 |
+| OURS-6 | issue 未提交 | 进行中 | torch_npu / op-plugin 六项按 P9 提交；torchtitan / pytorch 按 P10 不提 | — |
+| OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | HARNESS | — |
+| OURS-10 | gpt_oss × TP | 已确认 | 排查中（NIGHTLY 上复测待做） | 待做 |
+| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 进行中 | `constraints/npu-triton.txt` → 待改 `extras/triton.txt`；torch_npu master 已先试 `tl.extra.cann` | 待做 |
+| OURS-12 | **`npu_baseline` 违反 P1/P9**：展开 ChunkedLossWrapper（TT-4）、性能 override 混入 baseline | 部分修复 | TT-4 展开已删除；`npu_rms_norm` 移出 baseline 待做（P12） | — |
+| OURS-13 | 矩阵工具在 `setup()` 之前导入 torchtitan（F4 顺序），暴露了 NPU-8 | 已确认 | NPU-8 修复后可运行；工具本身也应先 `setup()`（待做） | 第二轮 |
+
+## NIGHTLY 修复验证（含六个补丁的 torch_npu 构建，2026-08-30）
+
+| 检查 | 结果 |
+|---|---|
+| `tests/repro/probe_npu_gaps.py` | NPU-1 / NPU-2（列表）/ NPU-3 / NPU-6 `[OK ]`；`_flash_attention_forward` PrivateUse1 = True；flex eager OK；TT-4 OK |
+| stock varlen（qwen3，零 override）10 步 | 🟢 loss 5.10302 / grad_norm 3.3060 |
+| stock llama3（`ascend_titan.recipes.stock`，零 override：stock ComplexRoPE + ChunkedLoss + spmd_types）10 步 | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
+| `import torch` 不再拖入 fsdp/checkpoint；`import spmd_types` 先行 | 🟢（NPU-8） |
+| 矩阵工具可运行；`pp_1f1b` | 🟢（无 shim） |
+| `cp` / `fsdp+cp` / `deepseek_v3_fused_mla_swiglu` | 🔴 DEP-INDUCTOR（Triton-Ascend） |
+| stock flex 模型级 | lowering 通过（NPU-7）→ `0 active drivers`：DEP-INDUCTOR |
+| UT：`test_autoload.py` / op-plugin `test_index_complex.py` / inductor 签名 | 4 OK / 6 OK / 1 passed |
+| UT：`test_fake_process_group_npu.py` / `test_flash_attention_privateuse1.py` / `test_zero_unsigned.py`；`--comm.mode=fake_backend` | 最终 wheel 结果：FINAL_PENDING |

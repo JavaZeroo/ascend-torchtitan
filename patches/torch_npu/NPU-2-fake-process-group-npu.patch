@@ -1,0 +1,189 @@
+From 0b0afc871c504d41135b348e335d68f98e637e7c Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 02:14:39 +0800
+Subject: [PATCH] fix: let the fake process-group backend accept npu tensors at
+ runtime
+
+torch's in-tree "fake" process-group backend (dry runs without any
+communication) lists cpu/cuda/hpu/xpu as its devices; out-of-tree devices
+have to add themselves. torch_npu only did so inside torch_npu.testing
+(_patch_backend_register_for_npu), i.e. for its own test suite, so any user
+program that runs collectives on npu tensors under a fake process group
+fails at the first collective:
+
+  RuntimeError: No backend type associated with device type npu
+
+(e.g. torchtitan --comm.mode=fake_backend, which simulates N ranks on one
+device, dies in its first broadcast).
+
+Newer torch registers the fake backend lazily through a
+torch.distributed.backends entry point on the first BackendConfig("fake"),
+which overwrites Backend.backend_capability["fake"]; appending "npu" once
+at init is therefore not enough. Apply the same logic torch_npu.testing
+already had, but from the distributed patch group at torch_npu init: wrap
+Backend.register_backend so every (re)registration of "fake" includes
+"npu", and fix up a list that is already registered. torch_npu.testing now
+delegates to the runtime patch.
+
+Test: test/distributed/test_fake_process_group_npu.py runs the check in a
+subprocess that never imports torch_npu.testing.
+---
+ .../test_fake_process_group_npu.py            | 39 ++++++++++++++++++
+ .../_init/patches/distributed_patches.py      | 40 +++++++++++++++++++
+ torch_npu/testing/__init__.py                 | 36 +++--------------
+ 3 files changed, 85 insertions(+), 30 deletions(-)
+ create mode 100644 test/distributed/test_fake_process_group_npu.py
+
+diff --git a/test/distributed/test_fake_process_group_npu.py b/test/distributed/test_fake_process_group_npu.py
+new file mode 100644
+index 000000000..661f43b76
+--- /dev/null
++++ b/test/distributed/test_fake_process_group_npu.py
+@@ -0,0 +1,39 @@
++import subprocess
++import sys
++
++import torch_npu  # noqa: F401
++from torch_npu.testing.testcase import TestCase, run_tests
++
++# torch_npu.testing patches Backend.register_backend for the test suite itself, so the runtime
++# behaviour has to be checked in a subprocess that never imports torch_npu.testing.
++_CHECK = """
++import torch, torch.distributed as dist, torch_npu
++try:
++    from torch.testing._internal.distributed.fake_pg import FakeStore
++except ImportError:
++    from torch._C._distributed_c10d import FakeStore
++dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
++assert "npu" in dist.Backend.backend_capability["fake"], dist.Backend.backend_capability["fake"]
++t = torch.ones(8, device="npu")
++dist.all_reduce(t)          # fake backend: no communication, must not raise
++dist.broadcast(t, src=0)
++out = torch.empty(32, device="npu")
++dist.all_gather_into_tensor(out, t)
++assert dist.get_world_size() == 4
++dist.destroy_process_group()
++print("FAKE_PG_NPU_OK")
++"""
++
++
++class TestFakeProcessGroupNpu(TestCase):
++    """The in-tree "fake" process-group backend (dry runs without real communication) must
++    accept npu tensors at runtime, not only under torch_npu.testing."""
++
++    def test_fake_process_group_accepts_npu_tensors(self):
++        out = subprocess.run([sys.executable, "-c", _CHECK], text=True, capture_output=True)
++        self.assertTrue(out.returncode == 0, out.stderr[-2000:])
++        self.assertTrue("FAKE_PG_NPU_OK" in out.stdout, out.stdout[-500:])
++
++
++if __name__ == "__main__":
++    run_tests()
+diff --git a/torch_npu/_init/patches/distributed_patches.py b/torch_npu/_init/patches/distributed_patches.py
+index 8e0dcb5d7..dc1bbe3bb 100644
+--- a/torch_npu/_init/patches/distributed_patches.py
++++ b/torch_npu/_init/patches/distributed_patches.py
+@@ -127,6 +127,45 @@ def _apply_wrapped_functions(torch, torch_npu):
+     )
+ 
+ 
++def _apply_fake_backend_device_patch(torch):
++    """
++    Let torch's in-tree "fake" process-group backend accept npu tensors.
++
++    torch lists cpu/cuda/hpu/xpu for the fake backend; out-of-tree devices
++    have to add themselves, otherwise any collective on an npu tensor under a
++    fake process group (dry runs without communication) fails with
++    "No backend type associated with device type npu". Newer torch registers
++    the fake backend lazily (entry point, first BackendConfig("fake")), which
++    overwrites Backend.backend_capability["fake"], so appending once at init is
++    not enough: wrap Backend.register_backend so every (re)registration of
++    "fake" includes "npu", and fix up a list that is already there. Until now
++    torch_npu did this only inside torch_npu.testing, i.e. for its own tests.
++    """
++    Backend = torch.distributed.Backend
++    if getattr(Backend.register_backend, "_npu_fake_device_patched", False):
++        return
++    _original_register_backend = Backend.register_backend.__func__
++
++    @classmethod
++    def _register_backend(cls, name, func, extended_api=False, devices=None, **kwargs):
++        if devices is not None and str(name).lower() == "fake":
++            devices = [devices] if isinstance(devices, str) else list(devices)
++            if "npu" not in devices:
++                devices.append("npu")
++        # **kwargs forwards keyword-only parameters that newer torch adds
++        # (e.g. _backend_type); caller and original are the same torch version.
++        return _original_register_backend(
++            cls, name, func, extended_api=extended_api, devices=devices, **kwargs
++        )
++
++    _register_backend.__func__._npu_fake_device_patched = True
++    Backend.register_backend = _register_backend
++
++    devices = Backend.backend_capability.get("fake")
++    if devices is not None and "npu" not in devices:
++        devices.append("npu")
++
++
+ def _apply_sharded_grad_scaler_patch(torch):
+     """
+     Replace PyTorch FSDP ShardedGradScaler with torch_npu implementation.
+@@ -154,5 +193,6 @@ def apply_distributed_methods_patch():
+     """
+     _apply_internal_replacements(torch, torch_npu)
+     _apply_public_api_aliases(torch, torch_npu)
++    _apply_fake_backend_device_patch(torch)
+     _apply_sharded_grad_scaler_patch(torch)
+     _apply_wrapped_functions(torch, torch_npu)
+diff --git a/torch_npu/testing/__init__.py b/torch_npu/testing/__init__.py
+index 3007c1cff..7226a6145 100644
+--- a/torch_npu/testing/__init__.py
++++ b/torch_npu/testing/__init__.py
+@@ -210,37 +210,13 @@ def _test_for_npu():
+ 
+ def _patch_backend_register_for_npu():
+     """
+-    Patch Backend.register_backend to automatically add 'npu' device support
+-    for 'fake' backend. This ensures compatibility with PyTorch's
+-    testing infrastructure (e.g., fake process group) without modifying PyTorch source.
++    'npu' support for the 'fake' backend is applied at torch_npu init
++    (torch_npu._init.patches.distributed_patches._apply_fake_backend_device_patch);
++    kept as a no-op entry point for existing callers.
+     """
+-    Backend = torch.distributed.Backend
+-    _original_register_backend = Backend.register_backend.__func__
+-
+-    @classmethod
+-    def _patched_register_backend(cls, backend_name, func, extended_api=False, devices=None,
+-                                  **kwargs):
+-        if devices is not None:
+-            if isinstance(devices, str):
+-                devices = [devices]
+-            else:
+-                devices = list(devices)
+-            if backend_name == 'fake' and 'npu' not in devices:
+-                devices.append('npu')
+-        # Forward any extra keyword arguments (e.g. torch 2.14's `_backend_type`) untouched.
+-        # Using **kwargs keeps this patch compatible across torch versions that add or drop
+-        # register_backend parameters: caller and original are the same torch version, so the
+-        # forwarded kwargs always match the original's signature (2.13 passes none, 2.14 passes
+-        # _backend_type).
+-        return _original_register_backend(cls, backend_name, func, extended_api=extended_api,
+-                                          devices=devices, **kwargs)
+-
+-    Backend.register_backend = _patched_register_backend
+-
+-    # Also patch already registered 'fake' backend that not support 'npu'
+-    for backend_name, supported_devices in Backend.backend_capability.items():
+-        if backend_name == 'fake' and 'npu' not in supported_devices:
+-            Backend.backend_capability[backend_name].append('npu')
++    from torch_npu._init.patches.distributed_patches import _apply_fake_backend_device_patch
++
++    _apply_fake_backend_device_patch(torch)
+ 
+ 
+ def _apply_test_patchs():
+-- 
+2.43.0
+

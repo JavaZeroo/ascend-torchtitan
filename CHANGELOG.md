@@ -3,6 +3,15 @@
 所有值得记录的变更都在这里。格式：[Keep a Changelog](https://keepachangelog.com/)；0.1.0 之后遵循 SemVer。
 
 ## [Unreleased]
+### 变更（2026-08-30，nightly-first，ADR-006）
+- **基线改为 NIGHTLY**：torch 2.15.0.dev20260812（torch_npu master 钉的日期）+ torch_npu master 源码构建（`scripts/build_torch_npu.sh`，`constraints/torch_npu.sha`）+ torchtitan `13da2d77c`。`constraints/nightly.txt` 成为默认；`install.sh` 识别 `.dev` pin 走 nightly index 与本地 torch_npu wheel。NIGHTLY 上 `ASCEND_TITAN_SKIP_SHIMS=1` 的 golden（单卡 / FSDP2×2）与 2.13 golden 逐位一致。
+- 架构评审 `docs/design/2026-08-30-architecture-review.md`；原则 P8–P13（`docs/PRINCIPLES.md`）；`CLAUDE.md` 重写为 nightly-first 工作流。
+- `npu_baseline`：spmd_types 步骤改为特性探测（nightly 保留上游默认）；**删除 ChunkedLossWrapper 展开**（TT-4 在 NIGHTLY 不复现；此前是 P1 违规）。
+- `patches/` 重组：`torch_npu/`、`op-plugin/` = 在途修复（须带 PR 链接），`evidence/` = torchtitan / pytorch 只读证据；删除版本差补丁 TT-2 / TT-8 / TT-9。
+- torch_npu / op-plugin 修复（含 UT，NIGHTLY 验证）：NPU-1 `_flash_attention_forward/_backward` PrivateUse1 内核、NPU-2 fake 进程组、NPU-3 复数索引（op-plugin C++）、NPU-6 uint16/32/64 `zero_`（op-plugin C++）、NPU-7 inductor `make_reduction` 签名、NPU-8 DTensor 公开导入（spmd_types 循环导入）。
+- `ascend_titan/recipes/stock.py`（零 override 的上游 llama3 配置）、`tests/repro/`（最小复现 / 探测脚本）。
+- 文档：`docs/issues/STATUS.md` 成为唯一状态来源；`baseline.md`、`upstream-tracking.md`、`capability-matrix.md`、ADR-003 / 设计文档 §4 更正"torch_npu 面向正式版"的错误前提。
+
 ### 新增（M3，进行中）
 - `kernels/swiglu.py`：复用上游 `FusedSwiGLU`（融合 w13、TP 交错布局、checkpoint hook），激活换成 `torch_npu.npu_swiglu`；`kernels/rope.py` 新增 `npu_rotary_cossin`（CosSinRoPE 旋转用 `npu_rotary_mul`），ComplexRoPE 在 NPU 上也走该内核。
 - `qwen3_debugmodel_npu_fused`：RMSNorm + SwiGLU + rotary 三个零构建融合内核，**tps 55k → 77k（+40%）**，显存 2.38 → 1.89 GiB。

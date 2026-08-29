@@ -1,0 +1,244 @@
+From ec6cec05c852454287d79313c113fbb3f7f8116a Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 01:42:39 +0800
+Subject: [PATCH] fix: keep torch.distributed.checkpoint/fsdp out of
+ torch_npu's import footprint
+
+torch_npu is imported from inside `import torch` (device-backend autoload),
+so every module it imports at init time is imported by every `import torch`.
+Two init-time imports pulled in torch.distributed.checkpoint and
+torch.distributed.fsdp:
+
+1. torch_npu.distributed.tensor imported register_sharding / placement
+   types from torch.distributed._tensor, the deprecated alias package whose
+   __init__ imports _shards_wrapper -> torch.distributed.checkpoint -> fsdp.
+2. the distributed patch group imported torch.distributed.fsdp.sharded_grad_scaler
+   eagerly to replace ShardedGradScaler.
+
+On torch >= 2.14 nightly, fsdp's _fsdp_state imports the third-party
+spmd_types package at module level. A program whose first torch import
+happens *from inside spmd_types* (e.g. `import spmd_types` before
+`import torch`, as torchtitan does) then fails with
+
+  RuntimeError: Failed to load the backend extension: torch_npu
+  AttributeError: partially initialized module 'spmd_types' has no
+  attribute 'register_local_autograd_function' (most likely due to a
+  circular import)
+
+Fixes:
+- use the public modules (torch.distributed.tensor,
+  torch.distributed.tensor.experimental, torch.distributed.tensor._dtensor_spec),
+  which do not pull the checkpoint/fsdp chain; the names exist on every
+  torch line this tree supports.
+- defer the ShardedGradScaler replacement until the user imports
+  torch.distributed.fsdp.sharded_grad_scaler (new helper
+  torch_npu/utils/_import_hooks.py::run_after_import, a meta-path
+  post-import hook; the patch still applies the first time the module is
+  imported from anywhere).
+
+Test: test/test_autoload.py::AutoloadImportFootprintTest asserts that
+`import torch` (with autoload) does not load torch.distributed.checkpoint
+or torch.distributed.fsdp, and that ShardedGradScaler is still replaced
+once the module is imported.
+---
+ test/test_autoload.py                         | 23 ++++++
+ .../_init/patches/distributed_patches.py      | 13 +++-
+ torch_npu/distributed/tensor/_attention.py    |  4 +-
+ torch_npu/distributed/tensor/_matrix_ops.py   |  2 +-
+ torch_npu/distributed/tensor/_moe_ops.py      |  4 +-
+ torch_npu/utils/_import_hooks.py              | 77 +++++++++++++++++++
+ 6 files changed, 115 insertions(+), 8 deletions(-)
+ create mode 100644 torch_npu/utils/_import_hooks.py
+
+diff --git a/test/test_autoload.py b/test/test_autoload.py
+index b7914a96a..157559c2e 100644
+--- a/test/test_autoload.py
++++ b/test/test_autoload.py
+@@ -1,5 +1,6 @@
+ # Owner(s): ["module: unknown"]
+ 
++import subprocess
+ import sys
+ import unittest
+ 
+@@ -43,5 +44,27 @@ class AutoloadTest(TestCase):
+         self.assertTupleEqual(outputs.shape, (64, 2))
+ 
+ 
++class AutoloadImportFootprintTest(TestCase):
++    """torch_npu is imported from inside `import torch` (device-backend autoload). Anything it
++    imports eagerly is therefore imported by every `import torch`; in particular it must not pull
++    torch.distributed.checkpoint / fsdp, which themselves import third-party packages (spmd_types)
++    at module level -- a package that does `import torch` at its own top level then dies with
++    "partially initialized module 'spmd_types' ... (most likely due to a circular import)".
++    torch.distributed._tensor (the deprecated alias) drags that chain in; the public
++    torch.distributed.tensor modules do not."""
++
++    @unittest.skipIf(not AUTO_LOAD, "requires device backend autoload")
++    def test_import_torch_does_not_load_checkpoint_or_fsdp(self):
++        code = (
++            "import sys, torch\n"
++            "assert 'torch_npu' in sys.modules, 'torch_npu was not autoloaded'\n"
++            "bad = [m for m in ('torch.distributed.checkpoint', 'torch.distributed.fsdp') if m in sys.modules]\n"
++            "assert not bad, f'import torch loaded {bad} through torch_npu'\n"
++            "import torch.distributed.fsdp.sharded_grad_scaler as s\n"
++            "assert s.ShardedGradScaler.__module__.startswith('torch_npu'), s.ShardedGradScaler\n"
++        )
++        subprocess.run([sys.executable, "-c", code], check=True)
++
++
+ if __name__ == "__main__":
+     run_tests()
+diff --git a/torch_npu/_init/patches/distributed_patches.py b/torch_npu/_init/patches/distributed_patches.py
+index 8e0dcb5d7..479cd3505 100644
+--- a/torch_npu/_init/patches/distributed_patches.py
++++ b/torch_npu/_init/patches/distributed_patches.py
+@@ -135,11 +135,18 @@ def _apply_sharded_grad_scaler_patch(torch):
+         torch.distributed.fsdp.sharded_grad_scaler.ShardedGradScaler
+             -> torch_npu.npu.amp.sharded_grad_scaler._ShardedGradScaler
+     """
+-    from torch.distributed.fsdp import sharded_grad_scaler
++    from torch_npu.utils._import_hooks import run_after_import
+ 
+-    from torch_npu.npu.amp.sharded_grad_scaler import _ShardedGradScaler
++    def _patch(sharded_grad_scaler):
++        from torch_npu.npu.amp.sharded_grad_scaler import _ShardedGradScaler
+ 
+-    sharded_grad_scaler.ShardedGradScaler = _ShardedGradScaler
++        sharded_grad_scaler.ShardedGradScaler = _ShardedGradScaler
++
++    # Deferred until the user imports the module: importing torch.distributed.fsdp here
++    # would make every `import torch` (which autoloads torch_npu) import fsdp, and on
++    # torch >= 2.14 fsdp imports the third-party spmd_types package at module level
++    # (circular import for programs whose first `import torch` comes from spmd_types).
++    run_after_import("torch.distributed.fsdp.sharded_grad_scaler", _patch)
+ 
+ 
+ @PatchManager.register_patch("distributed")
+diff --git a/torch_npu/distributed/tensor/_attention.py b/torch_npu/distributed/tensor/_attention.py
+index 7649d9e28..807fb1e9f 100644
+--- a/torch_npu/distributed/tensor/_attention.py
++++ b/torch_npu/distributed/tensor/_attention.py
+@@ -3,8 +3,8 @@ from typing import cast, Any, Dict, Tuple
+ 
+ import torch
+ from torch.distributed.device_mesh import DeviceMesh
+-from torch.distributed._tensor.experimental import register_sharding
+-from torch.distributed._tensor.placement_types import DTensorSpec
++from torch.distributed.tensor.experimental import register_sharding
++from torch.distributed.tensor._dtensor_spec import DTensorSpec
+ from torch.distributed.tensor import DTensor, Replicate, Shard
+ from torch.distributed.tensor._op_schema import (
+     OpInfo,
+diff --git a/torch_npu/distributed/tensor/_matrix_ops.py b/torch_npu/distributed/tensor/_matrix_ops.py
+index 7c66adb2e..84da138b4 100644
+--- a/torch_npu/distributed/tensor/_matrix_ops.py
++++ b/torch_npu/distributed/tensor/_matrix_ops.py
+@@ -2,7 +2,7 @@ from typing import cast, Dict, List, Optional, Tuple, Union
+ import os
+ 
+ import torch
+-from torch.distributed._tensor.experimental import register_sharding
++from torch.distributed.tensor.experimental import register_sharding
+ from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+ from torch_npu._compat.distributed import _mm_like_strategy
+diff --git a/torch_npu/distributed/tensor/_moe_ops.py b/torch_npu/distributed/tensor/_moe_ops.py
+index 481862266..c49c5ae5c 100644
+--- a/torch_npu/distributed/tensor/_moe_ops.py
++++ b/torch_npu/distributed/tensor/_moe_ops.py
+@@ -1,6 +1,6 @@
+ import torch
+-from torch.distributed._tensor import Partial, Replicate, Shard
+-from torch.distributed._tensor.experimental import register_sharding
++from torch.distributed.tensor import Partial, Replicate, Shard
++from torch.distributed.tensor.experimental import register_sharding
+ 
+ npu = torch.ops.npu
+ 
+diff --git a/torch_npu/utils/_import_hooks.py b/torch_npu/utils/_import_hooks.py
+new file mode 100644
+index 000000000..669d94908
+--- /dev/null
++++ b/torch_npu/utils/_import_hooks.py
+@@ -0,0 +1,77 @@
++"""Run a callback right after a module finishes importing, without importing it eagerly.
++
++torch_npu is imported from inside ``import torch`` (device-backend autoload), so anything it
++imports at init time is imported by every ``import torch``. Patches that target modules such as
++``torch.distributed.fsdp.sharded_grad_scaler`` must therefore wait for the *user* to import
++those modules instead of pulling them in themselves.
++"""
++
++import importlib.abc
++import importlib.machinery
++import sys
++from typing import Callable, Dict, List
++
++
++class _PostImportLoader(importlib.abc.Loader):
++    """Loader wrapper that runs callbacks after the wrapped loader executed the module."""
++
++    def __init__(self, loader, callbacks: List[Callable]):
++        self._loader = loader
++        self._callbacks = callbacks
++
++    def create_module(self, spec):
++        create = getattr(self._loader, "create_module", None)
++        return create(spec) if create is not None else None
++
++    def exec_module(self, module):
++        self._loader.exec_module(module)
++        for callback in self._callbacks:
++            callback(module)
++
++    def __getattr__(self, name):  # delegate get_code / is_package / ... to the real loader
++        return getattr(self._loader, name)
++
++
++class _PostImportFinder(importlib.abc.MetaPathFinder):
++    """Meta-path finder that decorates the real spec of registered modules."""
++
++    def __init__(self):
++        self._hooks: Dict[str, List[Callable]] = {}
++
++    def register(self, module_name: str, callback: Callable):
++        self._hooks.setdefault(module_name, []).append(callback)
++
++    def find_spec(self, fullname, path, target=None):
++        callbacks = self._hooks.get(fullname)
++        if not callbacks:
++            return None
++        for finder in sys.meta_path:
++            if finder is self:
++                continue
++            find = getattr(finder, "find_spec", None)
++            if find is None:
++                continue
++            spec = find(fullname, path, target)
++            if spec is not None and spec.loader is not None:
++                del self._hooks[fullname]
++                spec.loader = _PostImportLoader(spec.loader, callbacks)
++                return spec
++        return None
++
++
++_finder = _PostImportFinder()
++
++
++def run_after_import(module_name: str, callback: Callable) -> None:
++    """Call ``callback(module)`` once ``module_name`` has been imported.
++
++    If the module is already imported the callback runs immediately; otherwise it runs right
++    after the module body executes, from whichever import statement pulls it in first.
++    """
++    module = sys.modules.get(module_name)
++    if module is not None:
++        callback(module)
++        return
++    if _finder not in sys.meta_path:
++        sys.meta_path.insert(0, _finder)
++    _finder.register(module_name, callback)
+-- 
+2.43.0
+

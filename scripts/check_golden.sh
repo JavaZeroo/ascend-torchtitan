@@ -7,7 +7,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CONFIG=${1:?config name}
 MODULE=${MODULE:-ascend_titan.recipes.qwen3}
-TUPLE=$(python -c "import importlib.metadata as m; print(f\"torch{m.version('torch').split('+')[0]}_npu{m.version('torch_npu')}\")")
+TUPLE=$(python -c "import importlib.metadata as m; print(f\"torch{m.version('torch').split('+')[0]}_npu{m.version('torch_npu').split('+')[0]}\")")
 GOLDEN="$HERE/tests/assets/losses/npu/${CONFIG}__${TUPLE}.txt"
 OUT=$(mktemp)
 MODULE=$MODULE CONFIG=$CONFIG "$HERE/scripts/run_train.sh" --debug.seed 42 --debug.deterministic 2>&1 \

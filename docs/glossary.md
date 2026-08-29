@@ -8,7 +8,7 @@
 | **pinned SHA** | `constraints/torchtitan.sha` 里的 torchtitan commit。 | torchtitan 的 PyPI release（已陈旧）。 |
 | **matrix / 矩阵** | `docs/capability-matrix.md`，每格三态。 | 上游 CI 的用例列表。 |
 | **provenance** | 一次运行中每个可 override 节点*实际生效的后端*表。 | override 的日志行（那只是它的输入之一）。 |
-| **NEXT / STABLE** | 两套已验证的版本元组（`constraints/npu.txt`、`constraints/npu-stable.txt`）。 | torchtitan 自己的 nightly/stable wheel。 |
+| **NIGHTLY / RELEASE** | NIGHTLY = torch nightly + torch_npu master 源码构建 + torchtitan main（`constraints/nightly.txt` + 两个 `.sha`，唯一门禁）；RELEASE = PyPI torch_npu 发布版（`constraints/npu.txt`，信息性）。旧的 NEXT/STABLE 已废弃。 | torchtitan 自己的 nightly/stable wheel。 |
 | **golden** | `tests/assets/losses/npu/` 里冻结的确定性 loss/grad_norm 曲线，由 `scripts/check_golden.sh` 校验。 | 上游的 `tests/assets/losses/*_a10g.txt`（GPU，配置不同）。 |
 | **L0–L4** | compat / kernels / parallel+graph / recipes / tools。见设计文档。 | |
 | **M0–M5** | 里程碑。见 docs/roadmap.md。 | |

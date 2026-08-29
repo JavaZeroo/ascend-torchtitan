@@ -30,6 +30,14 @@ def test_parse_cards():
     assert parse_cards("0-3,6") == [0, 1, 2, 3, 6]
 
 
+def _expected_spmd_backend() -> str:
+    """npu_baseline only forces partial_dtensor on a torch whose FSDP2 cannot read
+    spmd_types annotations (torch <= 2.13); nightly keeps the upstream default."""
+    from ascend_titan.recipes.transforms import _torch_fsdp_reads_spmd_types
+
+    return "spmd_types" if _torch_fsdp_reads_spmd_types() else "partial_dtensor"
+
+
 @pytest.mark.titan
 def test_npu_baseline_transform_on_upstream_recipes():
     from torchtitan.components.loss import ChunkedLossWrapper
@@ -47,8 +55,9 @@ def test_npu_baseline_transform_on_upstream_recipes():
     assert ATTENTION_OVERRIDE in cfg.override.imports
     assert "ascend_titan.kernels.rope.real_cache_rope" in cfg.override.imports
     assert "ascend_titan.kernels.rms_norm.npu_rms_norm" in cfg.override.imports
-    assert cfg.parallelism.spmd_backend == "partial_dtensor"
-    assert not isinstance(cfg.loss, ChunkedLossWrapper.Config)
+    assert cfg.parallelism.spmd_backend == _expected_spmd_backend()
+    # TT-4 is gone on the NIGHTLY track; the upstream default loss wrapper stays in place.
+    assert isinstance(cfg.loss, ChunkedLossWrapper.Config)
     # idempotent
     b = npu_baseline(cfg)
     assert b.flex_to_varlen == 0 and cfg.override.imports.count(ATTENTION_OVERRIDE) == 1
@@ -60,7 +69,7 @@ def test_matrix_module_resolves_upstream_recipe():
 
     fn = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel")
     cfg = fn()
-    assert cfg.parallelism.spmd_backend == "partial_dtensor"
+    assert cfg.parallelism.spmd_backend == _expected_spmd_backend()
     stock = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel__stock")()
     assert stock.override.imports == []
     with pytest.raises(AttributeError):

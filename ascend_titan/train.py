@@ -8,7 +8,9 @@ runs first. That ordering is the whole point of this file (see _bootstrap.py).
 def main() -> None:
     import ascend_titan
 
-    ascend_titan.setup()
+    # A training entry without a device backend is a broken environment, not a degraded
+    # one (ADR-004 covers kernel dependencies, not the backend): fail here, loudly.
+    ascend_titan.setup(require_npu=True)
 
     # Imported only now, after setup(): torchtitan freezes device_type on import.
     from torchtitan.train import main as titan_main

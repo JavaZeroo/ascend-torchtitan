@@ -1,33 +1,147 @@
-From a77e608fea260028047d020a0b7ba17bf412332a Mon Sep 17 00:00:00 2001
-From: ascend-torchtitan <jimmy.eyjc@gmail.com>
-Date: Sat, 29 Aug 2026 23:45:15 +0800
-Subject: [PATCH] npu: implement aten::_flash_attention_forward/_backward on
+From 0061302aaab56a92f3e07793d78be5626a8791d3 Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 01:44:30 +0800
+Subject: [PATCH] fix: implement aten::_flash_attention_forward/_backward on
  npu_fusion_attention
 
 torch.nn.attention.varlen.varlen_attn (and the SDPA flash path) lower to
-aten::_flash_attention_forward / _backward, which have no PrivateUse1 kernel:
-'NotImplementedError: Could not run aten::_flash_attention_forward ...'.
+aten::_flash_attention_forward / _backward, which have no PrivateUse1
+kernel:
+
+  NotImplementedError: Could not run 'aten::_flash_attention_forward' ...
+
 Callers written against the public flash-attention contract -- e.g.
 torchtitan's VarlenAttention -- therefore cannot run on Ascend.
 
 Register PrivateUse1 implementations backed by npu_fusion_attention /
-npu_fusion_attention_grad: dense (B,S,N,D) and packed varlen (T,N,D) layouts,
-right-aligned causal (sparse_mode 3), left window (sparse_mode 4), GQA. The
-kernel's per-sequence head-major softmax statistics are folded into the aten
-logsumexp layout ((B,N,S) / (N,T)) and expanded back for the backward with
-softmax_sum == 1, which satisfies the kernel's P = exp(S - max) / sum.
-Dropout, alibi, paged KV and seqused_k are rejected explicitly.
+npu_fusion_attention_grad: dense (B,S,N,D) and packed varlen (T,N,D)
+layouts, right-aligned causal (sparse_mode 3), left window (sparse_mode 4),
+GQA. The kernel's per-sequence head-major softmax statistics are folded
+into the aten logsumexp layout ((B,N,S) / (N,T)) and expanded back for the
+backward with softmax_sum == 1, which satisfies the kernel's
+P = exp(S - max) / sum. Dropout, alibi, paged KV and seqused_k are rejected
+explicitly.
 
-Validated on Ascend 910B2 / CANN 9.1.0 (torch 2.13.0 + torch_npu 2.13.0rc1):
-varlen_attn forward and grads match a fp32 SDPA reference per document
-(bf16 tolerance), and torchtitan qwen3 debugmodel with the stock
-VarlenAttention (no override) trains 10 steps.
+Validated on Ascend 910B2 / CANN 9.1.0 with torch 2.15.0.dev20260812 +
+torch_npu master: varlen_attn forward and grads match a fp32 reference per
+document (bf16 tolerance), and torchtitan's stock VarlenAttention model
+trains.
+
+Test: test/npu/test_flash_attention_privateuse1.py (registration, dense
+causal forward vs reference, varlen MHA/GQA forward + backward vs
+reference, unsupported features raise).
 ---
- torch_npu/_init/patches/npu_patches.py   |   7 +
- torch_npu/utils/patch_flash_attention.py | 207 +++++++++++++++++++++++
- 2 files changed, 214 insertions(+)
+ test/npu/test_flash_attention_privateuse1.py |  98 +++++++++
+ torch_npu/_init/patches/npu_patches.py       |   7 +
+ torch_npu/utils/patch_flash_attention.py     | 207 +++++++++++++++++++
+ 3 files changed, 312 insertions(+)
+ create mode 100644 test/npu/test_flash_attention_privateuse1.py
  create mode 100644 torch_npu/utils/patch_flash_attention.py
 
+diff --git a/test/npu/test_flash_attention_privateuse1.py b/test/npu/test_flash_attention_privateuse1.py
+new file mode 100644
+index 000000000..877d49c0b
+--- /dev/null
++++ b/test/npu/test_flash_attention_privateuse1.py
+@@ -0,0 +1,98 @@
++import unittest
++
++import torch
++import torch_npu
++from torch_npu.testing.testcase import TestCase, run_tests
++
++try:
++    from torch.nn.attention.varlen import varlen_attn
++except ImportError:  # torch < 2.10
++    varlen_attn = None
++
++
++def _uint64_zero_supported():
++    try:
++        torch.zeros((2,), dtype=torch.uint64, device="npu")
++        return True
++    except RuntimeError:
++        return False
++
++
++def _ref_causal(q, k, v, scale):
++    """fp32 reference for one (S, N, D) document with right-aligned causal masking; GQA by
++    repeating kv heads. Differentiable (pass CPU leaves to get reference grads).
++    Returns (out (S, N, D), lse (N, S))."""
++    q, k, v = (t.float() for t in (q, k, v))
++    n_q, n_kv = q.shape[1], k.shape[1]
++    if n_q != n_kv:
++        k = k.repeat_interleave(n_q // n_kv, dim=1)
++        v = v.repeat_interleave(n_q // n_kv, dim=1)
++    s = torch.einsum("qnd,knd->nqk", q, k) * scale
++    mask = torch.ones(s.shape[-2], s.shape[-1], dtype=torch.bool).triu(1)
++    s = s.masked_fill(mask, float("-inf"))
++    lse = torch.logsumexp(s, dim=-1)
++    out = torch.einsum("nqk,knd->qnd", torch.softmax(s, dim=-1), v)
++    return out, lse
++
++
++class TestFlashAttentionPrivateUse1(TestCase):
++    """aten::_flash_attention_forward / _backward on NPU (npu_fusion_attention), the ops behind
++    torch.nn.attention.varlen.varlen_attn and the SDPA flash path."""
++
++    def test_kernels_registered(self):
++        has = torch._C._dispatch_has_kernel_for_dispatch_key
++        self.assertTrue(has("aten::_flash_attention_forward", "PrivateUse1"))
++        self.assertTrue(has("aten::_flash_attention_backward", "PrivateUse1"))
++
++    def test_dense_causal_forward(self):
++        torch.manual_seed(0)
++        b, s, n, d = 2, 128, 4, 64
++        q, k, v = (torch.randn(b, s, n, d, dtype=torch.bfloat16, device="npu") for _ in range(3))
++        scale = d ** -0.5
++        out, lse, *_ = torch.ops.aten._flash_attention_forward(
++            q, k, v, None, None, s, s, 0.0, True, False, scale=scale)
++        self.assertEqual(out.shape, (b, s, n, d))
++        self.assertEqual(lse.shape, (b, n, s))
++        for i in range(b):
++            ref_out, ref_lse = _ref_causal(q[i].cpu(), k[i].cpu(), v[i].cpu(), scale)
++            self.assertRtolEqual(out[i].float().cpu().numpy(), ref_out.numpy(), prec=2e-2)
++            self.assertRtolEqual(lse[i].float().cpu().numpy(), ref_lse.numpy(), prec=2e-2)
++
++    @unittest.skipIf(varlen_attn is None, "torch.nn.attention.varlen not available")
++    @unittest.skipIf(not _uint64_zero_supported(), "varlen_attn needs uint64 zero_ on npu")
++    def test_varlen_causal_forward_backward(self):
++        for n_kv in (4, 1):  # MHA and GQA
++            torch.manual_seed(0)
++            lengths = [100, 156]
++            t, n, d = sum(lengths), 4, 64
++            q = torch.randn(t, n, d, dtype=torch.bfloat16, device="npu", requires_grad=True)
++            k = torch.randn(t, n_kv, d, dtype=torch.bfloat16, device="npu", requires_grad=True)
++            v = torch.randn(t, n_kv, d, dtype=torch.bfloat16, device="npu", requires_grad=True)
++            cu = torch.tensor([0, lengths[0], t], dtype=torch.int32, device="npu")
++            out = varlen_attn(q, k, v, cu, cu, max(lengths), max(lengths),
++                              window_size=(-1, 0), enable_gqa=(n_kv != n))
++            grad_out = torch.randn_like(out)
++            out.backward(grad_out)
++
++            qr, kr, vr = (x.detach().float().cpu().requires_grad_(True) for x in (q, k, v))
++            ref_outs = []
++            start = 0
++            for length in lengths:
++                sl = slice(start, start + length)
++                ref_outs.append(_ref_causal(qr[sl], kr[sl], vr[sl], d ** -0.5)[0])
++                start += length
++            ref_out = torch.cat(ref_outs)
++            ref_out.backward(grad_out.float().cpu())
++            self.assertRtolEqual(out.float().cpu().numpy(), ref_out.detach().numpy(), prec=2e-2)
++            for got, ref in ((q.grad, qr.grad), (k.grad, kr.grad), (v.grad, vr.grad)):
++                self.assertRtolEqual(got.float().cpu().numpy(), ref.numpy(), prec=5e-2)
++
++    def test_unsupported_features_raise(self):
++        s, n, d = 32, 2, 64
++        q, k, v = (torch.randn(1, s, n, d, dtype=torch.bfloat16, device="npu") for _ in range(3))
++        with self.assertRaises(NotImplementedError):
++            torch.ops.aten._flash_attention_forward(q, k, v, None, None, s, s, 0.1, True, False)
++
++
++if __name__ == "__main__":
++    run_tests()
 diff --git a/torch_npu/_init/patches/npu_patches.py b/torch_npu/_init/patches/npu_patches.py
 index 578781424..aea3fdf08 100644
 --- a/torch_npu/_init/patches/npu_patches.py
