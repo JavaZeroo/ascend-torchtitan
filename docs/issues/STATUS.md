@@ -29,7 +29,7 @@
 | TT-8 | PP `step(arg_mbs=)` 无 fallback | 已修复（本地补丁） | `patches/torchtitan/0003-TT-8-*.patch` | ✅ 关闭全部 shim，NEXT 上 `pp_1f1b` 🟢 |
 | TT-9 | fused_mla 用 nightly-only `torch.Tag.inplace` | 已修复（本地补丁） | `patches/torchtitan/0001-TT-9-*.patch` | 模块可导入（该 override 的内核仍是 CUDA-only） |
 | TT-10 | 树内 Triton override / DistMuon 写死 CUDA | 无需处理 | 上游按设计 CUDA-only；昇腾替代在 L1 | ✅（swiglu 已替代） |
-| TT-11 | kimi_k3 导入需要 `cutlass` | 已确认 | 本地补丁：kda.py 懒加载 attn_gym 的 cute 路径 | 待做 |
+| TT-11 | kimi_k3 导入需要 `cutlass` | 已修复（本地补丁） | `patches/torchtitan/0005-TT-11-*.patch`：`kda.py` 的 short_conv 导入加 try/except，缺 cutlass 时用纯 torch 的按文档 depthwise 因果卷积回退（chunk_kda 走 attn_gym 自带的 naive 回退） | ✅ 无 cutlass 环境 `import torchtitan.models.kimi_k3` 成功；回退卷积与参考逐元素一致 |
 | OURS-1 | attention host offsets D2H | 已修复（本仓） | 已移入 custom_op 内部；每步一次 D2H 仍在 | — |
 | OURS-2/4/8/9 | LSE / provenance / compile graph break / override 冲突 | 已修复（本仓） | 见 CHANGELOG | ✅ |
 | OURS-3 | 滑窗 `sparse_mode=4` 未测 | 待确认 | 补 NPU 测试 | 待做 |
