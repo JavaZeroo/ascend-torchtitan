@@ -24,3 +24,6 @@
 ## TORCH-7 `torch.library.opcheck` 的 autograd 注册检查只支持 CPU/CUDA/XPU —— `draft`
 - `torch/testing/_internal/optests/autograd_registration.py:89`：`NotImplementedError: autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {'npu'}`。privateuse1 设备的自定义算子无法用 opcheck 完整校验；本仓的 NPU 测试跳过 `test_autograd_registration`，反向用数值对比覆盖。
 - 诉求：把 privateuse1 加入允许的设备集合（检查本身与设备无关）。
+
+## TORCH-8 `varlen_attn` 用 uint64 创建 rng_state 占位张量 —— `本地补丁`
+- `torch/nn/attention/varlen.py`：`rng_state_ = torch.zeros((2,), dtype=torch.uint64, ...)`；该值只是占位（dropout 固定为 0），uint64 在 NPU 上没有 zero_ 内核（NPU-6）。补丁：`patches/pytorch/0002-TORCH-8-varlen-rng_state-int64.patch`。

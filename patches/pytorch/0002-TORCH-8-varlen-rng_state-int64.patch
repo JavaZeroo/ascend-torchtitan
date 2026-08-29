@@ -1,0 +1,31 @@
+From: ascend-torchtitan <maintainers@ascend-torchtitan>
+Subject: [PATCH] TORCH-8: varlen_attn: use int64 for the rng_state placeholder
+
+Problem: torch/nn/attention/varlen.py allocates its dropout rng_state placeholder
+with dtype uint64. uint64 zero-fill has no kernel on Ascend NPU (aclnnInplaceZero:
+"Tensor self not implemented for DT_UINT64"), so varlen_attn fails on NPU even
+once _flash_attention_forward has a PrivateUse1 kernel.
+
+Fix: the placeholder carries no information (dropout_p is hardcoded to 0.0); use
+int64, which every backend implements. Consumers only forward it to the
+backward op, whose NPU kernel ignores it.
+
+Baseline: torch 2.13.0. Validated on Ascend 910B2 with torch_npu 2.13.0rc1 +
+the NPU-1 patch: varlen_attn fwd/bwd match the reference; torchtitan qwen3
+debugmodel with the stock VarlenAttention trains 10 steps.
+---
+--- a/torch/nn/attention/varlen.py	2026-07-03 22:18:38.000000000 +0800
++++ b/torch/nn/attention/varlen.py	2026-08-29 23:50:16.006210460 +0800
+@@ -126,9 +126,9 @@
+             num_splits=num_splits,
+         )
+ 
+-    rng_state_ = torch.zeros(
+-        (2,), dtype=torch.uint64, device=query.device
+-    )  # hardcoded since dropout is hardcoded to 0
++    # int64 rather than uint64: the value is a placeholder (dropout is hardcoded to 0),
++    # and uint64 zero-fill is not implemented by every backend (e.g. Ascend NPU).
++    rng_state_ = torch.zeros((2,), dtype=torch.int64, device=query.device)  # hardcoded since dropout is hardcoded to 0
+     return output, softmax_lse, rng_state_
+ 
+ 

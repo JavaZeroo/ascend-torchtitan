@@ -25,3 +25,7 @@
 
 ## NPU-5 `torch_npu==2.13.0rc1` 传递性地要求 `attn-gym` ≥0.0.6？—— `check`
 - 安装 torch_npu 2.13.0rc1 时拉入了 `attn-gym 0.0.6`，与 torchtitan 的 `==0.0.5` 冲突。需要确认是哪个包要求的；已在 `constraints/titan-deps.txt` 里 pin 回 0.0.5。
+
+## NPU-6 `torch.zeros(dtype=torch.uint64)` / `zero_` 不支持 uint64 —— `draft`
+- `aclnnInplaceZero` 的 dtype 列表不含 `DT_UINT64`（`ZerosLikeKernelNpuOpApi.cpp:26`，错误码 161002 / EZ1001）。
+- 影响：`torch/nn/attention/varlen.py` 用 uint64 创建 rng_state 占位张量，即使有了 NPU-1 的内核，stock `varlen_attn` 仍在这里失败。本仓给 torch 准备了 TORCH-8 补丁（占位改 int64），torch_npu 侧的正解是 op-plugin 的 `zero_`/`fill_` 支持 uint64。
