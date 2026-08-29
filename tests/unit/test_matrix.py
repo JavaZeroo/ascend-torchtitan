@@ -16,6 +16,8 @@ def test_triage_priority_and_unknown():
     )
     assert triage('  File "/x/torch_npu/foo.py", line 1\nRuntimeError: boom')[0] == "NPU"
     assert triage("something\n__TIMEOUT__\n")[0] == "HANG"
+    assert triage("ERR99999 UNKNOWN applicaiton exception\nRuntimeError: x")[0] != "CANN"
+    assert triage("[ERROR] EZ9999 op failed")[0] == "CANN"
     code, note = triage("Traceback\nZeroDivisionError: division by zero")
     assert code == "UNKNOWN" and "ZeroDivisionError" in note
 

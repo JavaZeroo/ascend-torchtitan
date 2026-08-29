@@ -10,6 +10,11 @@ Measured at torchtitan `13da2d77c` (2026-08-29). "nightly-only" = needs a torch 
 - `torchtitan/distributed/utils.py::set_pg_timeouts` (since #3764, 2026-06-27) calls the nightly-only public API after the first train step → `AttributeError` on torch ≤ 2.13.
 - Ask: fall back to `torch.distributed.distributed_c10d._set_pg_timeout` (identical semantics; nightly keeps it as a deprecated alias) or gate with `check_if_feature_in_pytorch`. Polyfilled here (`compat/shims/dist_set_timeout.py`).
 
+## TT-8 `PipelineSchedule.step(arg_mbs=..., kwarg_mbs=..., target_mbs=...)` nightly-only — `draft` <a name="pp-step"></a>
+- `trainer.py::pp_forward_backward_step` passes pre-split microbatches through keyword names that only nightly `step` accepts. Released torch (≤ 2.13) treats them as model kwargs and tries to chunk them → `IndexError: Dimension specified as 0 but tensor has no dimensions` (the 0-dim `global_valid_tokens`). Every PP case in the upstream integration suite is affected.
+- Released torch has `_step_microbatches(arg_mbs, kwarg_mbs, target_mbs, losses, return_outputs, loss_kwargs)` with identical parameters; wrapped here in `compat/shims/pp_step_presplit.py`.
+- Ask: gate on `inspect.signature(schedule.step)` / `check_if_feature_in_pytorch` and fall back to `_step_microbatches`.
+
 ## TT-3 `create_block_mask(separate_full_blocks=...)` nightly-only — `info`
 - `models/common/attention.py::create_attention_mask` since #4106 (2026-08-11). Present in torch 2.13.0, absent in 2.12.x. Moot on NPU while TORCH-1 stands.
 

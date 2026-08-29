@@ -30,6 +30,7 @@ TRIAGE: list[tuple[str, str, str]] = [
     ("TORCH-1", r"FlexAttention is only supported on", "flex device whitelist"),
     ("TT-2", r"has no attribute 'set_timeout'", "nightly-only set_timeout"),
     ("TT-1", r"No module named 'triton'", "unconditional import triton"),
+    ("TT-8", r"Dimension specified as 0 but tensor has no dimensions", "PP step(arg_mbs=) nightly-only contract"),
     (
         "DEP",
         r"No module named '(helion|fla|deep_ep|torchao|cutlass|deepep|hybridep)",
@@ -37,6 +38,11 @@ TRIAGE: list[tuple[str, str, str]] = [
     ),
     ("TT-4", r"data is not allocated yet", "ChunkedLossWrapper / manual unshard backward"),
     ("TT-5", r"all parameters must be\s+DTensors", "spmd_types + fully_shard(dp_mesh_dims)"),
+    (
+        "TT-5",
+        r"requires parallelism\.spmd_backend='spmd_types'",
+        "feature requires spmd_types, which fails on NPU (TT-5)",
+    ),
     (
         "TT-GATE",
         r"has_cuda_capability|only supported on Hopper|compute capability|CUDA capability",
@@ -48,8 +54,13 @@ TRIAGE: list[tuple[str, str, str]] = [
         r"torch\.cuda\.|\bcuda\b.*(not available|is_available)|Torch not compiled with CUDA",
         "hard-coded torch.cuda",
     ),
-    ("OURS", r"AscendFusionAttention", "limitation of the Ascend attention override"),
-    ("CANN", r"\b(EZ|EI|EE|EJ)\d{4}\b|ERR\d{5}", "CANN error code"),
+    (
+        "OURS",
+        r"NotImplementedError: AscendFusionAttention",
+        "limitation of the Ascend attention override",
+    ),
+    # ERR99999 is CANN's generic "application exception" wrapper printed on any crash -- not a CANN failure.
+    ("CANN", r"\b(EZ|EI|EE|EJ)\d{4}\b|ERR(?!99999)\d{5}", "CANN error code"),
     ("NPU", r'File "[^"]*torch_npu/', "traceback frame inside torch_npu"),
     ("HANG", r"__TIMEOUT__", "exceeded per-test timeout"),
     (
@@ -316,7 +327,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--filter", default=None, help="regex on case name")
     p.add_argument("--stock", action="store_true", help="run upstream configs unmodified")
     p.add_argument("--list", action="store_true")
+    p.add_argument("--retriage", default=None, help="re-run triage over an existing sweep dir")
     a = p.parse_args(argv)
+
+    if a.retriage:
+        out = Path(a.retriage)
+        results = [Result(**r) for r in json.loads((out / "results.json").read_text())]
+        for r in results:
+            if r.state != "red":
+                continue
+            log = "".join(
+                Path(run["log"]).read_text(errors="replace")
+                for run in r.runs
+                if Path(run["log"]).exists()
+            )
+            r.code, r.note = triage(log)
+        (out / "results.json").write_text(json.dumps([asdict(r) for r in results], indent=2))
+        (out / "report.md").write_text(render(results, title="Matrix sweep (re-triaged)"))
+        print(render(results, title="Matrix sweep (re-triaged)"))
+        return 0
 
     cases = load_cases(Path(a.titan_dir), a.suites.split(","), stock=a.stock)
     if a.filter:
