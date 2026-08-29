@@ -1,0 +1,40 @@
+From: ascend-torchtitan <maintainers@ascend-torchtitan>
+Subject: [PATCH] TORCH-7: opcheck: allow privateuse1 devices in autograd_registration_check
+
+Problem: torch.library.opcheck's autograd registration check rejects any
+device outside CPU/CUDA/XPU ("NYI devices other than CPU/CUDA/XPU, got
+{'npu'}"), so custom ops for out-of-tree backends cannot be validated with
+opcheck even though the check is device-agnostic.
+
+Fix: accept the registered privateuse1 backend name and probe
+AutogradPrivateUse1.
+
+Baseline: torch 2.13.0 (same code in 2.12.0 and nightly 2.15.0.dev20260828).
+Validation: ascend-torchtitan tests/npu/test_kernel_attention.py opcheck with
+test_autograd_registration enabled on Ascend (torch_npu registers its custom
+op autograd under AutogradPrivateUse1).
+---
+--- a/torch/testing/_internal/optests/autograd_registration.py	2026-07-03 22:18:38.000000000 +0800
++++ b/torch/testing/_internal/optests/autograd_registration.py	2026-08-29 23:36:04.970210460 +0800
+@@ -84,13 +84,19 @@
+ 
+     # Determine which AutogradBACKEND key to check
+     all_device_types = {arg.device.type for arg in all_tensors}
+-    if not all_device_types.issubset(["cpu", "cuda", "xpu"]):
++    privateuse1 = torch._C._get_privateuse1_backend_name()
++    if not all_device_types.issubset(["cpu", "cuda", "xpu", privateuse1]):
+         # Don't want to support other keys yet
+         raise NotImplementedError(
+-            f"autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {all_device_types}"
++            f"autograd_registration_check: NYI devices other than CPU/CUDA/XPU/{privateuse1}, "
++            f"got {all_device_types}"
+         )
+     if "cuda" in all_device_types:
+         key = "AutogradCUDA"
++    elif privateuse1 in all_device_types:
++        # Out-of-tree backends (e.g. torch_npu) register their autograd kernels
++        # under AutogradPrivateUse1; the check itself is device-agnostic.
++        key = "AutogradPrivateUse1"
+     elif "cpu" in all_device_types:
+         key = "AutogradCPU"
+     elif "xpu" in all_device_types:

@@ -16,7 +16,7 @@
 | TORCH-4 | PP `step(arg_mbs=)` 仅 nightly | 无需处理 | 本仓 shim；nightly 已有 | ✅ |
 | TORCH-5 | 2.12 pipelining `fork_rng` 默认 cuda | 无需处理 | 2.13 已修 | ✅ |
 | TORCH-6 | FSDP2 × spmd_types 仅 nightly | 阻塞 | 等 torch ≥ 2.14 | — |
-| TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已确认 | 本地补丁 | 待做 |
+| TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已修复（本地补丁） | `patches/pytorch/0001-TORCH-7-*.patch` | 见下方验证记录 |
 | TT-1 | core 无条件 `import triton` | 已确认 | 本地补丁：懒加载 | 待做 |
 | TT-2 | `set_timeout` 无特性检查 | 已修复（本地补丁） | `patches/torchtitan/0002-TT-2-*.patch` | ✅ 关闭全部 shim，qwen3 golden 在 2.12/2.13 逐位匹配 |
 | TT-3 | `separate_full_blocks` 仅 nightly | 无需处理 | 2.13 已有 | ✅ |

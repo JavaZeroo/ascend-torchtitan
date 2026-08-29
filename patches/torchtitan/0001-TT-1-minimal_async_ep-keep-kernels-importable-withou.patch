@@ -1,0 +1,59 @@
+From 12be6ebf2b4639ed4c82afeecd8416a24ff29b6b Mon Sep 17 00:00:00 2001
+From: ascend-torchtitan <maintainers@ascend-torchtitan>
+Date: Sat, 29 Aug 2026 23:37:14 +0800
+Subject: [PATCH] TT-1: minimal_async_ep: keep kernels importable without the
+ triton wheel
+
+---
+ .../distributed/minimal_async_ep/kernels.py   | 35 +++++++++++++++++--
+ 1 file changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/torchtitan/distributed/minimal_async_ep/kernels.py b/torchtitan/distributed/minimal_async_ep/kernels.py
+index 6b2d80f32..b8e9fba47 100644
+--- a/torchtitan/distributed/minimal_async_ep/kernels.py
++++ b/torchtitan/distributed/minimal_async_ep/kernels.py
+@@ -7,8 +7,39 @@
+ # pyrefly: ignore-errors
+ 
+ import torch
+-import triton
+-import triton.language as tl
++
++try:
++    import triton
++    import triton.language as tl
++except ImportError:  # pragma: no cover - exercised on installs without the triton wheel
++    # MinimalAsyncEP is opt-in, but this module is imported eagerly through
++    # models/common/token_dispatcher.py. Keep the import side-effect free without
++    # triton: the decorated kernels only fail when they are launched.
++    from types import SimpleNamespace
++
++    class _MissingTriton:
++        """Stands in for ``triton.language`` so kernel signatures still evaluate."""
++
++        def __getattr__(self, _name):
++            return _MissingTriton()
++
++        def __call__(self, *_args, **_kwargs):
++            return _MissingTriton()
++
++    def _jit(fn=None, **_kwargs):
++        def _deco(f):
++            def _unavailable(*a, **k):
++                raise ImportError(
++                    "MinimalAsyncEP kernels need the `triton` package, which is not installed"
++                )
++
++            _unavailable.__name__ = f.__name__
++            return _unavailable
++
++        return _deco if fn is None else _deco(fn)
++
++    triton = SimpleNamespace(jit=_jit, cdiv=lambda a, b: (a + b - 1) // b)
++    tl = _MissingTriton()
+ 
+ 
+ _COUNT_COPY_BLOCK_SIZE = 1024
+-- 
+2.34.1
+
