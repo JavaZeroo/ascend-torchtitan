@@ -12,3 +12,8 @@
 | **M5** | 图模式 / 低精度 / 多模态 | `graph/`（torchair）、post-converter 树上的 FP8 override、多模态轴 | 矩阵轴扩展；不新增机制类型。 |
 
 有意推迟、等有数据再定的决策：替换型 shim 的源码指纹（只在真出现替换型 shim 时做）、`AscendTrainer` 子类（尚无必要场景）、vendor 无关中间层（不做）。
+
+## M3 剩余项（2026-08-29 晚）
+- **SituGLU / KDA / causal_conv1d override 需要源码构建的算子库**：`ops-nn`（AscendC，CMake）、`flash-linear-attention-npu`（fla-npu）、`triton-ascend` + `triton-ascend-kernels` 都不在 pip 源上（`pip index versions` 均无结果），只有本地克隆。下一步在开发容器里从源码构建，并把构建步骤固化为 `scripts/build_kernels.sh`（矩阵 `DEP` 桶里的 fla、inductor 两项也依赖它们）。
+- OURS-10（gpt_oss + TP）二分。
+- provenance 表接入 `tools/matrix.py` 报告。
