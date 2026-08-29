@@ -21,6 +21,8 @@ from torchtitan.trainer import Trainer
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
 RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
+SWIGLU_OVERRIDE = "ascend_titan.kernels.swiglu.npu_fused_swiglu"
+ROPE_COSSIN_OVERRIDE = "ascend_titan.kernels.rope.npu_rotary_cossin"
 
 
 def qwen3_debugmodel_npu() -> Trainer.Config:
@@ -87,4 +89,17 @@ def qwen3_debugmodel_npu_fused_norm() -> Trainer.Config:
     Kept out of ``qwen3_debugmodel_npu`` so the frozen golden curve stays valid."""
     config = qwen3_debugmodel_npu()
     config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
+    return config
+
+
+def qwen3_debugmodel_npu_fused() -> Trainer.Config:
+    """All zero-build torch_npu fused kernels: RMSNorm + fused SwiGLU + rotary kernel.
+    The perf recipe; numerics differ from golden at bf16-rounding level."""
+    config = qwen3_debugmodel_npu()
+    config.override.imports = [
+        *config.override.imports,
+        RMSNORM_OVERRIDE,
+        SWIGLU_OVERRIDE,
+        ROPE_COSSIN_OVERRIDE,
+    ]
     return config

@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 ### 新增（M3，进行中）
+- `kernels/swiglu.py`：复用上游 `FusedSwiGLU`（融合 w13、TP 交错布局、checkpoint hook），激活换成 `torch_npu.npu_swiglu`；`kernels/rope.py` 新增 `npu_rotary_cossin`（CosSinRoPE 旋转用 `npu_rotary_mul`），ComplexRoPE 在 NPU 上也走该内核。
+- `qwen3_debugmodel_npu_fused`：RMSNorm + SwiGLU + rotary 三个零构建融合内核，**tps 55k → 77k（+40%）**，显存 2.38 → 1.89 GiB。
+- `scripts/build_kernels.sh`：ops-nn / ops-transformer / fla-npu 源码构建入口。
 - `kernels/attention.py` 改为 `torch.library.custom_op` 前向/反向 + `register_fake`：`cu_seq` 以张量传入、D2H 在算子内部，`torch.compile(fullgraph=True)` 可追踪（OURS-8 关闭）；数值与 golden 逐位不变。
 - `kernels/rms_norm.py`：RMSNorm → `torch_npu.npu_rms_norm`（drop-in，Meta/autograd 齐全）；recipe 变体 `qwen3_debugmodel_npu_fused_norm`；`npu_baseline` 默认启用。
 - `ascend-titan-provenance`：按节点列出实际生效的实现（ascend / upstream-override / upstream），P7 要求的审计表。

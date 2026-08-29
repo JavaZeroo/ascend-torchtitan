@@ -24,11 +24,41 @@ import torch
 from torchtitan.config import derive, override
 from torchtitan.models.common.rope import (
     ComplexRoPE,
+    CosSinRoPE,
     _maybe_check_max_pos,
     _maybe_wrap_positions,
 )
 
 logger = logging.getLogger(__name__)
+
+try:
+    import torch_npu
+
+    _HAS_ROTARY_KERNEL = hasattr(torch_npu, "npu_rotary_mul")
+except ImportError:
+    torch_npu = None
+    _HAS_ROTARY_KERNEL = False
+
+
+def _rotary_kernel(
+    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, mode: str
+) -> torch.Tensor:
+    """``torch_npu.npu_rotary_mul`` on ``(T, N, H)`` with ``(T, 1, H)`` cos/sin.
+
+    The kernel wants 4-D inputs; a leading batch of 1 is added and removed. It
+    computes in the input dtype (bf16 in, bf16 out) -- within bf16 rounding of
+    the upstream fp32 math (see tests/npu/test_kernel_rope.py).
+    """
+    return torch_npu.npu_rotary_mul(
+        x.unsqueeze(0),
+        cos.to(x.dtype).unsqueeze(0),
+        sin.to(x.dtype).unsqueeze(0),
+        rotary_mode=mode,
+    ).squeeze(0)
+
+
+def _use_kernel(x: torch.Tensor) -> bool:
+    return _HAS_ROTARY_KERNEL and x.device.type == "npu"
 
 
 class AscendComplexRoPE(ComplexRoPE):
@@ -59,6 +89,14 @@ class AscendComplexRoPE(ComplexRoPE):
         """(a + ib)(c + is) = (ac - bs) + i(as + bc) on adjacent (even, odd) pairs."""
         cos = rope_cache[..., 0]
         sin = rope_cache[..., 1]
+        if _use_kernel(query):
+            # interleave mode wants each angle repeated for its (even, odd) pair.
+            cos2 = cos.repeat_interleave(2, dim=-1)
+            sin2 = sin.repeat_interleave(2, dim=-1)
+            return (
+                _rotary_kernel(query, cos2, sin2, "interleave"),
+                _rotary_kernel(key, cos2, sin2, "interleave"),
+            )
 
         def rot(x: torch.Tensor) -> torch.Tensor:
             xf = x.float().reshape(*x.shape[:-1], -1, 2)
@@ -76,3 +114,33 @@ class AscendComplexRoPE(ComplexRoPE):
 )
 def real_cache_rope(cfg: ComplexRoPE.Config) -> AscendComplexRoPE.Config:
     return derive(cfg, AscendComplexRoPE.Config)
+
+
+class AscendCosSinRoPE(CosSinRoPE):
+    """Upstream ``CosSinRoPE`` (rotate-half, used by qwen3 & co.) applied with
+    ``npu_rotary_mul(rotary_mode="half")``. Cache layout and numerics contract are
+    upstream's; only the rotation is fused. Falls back to upstream math off-NPU."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(CosSinRoPE.Config):
+        pass
+
+    @staticmethod
+    def apply_rotary_emb(
+        query: torch.Tensor, key: torch.Tensor, rope_cache: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not _use_kernel(query):
+            return CosSinRoPE.apply_rotary_emb(query, key, rope_cache)
+        head_dim = query.shape[-1]
+        cos = rope_cache[..., :head_dim]
+        sin = rope_cache[..., head_dim:]
+        return _rotary_kernel(query, cos, sin, "half"), _rotary_kernel(key, cos, sin, "half")
+
+
+@override(
+    target=CosSinRoPE.Config,
+    exact=True,
+    description="CosSinRoPE rotation via torch_npu.npu_rotary_mul (rotate-half)",
+)
+def npu_rotary_cossin(cfg: CosSinRoPE.Config) -> AscendCosSinRoPE.Config:
+    return derive(cfg, AscendCosSinRoPE.Config)

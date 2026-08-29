@@ -92,6 +92,14 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | npu_rms_norm（RMSNorm 节点上的 override，`kernels/rms_norm.py`） | 🟢 | `qwen3_debugmodel_npu_fused_norm` 10 步：loss 5.10306（golden 5.10304）、grad_norm 3.3061 一致；**tps 72k vs 55k（+30%），显存 1.96 vs 2.38 GiB**；op 级对上游 bf16/fp32 对齐测试通过 |
 | torch.rms_norm（stock） | 🟢 | M1 默认（golden 基于它） |
 
+## 融合内核（零构建，torch_npu 自带）—— `qwen3_debugmodel_npu_fused`
+
+| 内核 | 状态 | 数值 | 收益（单卡 debugmodel，10 步，seed 42） |
+|---|---|---|---|
+| `npu_rms_norm` | 🟢 | op 级对齐 | 单独：tps 55k → 72k |
+| `npu_swiglu`（上游 FusedSwiGLU 布局） | 🟢 | 对上游 FeedForward 对齐，checkpoint 布局不变 | 三者合计：**tps 77k（+40%），显存 2.38 → 1.89 GiB** |
+| `npu_rotary_mul`（half / interleave） | 🟢 | 对上游 CosSinRoPE / ComplexRoPE 对齐（bf16 级） | loss 5.0958 vs golden 5.1030 |
+
 ## 损失
 
 | loss | 状态 | 归因 / 备注 |
