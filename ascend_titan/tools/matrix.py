@@ -68,6 +68,11 @@ TRIAGE: list[tuple[str, str, str]] = [
     ("DEP", r"`helion` is not installed|helion_rope", "helion (CUDA-only kernel DSL) missing"),
     ("DEP", r"No module named 'torchvision'", "torchvision missing (installable)"),
     (
+        "OURS-8",
+        r"Skip inlining function <function AscendFusionAttention|fake tensor call.*npu_fusion_attention|npu_fusion_attention\(\*\(FakeTensor",
+        "dynamo hit the Ascend attention kernel (graph break under fullgraph / unbacked SymInts)",
+    ),
+    (
         "COMPILE",
         r"when making fake tensor call|torch\._dynamo\.exc\.",
         "torch.compile path failed (see note)",

@@ -35,6 +35,9 @@
 
 注意：torch ≤ 2.13 上 `_set_pg_timeout` 只处理 nccl/gloo，并警告 `Set timeout is now only supported for either nccl or gloo`；HCCL 组的超时在第 1 步后**没有**被缩短（与 CUDA 的行为差异，记为 TORCH-3）。
 
+## M2 扫描结论（同日）
+NEXT 24 🟢 / STABLE 18 🟢（61 用例，5 个上游禁用/门控）。差异全在 PP（TORCH-5，2.13 已修）。剩余红格：TT-5（14，需 nightly FSDP2）、OURS-8（6，compile）、DEP（6）、TT-KERNEL/TT-CUDA（4）、OURS-2（2）、OURS-9（1）。详见 `docs/capability-matrix.md`。
+
 ## 复现
 ```bash
 WITH_TORCH=1 ./scripts/install.sh                 # NEXT track

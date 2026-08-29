@@ -2,8 +2,7 @@
 
 [torchtitan](https://github.com/pytorch/torchtitan) 的**昇腾 NPU** 树外扩展。把它装在一个按 commit 固定的 torchtitan 旁边，torchtitan 就能在 NPU 上跑；昇腾融合算子、并行策略和图模式按 recipe 选择性开启。torchtitan 本身**从不 fork、从不在磁盘上打补丁**。
 
-> 状态：**M2 进行中（2026-08-29）** —— `qwen3_debugmodel` 已在 Ascend 910B2 上完成训练（单卡与 FSDP2×2），只用了一个融合注意力 override + 一个 polyfill shim；torch 2.12.0/2.13.0 + torch_npu 2.12.0/2.13.0rc1 两套组合 loss 曲线逐位一致。
-> 上游 57 个集成用例的全量矩阵扫描正在进行，每个红格都带归因。详见 `docs/baseline.md`、`docs/capability-matrix.md`、`docs/issues/`。
+> 状态：**M2 完成（2026-08-29）** —— 上游 61 个集成用例整体搬到 Ascend 910B2 上扫描：NEXT track（torch 2.13.0 / torch_npu 2.13.0rc1）**24 🟢**，STABLE（2.12.0 / 2.12.0）18 🟢；FSDP2 / HSDP / TP / PP / EP（deepseek_v3 MoE）/ DCP 与 HF checkpoint / SFT 全部可跑，靠两个 L1 override（融合注意力、实数缓存 RoPE）和两条 shim。剩余红格全部归因到 6 个根因，**没有一个落在 NPU/CANN 上**。详见 `docs/capability-matrix.md`、`docs/baseline.md`、`docs/issues/`。
 
 ## 安装
 
