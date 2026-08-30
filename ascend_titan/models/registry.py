@@ -131,10 +131,11 @@ MODELS: dict[str, ModelEntry] = {
         title="Qwen3.5",
         status="🟡",
         summary=(
-            "语言侧真实尺寸（0.8B + 真实 tokenizer/C4 + 4096 上下文）能跑，"
-            "gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override。"
-            "视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制），"
-            "性能是主要缺口：GDN 没有融合算子。"
+            "语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 "
+            "`kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），"
+            "但从零训练第 4–10 步发散，未定位。"
+            "视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制）；"
+            "GDN 没有融合算子，性能是另一个缺口。"
         ),
         recipes="ascend_titan.models.qwen3_5.recipes",
         flavors=(
