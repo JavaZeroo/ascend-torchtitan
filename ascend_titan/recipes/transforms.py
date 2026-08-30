@@ -130,23 +130,32 @@ def npu_minimal(config: Trainer.Config) -> Applied:
                 setattr(parent, attr, new)
             a.flex_to_varlen += 1
 
-    # 2. Ascend fused attention on every VarlenAttention node (NPU-1).
-    has_varlen = any(True for _ in config.traverse(VarlenAttention.Config))
-    if has_varlen and ATTENTION_OVERRIDE not in config.override.imports:
-        config.override.imports = [*config.override.imports, ATTENTION_OVERRIDE]
-    a.attention_override = has_varlen
-
-    # 2b. ComplexRoPE nodes -> real-valued cache (torch_npu cannot index complex, NPU-3).
-    has_complex_rope = any(
-        type(c) is ComplexRoPE.Config for _f, c, _p, _a in config.traverse(ComplexRoPE.Config)
-    )
+    # An upstream override that replaces a whole attention block (fused_mla) owns
+    # everything under it -- the inner attention node and the RoPE node. torchtitan
+    # rejects an override that claims a descendant of another override's node
+    # ("claims 'layers.0.attention', an ancestor of 'layers.0.attention.inner_attention'"),
+    # so neither of our two attention-side overrides may be added on such a config
+    # (OURS-9). The block override brings its own implementation of both.
     block_override = any(
         str(imp if isinstance(imp, str) else imp[0]).startswith(_ATTENTION_BLOCK_OVERRIDES)
         for imp in config.override.imports
     )
     if block_override:
-        a.notes.append("rope override skipped: an upstream override claims the attention block")
-    elif has_complex_rope and ROPE_OVERRIDE not in config.override.imports:
+        a.notes.append(
+            "attention and rope overrides skipped: an upstream override claims the attention block"
+        )
+
+    # 2. Ascend fused attention on every VarlenAttention node (NPU-1).
+    has_varlen = any(True for _ in config.traverse(VarlenAttention.Config))
+    if has_varlen and not block_override and ATTENTION_OVERRIDE not in config.override.imports:
+        config.override.imports = [*config.override.imports, ATTENTION_OVERRIDE]
+    a.attention_override = has_varlen and not block_override
+
+    # 2b. ComplexRoPE nodes -> real-valued cache (torch_npu cannot index complex, NPU-3).
+    has_complex_rope = any(
+        type(c) is ComplexRoPE.Config for _f, c, _p, _a in config.traverse(ComplexRoPE.Config)
+    )
+    if has_complex_rope and not block_override and ROPE_OVERRIDE not in config.override.imports:
         config.override.imports = [*config.override.imports, ROPE_OVERRIDE]
     a.rope_override = has_complex_rope and not block_override
 

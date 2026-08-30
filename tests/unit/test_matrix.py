@@ -233,3 +233,23 @@ def test_hccl_base_port_is_per_card_set_and_out_of_the_default_range():
     assert hccl_base_port([0, 1]) != hccl_base_port([2, 3])
     assert hccl_base_port([4, 5]) == hccl_base_port([4, 5, 6, 7])  # keyed on the lowest card
     assert all(hccl_base_port([c]) >= 61000 for c in range(8))
+
+
+@pytest.mark.titan
+def test_npu_minimal_skips_both_attention_overrides_under_a_block_override(npu_stub):
+    """OURS-9: torchtitan rejects an override claiming a descendant of another's node.
+
+    `fused_mla` claims `layers.N.attention`, which is an ancestor of both the inner
+    attention node and the RoPE node, so neither of our overrides may be added.
+    """
+    from torchtitan.models.llama3.config_registry import llama3_debugmodel
+
+    from ascend_titan.recipes.transforms import ATTENTION_OVERRIDE, ROPE_OVERRIDE, npu_minimal
+
+    cfg = llama3_debugmodel()
+    cfg.override.imports = ["torchtitan.overrides.fused_mla.fused_mla"]
+    a = npu_minimal(cfg)
+    assert ATTENTION_OVERRIDE not in cfg.override.imports
+    assert ROPE_OVERRIDE not in cfg.override.imports
+    assert not a.attention_override and not a.rope_override
+    assert any("attention block" in n for n in a.notes)

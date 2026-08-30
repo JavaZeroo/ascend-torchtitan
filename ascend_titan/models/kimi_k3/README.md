@@ -38,7 +38,7 @@ torchtitan 拒绝"祖先已被别的 override 认领"的嵌套 override，所以
 | 函数 | 说明 |
 |---|---|
 | `kimi_k3_debugmodel_npu` | 参考路径：`npu_minimal` + KDA override + 关 checkpoint |
-| `kimi_k3_debugmodel_npu_fused` | 再叠加 ops-nn SiTU-GLU（需要 ops-nn run 包 + `cann_ops_nn_<vendor>`）。⚠️ 首次调用要 JIT 编译算子，很慢；本轮未跑完 |
+| `kimi_k3_debugmodel_npu_fused` | 再叠加 ops-nn SiTU-GLU（需要 ops-nn run 包 + `cann_ops_nn_<vendor>`）。🟢 实测 `step: 10 loss 4.29434`，tps 48。首次调用要 JIT 编译算子（约 1 分钟） |
 
 ## 4. 性能
 
@@ -53,10 +53,10 @@ tps 45 / MFU 0.05%。三个原因，按影响排序：
 ## 5. 待办
 
 - KDA 融合算子（fla-npu 或 ops-nn）替换 reference 实现。
-- SiTU-GLU：`cann_ops_nn_ascend_titan_nn` 已装进 NIGHTLY venv（需要 `patches/ops-nn/OPSNN-1-cxx-std.patch`：
-  上游构建器硬编码 `-std=c++17`，torch 2.15 要 C++20），算子注册成功、override 能落到 12 个
-  `KimiFeedForward` 节点；但**首次调用的 JIT 编译在本轮没跑完**（>20 分钟未结束），
-  所以 `kimi_k3_debugmodel_npu_fused` 还没有端到端结果。下次直接跑
-  `python /tmp/situprobe.py` 那种单算子调用把 JIT 缓存烤热，再跑训练。
+- ~~SiTU-GLU 端到端~~ **已跑通**（`loss 4.29434`）。需要 `patches/ops-nn/OPSNN-1-cxx-std.patch`
+  （上游构建器硬编码 `-std=c++17`，torch 2.15 要 C++20）。
+  之前"编译永远不结束"是**被 kill 的进程留下的 stale lock**，不是慢：
+  `rm -f /root/.cache/torch_extensions/*/situ_glu/lock` 或换 `TORCH_EXTENSIONS_DIR` 即可。
+- 融合 SiTU-GLU 目前**不改变吞吐**（tps 47 → 48）：瓶颈在 eager flex 与 reference KDA，不在 MoE 的激活。
 - `attn_res`：ops-transformer 的 `block_attn_res_update` 缺反向，只能用于推理；要么等它补反向（gitcode 提 issue，P9），要么自己写反向。
 - Triton-Ascend 到位后复测，并撤掉 `flex_block_mask_eager` shim（它会自己让路）。

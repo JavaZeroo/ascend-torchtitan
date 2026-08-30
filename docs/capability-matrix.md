@@ -33,10 +33,13 @@ NIGHTLY track（torch 2.15.0.dev20260812 + torch_npu master + `patches/` 的八�
 | `DEP-INDUCTOR` | 5 | 四个 `*_compile` 用例 + `gpt_oss_fsdp+tp+ep+compile` | 装 Triton-Ascend（已验证可行，见"Triton-Ascend / inductor"一节） |
 | `DEP` | 5 | `fla`（qwen3_5 ×3）、`helion` ×2 | 昇腾替代属 L1（fla-npu 在路线图） |
 | `TT-CUDA` | 2 | `DistMuon requires one CUDA device per process` | 上游按设计 CUDA-only |
-| `TT-KERNEL` | 2 | `override_fused_swiglu` / `override_fused_grouped_experts`（上游树内 Triton 内核） | 昇腾替代属 L1（我们已有 `npu_swiglu` 版本） |
-| `OURS-9` | 1 | `deepseek_v3_fused_mla_swiglu`：上游 override 与我们的 RoPE override 抢同一个节点 | **本仓**，唯一属于我们的红格 |
+| `TT-KERNEL` | 3 | `override_fused_swiglu` / `override_fused_grouped_experts` / `deepseek_v3_fused_mla_swiglu`（上游树内 Triton 内核） | 昇腾替代属 L1（我们已有 `npu_swiglu` 版本） |
 
-**`NPU` / `NPU-OP` 归因的红格 = 0，`UNKNOWN` = 0，`HARNESS` = 0。**
+**`NPU` / `NPU-OP` 归因的红格 = 0，`UNKNOWN` = 0，`HARNESS` = 0，`OURS-*` = 0。**
+
+> 扫描时 `deepseek_v3_fused_mla_swiglu` 还是 `OURS-9`（我们的 override 与上游 `fused_mla` 抢节点）。
+> 当天已修复：`fused_mla` 认领的 `layers.N.attention` 同时是 inner attention 与 RoPE 两个节点的祖先，
+> 所以两个 override 都得跳过（此前只跳了 RoPE）。修复后复跑，该用例归因变为 `TT-KERNEL`。
 
 ⚪ 5 个：4 个上游自己禁用（`2d_asynctp_compile`、`pp_zbv`、`pp_custom_csv`、`pp_looped_zero_bubble`），
 1 个上游写死要 CUDA capability 10.0（`kimi_k3_mm_fsdp`）。
