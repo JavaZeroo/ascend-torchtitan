@@ -41,7 +41,12 @@ class CardPool:
             while len(self._free) < n:
                 self._cv.wait()
             got, self._free = self._free[:n], self._free[n:]
-            return got
+            # ASCEND_RT_VISIBLE_DEVICES must be ascending: with an unsorted list
+            # (e.g. "4,5,0,1", which this pool produces after a release) torch_npu
+            # reports device_count()==0 and torch.npu.is_available() False, and the
+            # run dies far away with a confusing device_type error. Measured on
+            # 910B2 / CANN 9.1.0; also filed as NPU-10.
+            return sorted(got)
 
     def release(self, cards: list[int]) -> None:
         with self._cv:

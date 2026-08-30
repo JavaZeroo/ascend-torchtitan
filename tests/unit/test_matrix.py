@@ -208,3 +208,19 @@ def test_bench_parses_and_takes_steady_state():
 
     md = render([Row(module="m", config="c", ngpu=1, note="boom")], "torchX_npuY")
     assert "🔴" in md and "provenance" in md
+
+
+def test_card_pool_hands_out_ascending_lists():
+    """ASCEND_RT_VISIBLE_DEVICES must be ascending: torch_npu reports zero devices
+    for an unsorted list (NPU-10), and the pool naturally produces one after a release."""
+    from ascend_titan.tools.matrix import CardPool
+
+    pool = CardPool([0, 1, 2, 3])
+    first = pool.acquire(2)
+    second = pool.acquire(2)
+    pool.release(first)
+    assert pool.acquire(2) == first == sorted(first)
+    assert second == sorted(second)
+
+    pool = CardPool([4, 5, 0, 1])
+    assert pool.acquire(4) == [0, 1, 4, 5]

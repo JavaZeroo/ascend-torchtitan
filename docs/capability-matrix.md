@@ -52,12 +52,28 @@ triton-ascend 3.2.2（自带 triton 3.2.0）**可以和 torch 2.15 nightly + tor
 |---|---|
 | `triton.backends` 里有 `ascend` 且 `is_active()` | 🟢 |
 | `torch.compile(f, backend="inductor")` 简单逐点 + 归约图（前反向） | 🟢 |
-| `torch.compile(flex_attention)` + causal block mask | 🔴 → **🟢（NPU-9 修复后）** |
-| `torch.compile(flex_attention)` + 读 buffer 的 mask_mod（document mask） | 🔴 `SubgraphLoweringException: Buffers cannot be created while lowering a pointwise subgraph` |
+| `torch.compile(flex_attention)` + causal block mask（不读张量） | 🔴 → **🟢（NPU-9 修复后）** |
+| `torch.compile(flex_attention)` + 读张量的 mask_mod（document mask） | 🔴 **910B2 硬件限制**，见下 |
 | torchtitan `1d_compile` 用例（llama3 + `compile.enable`） | 🔴 同上（它的 flex 掩码就是 document mask） |
 
-也就是说：inductor 本身在昇腾上是通的，**卡点收敛到"带 buffer 读的 flex mask_mod 子图无法 lowering"这一个**。
-CP 依赖 flex（上游硬性要求），所以 CP 也卡在这里。
+### 为什么 document mask 编不了（归因：硬件 / CANN，不是缺陷）
+
+链条一路查到底：
+
+1. flex 的 `mask_mod` 是 **pointwise 子图**，torch 的 `PointwiseSubgraphLowering` 明确禁止在其中创建 buffer。
+2. document mask 里 `segment_ids[q_idx]` 是 `aten.index.Tensor`。
+3. torch_npu 把 `aten.index` 放在 `INDIRECT_MEM_FALLBACK_LIST` 里，只有
+   `inductor_indirect_memory_mode` 打开时才有真正的 lowering，否则 fallback 成 ExternKernel（=建 buffer）。
+4. `torch_npu/_inductor/config.py`：`inductor_indirect_memory_mode` **只在 `is_ascend950` 时才赋值**，
+   910B2 上恒为 `None`，`INDUCTOR_INDIRECT_MEMORY_MODE` 环境变量在这台机器上根本不会被读。
+
+实测确认：`soc=Ascend910B2, is_ascend950=False, indirect_memory_mode=None`；失败算子经
+`PointwiseSubgraphLowering.call_function` 打点确认就是 `aten.index.Tensor`。
+
+**结论：910B2 上 inductor 没有 indirect-memory（SIMT）支持，任何读张量的 flex mask_mod 都编不出来。**
+这不是 torch_npu 的 bug，是 A2 硬件没有这条路径，要 Ascend950。
+连带结论：**CP 在 910B2 上不可能跑通**——上游强制 CP 必须配 FlexAttention，而 torchtitan 的
+掩码就是 document mask。
 
 ## 多模态（M5，2026-08-30 实测）
 
