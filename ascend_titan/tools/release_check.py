@@ -101,6 +101,102 @@ def run(
     return chk
 
 
+def checkpoint_roundtrip(
+    repo: Path, module: str, config: str, cards: str, ngpu: int, steps: int, timeout: int
+) -> Check:
+    """R4: save at ``steps``, resume, and land on the same loss as an uninterrupted run.
+
+    Three deterministic runs of the same recipe:
+      A  0 -> 2*steps            uninterrupted, the reference trajectory
+      B  0 -> steps              saves a checkpoint at the end
+      C  steps -> 2*steps        resumes from B's checkpoint
+    C's final loss must equal A's. Anything else means the checkpoint does not
+    carry the full training state, which is the difference between a model you
+    can hand over and a demo.
+    """
+    import shutil
+    import tempfile
+
+    chk = Check(
+        name="checkpoint save/resume",
+        criterion="R4",
+        command=(
+            f"NPU={ngpu} MODULE={module} CONFIG={config} ./scripts/run_train.sh "
+            f"--checkpoint.enable --checkpoint.interval {steps} --training.steps {{N}} "
+            f"--debug.seed 42 --debug.deterministic"
+        ),
+    )
+    folder = Path(tempfile.mkdtemp(prefix="ascend_titan_ckpt_", dir="/tmp"))
+    t0 = time.time()
+    try:
+        common = ["--debug.seed", "42", "--debug.deterministic"]
+
+        def go(extra: list[str]) -> list[tuple[int, float]]:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "MODULE": module,
+                    "CONFIG": config,
+                    "NPU": str(ngpu),
+                    "ASCEND_RT_VISIBLE_DEVICES": cards,
+                }
+            )
+            out = subprocess.run(
+                [str(repo / "scripts/run_train.sh"), *common, *extra],
+                env=env,
+                timeout=timeout,
+                text=True,
+                capture_output=True,
+            )
+            log = re.sub(r"\x1b\[[0-9;]*m", "", out.stdout + out.stderr)
+            steps_seen = [(int(m.group(1)), float(m.group(2))) for m in _STEP.finditer(log)]
+            if out.returncode != 0 and not steps_seen:
+                named = [ln for ln in log.splitlines() if re.search(r"\w+Error", ln)]
+                raise RuntimeError(named[-1][:160] if named else f"rc={out.returncode}")
+            return steps_seen
+
+        reference = go(["--training.steps", str(2 * steps), "--no-checkpoint.enable"])
+        go(
+            [
+                "--training.steps",
+                str(steps),
+                "--checkpoint.enable",
+                "--checkpoint.interval",
+                str(steps),
+                "--checkpoint.folder",
+                str(folder),
+            ]
+        )
+        resumed = go(
+            [
+                "--training.steps",
+                str(2 * steps),
+                "--checkpoint.enable",
+                "--checkpoint.interval",
+                str(10**9),
+                "--checkpoint.folder",
+                str(folder),
+            ]
+        )
+        if not reference or not resumed:
+            chk.detail = "no step lines"
+            return chk
+        want, got = reference[-1], resumed[-1]
+        chk.steps = resumed
+        chk.ok = want[0] == got[0] and abs(want[1] - got[1]) < 1e-6
+        chk.detail = (
+            f"uninterrupted step {want[0]} loss {want[1]:.5f}; "
+            f"resumed from step {steps} -> step {got[0]} loss {got[1]:.5f}"
+            + ("" if chk.ok else "  (MISMATCH)")
+        )
+    except Exception as e:  # noqa: BLE001 - the failure is the result
+        chk.detail = f"{type(e).__name__}: {str(e)[:160]}"
+    finally:
+        chk.seconds = round(time.time() - t0, 1)
+        shutil.rmtree(folder, ignore_errors=True)
+    return chk
+
+
 def render(model: str, checks: list[Check], tag: str) -> str:
     lines = [
         f"# release 检查 · {model} · {tag}",
@@ -129,6 +225,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cards", default="0-7")
     p.add_argument("--timeout", type=int, default=1800)
     p.add_argument("--out", default=None)
+    p.add_argument(
+        "--checkpoint-steps",
+        type=int,
+        default=5,
+        help="R4: save at this step, resume, compare at twice it",
+    )
+    p.add_argument("--skip-checkpoint", action="store_true")
     a = p.parse_args(argv)
 
     from ascend_titan.tools.matrix import parse_cards
@@ -152,6 +255,21 @@ def main(argv: list[str] | None = None) -> int:
         chk.name, chk.criterion = name, criterion
         checks.append(chk)
         print(f"[{'ok   ' if chk.ok else 'FAIL '}] {name}: {chk.detail}", flush=True)
+
+    if not a.skip_checkpoint:
+        first = PLANS[a.model][0]
+        print("[run  ] checkpoint save/resume", flush=True)
+        chk = checkpoint_roundtrip(
+            repo,
+            MODULES[a.model],
+            first[2],
+            ",".join(map(str, sorted(cards[:1]))),
+            1,
+            a.checkpoint_steps,
+            a.timeout,
+        )
+        checks.append(chk)
+        print(f"[{'ok   ' if chk.ok else 'FAIL '}] checkpoint: {chk.detail}", flush=True)
 
     report = render(a.model, checks, tuple_tag())
     print(report)

@@ -26,6 +26,7 @@ Full guide: ascend_titan/models/qwen3/README.md
 """
 
 from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
+from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.models.qwen3 import model_registry
 from torchtitan.models.qwen3.config_registry import (
     qwen3_0_6b,
@@ -165,5 +166,11 @@ def qwen3_14b_npu_pp2() -> Trainer.Config:
     config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
     config.parallelism.pipeline_parallel_degree = 2
     config.parallelism.data_parallel_shard_degree = 4
+    # 微批数必须 >= 流水级数，否则流水线排不出来（上游默认 1）。
+    config.parallelism.num_pp_microbatches = 2
     config.training.disable_cuda_graphs = True  # 同上：上游禁止 CUDA graphs + PP
+    # 14B 在 8×910B2 上按上游默认（SelectiveAC + 4×4096 tokens/微批）会 OOM
+    # （50.25 GiB 已分配时再要 546 MiB 失败）。全量重计算 + 半个微批换显存。
+    config.activation_checkpoint = FullAC.Config()
+    config.training.num_tokens_per_microbatch_per_dp_rank = 2 * 4096
     return config
