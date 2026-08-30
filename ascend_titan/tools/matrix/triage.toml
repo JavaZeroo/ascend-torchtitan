@@ -16,6 +16,11 @@ pattern = 'EI0020|have already been bound|hcclCommInitRootInfoConfig'
 note = 'HCCL port conflict: another job on the same NPU (rerun)'
 
 [[rule]]
+code = 'HARNESS'
+pattern = '_cuda_setDevice|device_type=None, not .npu.'
+note = 'torch could not see a usable NPU at import time (card busy) so torchtitan froze device_type=cuda; rerun'
+
+[[rule]]
 code = 'NPU-2'
 pattern = 'No backend type associated with device type npu'
 note = 'fake PG lacks npu'
