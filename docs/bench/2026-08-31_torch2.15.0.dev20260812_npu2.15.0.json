@@ -4,281 +4,281 @@
     "config": "qwen3_0_6b_npu",
     "ngpu": 1,
     "ok": true,
-    "loss": 7.76782,
-    "tps": 10212,
-    "tflops": 65.3,
-    "mfu": 20.93,
+    "loss": 7.77436,
+    "tps": 10186,
+    "tflops": 65.14,
+    "mfu": 20.88,
     "memory_gib": 19.08,
     "steps": [
       {
         "step": 1,
         "loss": 12.1475,
-        "grad_norm": 4.2897,
+        "grad_norm": 4.2896,
         "memory_gib": 13.85,
-        "tps": 1824,
-        "tflops": 11.67,
-        "mfu": 3.74
+        "tps": 1886,
+        "tflops": 12.06,
+        "mfu": 3.86
       },
       {
         "step": 2,
-        "loss": 11.71402,
-        "grad_norm": 6.3685,
+        "loss": 11.71395,
+        "grad_norm": 6.3664,
         "memory_gib": 19.08,
-        "tps": 8776,
-        "tflops": 56.12,
-        "mfu": 17.99
+        "tps": 8794,
+        "tflops": 56.24,
+        "mfu": 18.02
       },
       {
         "step": 3,
-        "loss": 10.76628,
-        "grad_norm": 2.7679,
+        "loss": 10.76631,
+        "grad_norm": 2.7699,
         "memory_gib": 19.08,
-        "tps": 10095,
-        "tflops": 64.56,
-        "mfu": 20.69
-      },
-      {
-        "step": 4,
-        "loss": 10.1322,
-        "grad_norm": 2.8401,
-        "memory_gib": 19.08,
-        "tps": 10478,
-        "tflops": 67.01,
-        "mfu": 21.48
-      },
-      {
-        "step": 5,
-        "loss": 10.22227,
-        "grad_norm": 2.2985,
-        "memory_gib": 19.08,
-        "tps": 10322,
-        "tflops": 66.01,
-        "mfu": 21.16
-      },
-      {
-        "step": 6,
-        "loss": 9.89425,
-        "grad_norm": 2.0534,
-        "memory_gib": 19.08,
-        "tps": 9686,
-        "tflops": 61.94,
-        "mfu": 19.85
-      },
-      {
-        "step": 7,
-        "loss": 9.65988,
-        "grad_norm": 1.9618,
-        "memory_gib": 19.08,
-        "tps": 9740,
-        "tflops": 62.29,
-        "mfu": 19.96
-      },
-      {
-        "step": 8,
-        "loss": 9.24767,
-        "grad_norm": 1.8771,
-        "memory_gib": 19.08,
-        "tps": 10290,
-        "tflops": 65.8,
-        "mfu": 21.09
-      },
-      {
-        "step": 9,
-        "loss": 9.05319,
-        "grad_norm": 1.582,
-        "memory_gib": 19.08,
-        "tps": 10115,
-        "tflops": 64.69,
-        "mfu": 20.73
-      },
-      {
-        "step": 10,
-        "loss": 8.82618,
-        "grad_norm": 1.2953,
-        "memory_gib": 19.08,
-        "tps": 10111,
-        "tflops": 64.66,
+        "tps": 10109,
+        "tflops": 64.65,
         "mfu": 20.72
       },
       {
-        "step": 11,
-        "loss": 8.51076,
-        "grad_norm": 1.2144,
+        "step": 4,
+        "loss": 10.13191,
+        "grad_norm": 2.8408,
         "memory_gib": 19.08,
-        "tps": 9875,
-        "tflops": 63.15,
-        "mfu": 20.24
+        "tps": 10382,
+        "tflops": 66.39,
+        "mfu": 21.28
+      },
+      {
+        "step": 5,
+        "loss": 10.22206,
+        "grad_norm": 2.3087,
+        "memory_gib": 19.08,
+        "tps": 10200,
+        "tflops": 65.23,
+        "mfu": 20.91
+      },
+      {
+        "step": 6,
+        "loss": 9.89417,
+        "grad_norm": 2.7757,
+        "memory_gib": 19.08,
+        "tps": 9585,
+        "tflops": 61.3,
+        "mfu": 19.65
+      },
+      {
+        "step": 7,
+        "loss": 9.67132,
+        "grad_norm": 2.078,
+        "memory_gib": 19.08,
+        "tps": 9695,
+        "tflops": 62.0,
+        "mfu": 19.87
+      },
+      {
+        "step": 8,
+        "loss": 9.25478,
+        "grad_norm": 1.8969,
+        "memory_gib": 19.08,
+        "tps": 10255,
+        "tflops": 65.58,
+        "mfu": 21.02
+      },
+      {
+        "step": 9,
+        "loss": 9.05922,
+        "grad_norm": 1.5885,
+        "memory_gib": 19.08,
+        "tps": 10026,
+        "tflops": 64.12,
+        "mfu": 20.55
+      },
+      {
+        "step": 10,
+        "loss": 8.83542,
+        "grad_norm": 1.3166,
+        "memory_gib": 19.08,
+        "tps": 10153,
+        "tflops": 64.92,
+        "mfu": 20.81
+      },
+      {
+        "step": 11,
+        "loss": 8.51684,
+        "grad_norm": 1.2131,
+        "memory_gib": 19.08,
+        "tps": 9841,
+        "tflops": 62.93,
+        "mfu": 20.17
       },
       {
         "step": 12,
-        "loss": 8.53808,
-        "grad_norm": 1.384,
+        "loss": 8.53599,
+        "grad_norm": 6.589,
         "memory_gib": 19.08,
-        "tps": 10466,
-        "tflops": 66.93,
-        "mfu": 21.45
+        "tps": 10478,
+        "tflops": 67.0,
+        "mfu": 21.48
       },
       {
         "step": 13,
-        "loss": 8.27436,
-        "grad_norm": 1.1557,
+        "loss": 8.30829,
+        "grad_norm": 1.5171,
         "memory_gib": 19.08,
-        "tps": 9341,
-        "tflops": 59.73,
-        "mfu": 19.15
+        "tps": 9337,
+        "tflops": 59.71,
+        "mfu": 19.14
       },
       {
         "step": 14,
-        "loss": 8.18624,
-        "grad_norm": 0.96,
+        "loss": 8.21894,
+        "grad_norm": 1.157,
         "memory_gib": 19.08,
-        "tps": 10205,
-        "tflops": 65.26,
-        "mfu": 20.92
+        "tps": 10167,
+        "tflops": 65.02,
+        "mfu": 20.84
       },
       {
         "step": 15,
-        "loss": 8.13603,
-        "grad_norm": 0.8951,
+        "loss": 8.1605,
+        "grad_norm": 0.9791,
         "memory_gib": 19.08,
-        "tps": 10303,
-        "tflops": 65.89,
-        "mfu": 21.12
+        "tps": 10297,
+        "tflops": 65.85,
+        "mfu": 21.11
       },
       {
         "step": 16,
-        "loss": 8.09797,
-        "grad_norm": 0.9354,
+        "loss": 8.12278,
+        "grad_norm": 1.0252,
         "memory_gib": 19.08,
-        "tps": 9578,
-        "tflops": 61.25,
-        "mfu": 19.63
+        "tps": 9620,
+        "tflops": 61.52,
+        "mfu": 19.72
       },
       {
         "step": 17,
-        "loss": 8.2956,
-        "grad_norm": 1.266,
+        "loss": 8.30737,
+        "grad_norm": 1.5161,
         "memory_gib": 19.08,
-        "tps": 10557,
-        "tflops": 67.51,
-        "mfu": 21.64
+        "tps": 10472,
+        "tflops": 66.97,
+        "mfu": 21.46
       },
       {
         "step": 18,
-        "loss": 7.93501,
-        "grad_norm": 0.9265,
+        "loss": 7.93786,
+        "grad_norm": 0.8816,
         "memory_gib": 19.08,
-        "tps": 10247,
-        "tflops": 65.53,
-        "mfu": 21.0
-      },
-      {
-        "step": 19,
-        "loss": 7.94034,
-        "grad_norm": 0.6851,
-        "memory_gib": 19.08,
-        "tps": 10005,
-        "tflops": 63.98,
-        "mfu": 20.51
-      },
-      {
-        "step": 20,
-        "loss": 7.74323,
-        "grad_norm": 0.7979,
-        "memory_gib": 19.08,
-        "tps": 10313,
-        "tflops": 65.95,
-        "mfu": 21.14
-      },
-      {
-        "step": 21,
-        "loss": 7.88634,
-        "grad_norm": 0.9799,
-        "memory_gib": 19.08,
-        "tps": 10212,
-        "tflops": 65.3,
-        "mfu": 20.93
-      },
-      {
-        "step": 22,
-        "loss": 7.99179,
-        "grad_norm": 0.704,
-        "memory_gib": 19.08,
-        "tps": 9451,
-        "tflops": 60.44,
-        "mfu": 19.37
-      },
-      {
-        "step": 23,
-        "loss": 7.95574,
-        "grad_norm": 0.8809,
-        "memory_gib": 19.08,
-        "tps": 10205,
-        "tflops": 65.26,
-        "mfu": 20.92
-      },
-      {
-        "step": 24,
-        "loss": 7.7591,
-        "grad_norm": 1.004,
-        "memory_gib": 19.08,
-        "tps": 10188,
-        "tflops": 65.15,
+        "tps": 10186,
+        "tflops": 65.14,
         "mfu": 20.88
       },
       {
-        "step": 25,
-        "loss": 7.89627,
-        "grad_norm": 0.7833,
+        "step": 19,
+        "loss": 7.94146,
+        "grad_norm": 0.7781,
         "memory_gib": 19.08,
-        "tps": 9945,
-        "tflops": 63.6,
-        "mfu": 20.38
+        "tps": 9901,
+        "tflops": 63.32,
+        "mfu": 20.29
+      },
+      {
+        "step": 20,
+        "loss": 7.74438,
+        "grad_norm": 0.725,
+        "memory_gib": 19.08,
+        "tps": 10218,
+        "tflops": 65.34,
+        "mfu": 20.94
+      },
+      {
+        "step": 21,
+        "loss": 7.8834,
+        "grad_norm": 1.1001,
+        "memory_gib": 19.08,
+        "tps": 10203,
+        "tflops": 65.25,
+        "mfu": 20.91
+      },
+      {
+        "step": 22,
+        "loss": 7.99265,
+        "grad_norm": 0.9006,
+        "memory_gib": 19.08,
+        "tps": 9465,
+        "tflops": 60.53,
+        "mfu": 19.4
+      },
+      {
+        "step": 23,
+        "loss": 7.94446,
+        "grad_norm": 0.8735,
+        "memory_gib": 19.08,
+        "tps": 10136,
+        "tflops": 64.82,
+        "mfu": 20.77
+      },
+      {
+        "step": 24,
+        "loss": 7.75349,
+        "grad_norm": 1.0098,
+        "memory_gib": 19.08,
+        "tps": 10140,
+        "tflops": 64.85,
+        "mfu": 20.78
+      },
+      {
+        "step": 25,
+        "loss": 7.89789,
+        "grad_norm": 1.0131,
+        "memory_gib": 19.08,
+        "tps": 10044,
+        "tflops": 64.23,
+        "mfu": 20.59
       },
       {
         "step": 26,
-        "loss": 8.23632,
-        "grad_norm": 0.783,
+        "loss": 8.24491,
+        "grad_norm": 0.8565,
         "memory_gib": 19.08,
-        "tps": 9845,
-        "tflops": 62.96,
-        "mfu": 20.18
+        "tps": 9933,
+        "tflops": 63.52,
+        "mfu": 20.36
       },
       {
         "step": 27,
-        "loss": 7.77363,
-        "grad_norm": 0.8225,
+        "loss": 7.76971,
+        "grad_norm": 0.786,
         "memory_gib": 19.08,
-        "tps": 10639,
-        "tflops": 68.03,
-        "mfu": 21.81
+        "tps": 10549,
+        "tflops": 67.46,
+        "mfu": 21.62
       },
       {
         "step": 28,
-        "loss": 8.02721,
-        "grad_norm": 1.0866,
+        "loss": 8.03425,
+        "grad_norm": 1.0444,
         "memory_gib": 19.08,
-        "tps": 10351,
-        "tflops": 66.19,
-        "mfu": 21.22
+        "tps": 10265,
+        "tflops": 65.64,
+        "mfu": 21.04
       },
       {
         "step": 29,
-        "loss": 7.9006,
-        "grad_norm": 1.042,
+        "loss": 7.90144,
+        "grad_norm": 1.0067,
         "memory_gib": 19.08,
-        "tps": 10279,
-        "tflops": 65.73,
-        "mfu": 21.07
+        "tps": 10202,
+        "tflops": 65.24,
+        "mfu": 20.91
       },
       {
         "step": 30,
-        "loss": 7.76782,
-        "grad_norm": 1.2918,
+        "loss": 7.77436,
+        "grad_norm": 1.3637,
         "memory_gib": 19.08,
-        "tps": 10701,
-        "tflops": 68.43,
-        "mfu": 21.93
+        "tps": 10594,
+        "tflops": 67.74,
+        "mfu": 21.71
       }
     ],
     "ascend_nodes": [
@@ -290,28 +290,340 @@
     "module": "ascend_titan.models.qwen3",
     "config": "qwen3_0_6b_npu_fsdp2",
     "ngpu": 8,
-    "ok": false,
-    "loss": null,
-    "tps": null,
-    "tflops": null,
-    "mfu": null,
-    "memory_gib": null,
-    "steps": [],
-    "ascend_nodes": [],
-    "note": "rc=1, 0 steps parsed"
+    "ok": true,
+    "loss": 7.69968,
+    "tps": 9440,
+    "tflops": 60.37,
+    "mfu": 19.35,
+    "memory_gib": 10.29,
+    "steps": [
+      {
+        "step": 1,
+        "loss": 12.13463,
+        "grad_norm": 2.9729,
+        "memory_gib": 9.06,
+        "tps": 1465,
+        "tflops": 9.37,
+        "mfu": 3.0
+      },
+      {
+        "step": 2,
+        "loss": 11.46474,
+        "grad_norm": 4.2231,
+        "memory_gib": 10.29,
+        "tps": 8973,
+        "tflops": 57.38,
+        "mfu": 18.39
+      },
+      {
+        "step": 3,
+        "loss": 10.58837,
+        "grad_norm": 2.2409,
+        "memory_gib": 10.29,
+        "tps": 9315,
+        "tflops": 59.57,
+        "mfu": 19.09
+      },
+      {
+        "step": 4,
+        "loss": 10.17137,
+        "grad_norm": 2.1643,
+        "memory_gib": 10.29,
+        "tps": 9353,
+        "tflops": 59.81,
+        "mfu": 19.17
+      },
+      {
+        "step": 5,
+        "loss": 9.92901,
+        "grad_norm": 2.0567,
+        "memory_gib": 10.29,
+        "tps": 9024,
+        "tflops": 57.71,
+        "mfu": 18.5
+      },
+      {
+        "step": 6,
+        "loss": 9.66983,
+        "grad_norm": 1.8233,
+        "memory_gib": 10.29,
+        "tps": 9041,
+        "tflops": 57.81,
+        "mfu": 18.53
+      },
+      {
+        "step": 7,
+        "loss": 9.35788,
+        "grad_norm": 1.7024,
+        "memory_gib": 10.29,
+        "tps": 9559,
+        "tflops": 61.13,
+        "mfu": 19.59
+      },
+      {
+        "step": 8,
+        "loss": 9.03084,
+        "grad_norm": 1.6338,
+        "memory_gib": 10.29,
+        "tps": 9406,
+        "tflops": 60.15,
+        "mfu": 19.28
+      },
+      {
+        "step": 9,
+        "loss": 8.82013,
+        "grad_norm": 1.429,
+        "memory_gib": 10.29,
+        "tps": 9510,
+        "tflops": 60.81,
+        "mfu": 19.49
+      },
+      {
+        "step": 10,
+        "loss": 8.59543,
+        "grad_norm": 1.3219,
+        "memory_gib": 10.29,
+        "tps": 9586,
+        "tflops": 61.3,
+        "mfu": 19.65
+      },
+      {
+        "step": 11,
+        "loss": 8.41483,
+        "grad_norm": 1.1101,
+        "memory_gib": 10.29,
+        "tps": 9428,
+        "tflops": 60.29,
+        "mfu": 19.32
+      },
+      {
+        "step": 12,
+        "loss": 8.22262,
+        "grad_norm": 1.0453,
+        "memory_gib": 10.29,
+        "tps": 9656,
+        "tflops": 61.75,
+        "mfu": 19.79
+      },
+      {
+        "step": 13,
+        "loss": 8.06998,
+        "grad_norm": 0.857,
+        "memory_gib": 10.29,
+        "tps": 8787,
+        "tflops": 56.19,
+        "mfu": 18.01
+      },
+      {
+        "step": 14,
+        "loss": 7.99683,
+        "grad_norm": 0.7379,
+        "memory_gib": 10.29,
+        "tps": 8964,
+        "tflops": 57.32,
+        "mfu": 18.37
+      },
+      {
+        "step": 15,
+        "loss": 7.94508,
+        "grad_norm": 0.7559,
+        "memory_gib": 10.29,
+        "tps": 9763,
+        "tflops": 62.43,
+        "mfu": 20.01
+      },
+      {
+        "step": 16,
+        "loss": 7.85987,
+        "grad_norm": 0.5244,
+        "memory_gib": 10.29,
+        "tps": 9502,
+        "tflops": 60.77,
+        "mfu": 19.48
+      },
+      {
+        "step": 17,
+        "loss": 7.81907,
+        "grad_norm": 0.4209,
+        "memory_gib": 10.29,
+        "tps": 9063,
+        "tflops": 57.95,
+        "mfu": 18.58
+      },
+      {
+        "step": 18,
+        "loss": 7.71863,
+        "grad_norm": 0.4197,
+        "memory_gib": 10.29,
+        "tps": 9526,
+        "tflops": 60.92,
+        "mfu": 19.53
+      },
+      {
+        "step": 19,
+        "loss": 7.74455,
+        "grad_norm": 0.358,
+        "memory_gib": 10.29,
+        "tps": 9440,
+        "tflops": 60.37,
+        "mfu": 19.35
+      },
+      {
+        "step": 20,
+        "loss": 7.72844,
+        "grad_norm": 0.379,
+        "memory_gib": 10.29,
+        "tps": 9375,
+        "tflops": 59.95,
+        "mfu": 19.21
+      },
+      {
+        "step": 21,
+        "loss": 7.72348,
+        "grad_norm": 0.3791,
+        "memory_gib": 10.29,
+        "tps": 9719,
+        "tflops": 62.15,
+        "mfu": 19.92
+      },
+      {
+        "step": 22,
+        "loss": 7.75092,
+        "grad_norm": 0.4506,
+        "memory_gib": 10.29,
+        "tps": 9053,
+        "tflops": 57.89,
+        "mfu": 18.55
+      },
+      {
+        "step": 23,
+        "loss": 7.72785,
+        "grad_norm": 0.4999,
+        "memory_gib": 10.29,
+        "tps": 9410,
+        "tflops": 60.18,
+        "mfu": 19.29
+      },
+      {
+        "step": 24,
+        "loss": 7.7427,
+        "grad_norm": 0.5895,
+        "memory_gib": 10.29,
+        "tps": 9589,
+        "tflops": 61.32,
+        "mfu": 19.65
+      },
+      {
+        "step": 25,
+        "loss": 7.86266,
+        "grad_norm": 0.518,
+        "memory_gib": 10.29,
+        "tps": 9390,
+        "tflops": 60.05,
+        "mfu": 19.25
+      },
+      {
+        "step": 26,
+        "loss": 7.81247,
+        "grad_norm": 0.4658,
+        "memory_gib": 10.29,
+        "tps": 9447,
+        "tflops": 60.41,
+        "mfu": 19.36
+      },
+      {
+        "step": 27,
+        "loss": 7.84897,
+        "grad_norm": 0.5322,
+        "memory_gib": 10.29,
+        "tps": 9498,
+        "tflops": 60.74,
+        "mfu": 19.47
+      },
+      {
+        "step": 28,
+        "loss": 7.79364,
+        "grad_norm": 0.451,
+        "memory_gib": 10.29,
+        "tps": 9267,
+        "tflops": 59.26,
+        "mfu": 18.99
+      },
+      {
+        "step": 29,
+        "loss": 7.72541,
+        "grad_norm": 0.4195,
+        "memory_gib": 10.29,
+        "tps": 8899,
+        "tflops": 56.91,
+        "mfu": 18.24
+      },
+      {
+        "step": 30,
+        "loss": 7.69968,
+        "grad_norm": 0.4051,
+        "memory_gib": 10.29,
+        "tps": 9440,
+        "tflops": 60.37,
+        "mfu": 19.35
+      }
+    ],
+    "ascend_nodes": [
+      "ascend_titan.kernels.attention.AscendFusionAttention.Config"
+    ],
+    "note": ""
   },
   {
     "module": "ascend_titan.models.qwen3",
     "config": "qwen3_8b_npu_pp2",
     "ngpu": 8,
-    "ok": false,
-    "loss": null,
-    "tps": null,
-    "tflops": null,
-    "mfu": null,
-    "memory_gib": null,
-    "steps": [],
-    "ascend_nodes": [],
-    "note": "rc=1, 0 steps parsed"
+    "ok": true,
+    "loss": 8.27304,
+    "tps": 1409,
+    "tflops": 74.22,
+    "mfu": 23.79,
+    "memory_gib": 51.43,
+    "steps": [
+      {
+        "step": 1,
+        "loss": 12.78555,
+        "grad_norm": 5.1219,
+        "memory_gib": 43.99,
+        "tps": 353,
+        "tflops": 18.57,
+        "mfu": 5.95
+      },
+      {
+        "step": 10,
+        "loss": 11.29837,
+        "grad_norm": 14.7721,
+        "memory_gib": 51.43,
+        "tps": 1379,
+        "tflops": 72.6,
+        "mfu": 23.27
+      },
+      {
+        "step": 20,
+        "loss": 9.46015,
+        "grad_norm": 8.7446,
+        "memory_gib": 51.43,
+        "tps": 1402,
+        "tflops": 73.8,
+        "mfu": 23.66
+      },
+      {
+        "step": 30,
+        "loss": 8.27304,
+        "grad_norm": 5.0205,
+        "memory_gib": 51.43,
+        "tps": 1409,
+        "tflops": 74.22,
+        "mfu": 23.79
+      }
+    ],
+    "ascend_nodes": [
+      "ascend_titan.kernels.attention.AscendFusionAttention.Config"
+    ],
+    "note": ""
   }
 ]

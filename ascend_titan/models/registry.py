@@ -117,7 +117,7 @@ MODELS: dict[str, ModelEntry] = {
             "R2": "🟢",  # 1 卡 / FSDP2×8 / FSDP2×4+TP2 / PP2×FSDP2-4（8B）全绿
             "R3": "🟢",  # 四条 golden 逐位；500 步 12.12 → 6.28；tests/npu 算子对拍
             "R4": "🟢",  # DCP 续训逐位一致；HF 导出/导入权重完整往返
-            "R5": "🟢",  # 10,307 tps / 65.91 TFLOPs / 19.08 GiB，带 provenance
+            "R5": "🟢",  # 单卡 10,186 / FSDP2×8 9,440 / PP2 1,409 tps，均带 provenance
             "R6": "🟢",  # 500 步 rc=0，显存自第 51 步起恒定，无 NaN
             "R7": "🟢",  # models/qwen3/README.md
             "R8": "🟢",  # provenance：AscendFusionAttention

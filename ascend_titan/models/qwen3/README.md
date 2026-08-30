@@ -124,7 +124,7 @@ PP 本身在昇腾上是通的：能力矩阵里 llama3 的 `pp_1f1b`、`pp_dp_1
 | R2 并行覆盖 | 🟢 | 单卡 🟢（12.11337 → 7.75390）；FSDP2×8 🟢（12.12893 → 7.72891）；FSDP2×4+TP2 🟢（12.12286 → 7.71191）；PP2×FSDP2-4 🟢 —— `qwen3_8b_npu_pp2` 20 步 12.77976 → 9.45129（8B 是第一个不共享 embedding 的尺寸，见下） |
 | R3 数值可信 | 🟢 | 四条 debugmodel golden 逐位冻结；500 步 loss 12.11569 → 6.28435 稳定下降（中间有正常抖动，不是单调）；`tests/npu/` 对 attention / rope / rms_norm / swiglu 逐个对上游 eager 对拍 |
 | R4 checkpoint | 🟢 | DCP 存取 + 续训：第 5 步存档 → 续训到第 10 步 loss `9.42568`，与一口气跑到底**逐位相同**。HF 互操作：导出成 safetensors（`model-00001-of-00001.safetensors` + index）后用 `--checkpoint.initial_load_in_hf` 读回，第一步 loss `9.95988`（导出时 `10.23167`，随机初始 `12.14750`）——权重完整往返 |
-| R5 性能基线 | 🟢 | 10,307 tps / 65.91 TFLOPs / 19.08 GiB，provenance = `AscendFusionAttention`（`docs/bench/`）。MFU 21.12% 的分母是 torchtitan 回落的 A100 峰值，不是 910B2 的 |
+| R5 性能基线 | 🟢 | `docs/bench/`，30 步取后半程中位数，每行都带 provenance：0.6B 单卡 10,186 tps / 65.14 TFLOPs / 19.08 GiB；0.6B FSDP2×8 9,440 tps / 60.37 TFLOPs / 10.29 GiB；8B PP2×FSDP2-4 1,409 tps / 74.22 TFLOPs / 51.43 GiB。MFU 那一列的分母是 torchtitan 回落的 A100 峰值（312 TFLOPS），不是 910B2 的，跨机器不可比 |
 | R6 长稳 | 🟢 | 500 步 rc=0，无 NaN，显存自第 51 步起恒定 19.08 GiB |
 | R7 文档 | 🟢 | 本文每条结论都有可照抄的命令 |
 | R8 无隐藏降级 | 🟢 | `ascend-titan-provenance` 里注意力节点是 `ascend`，其余走上游默认 |
