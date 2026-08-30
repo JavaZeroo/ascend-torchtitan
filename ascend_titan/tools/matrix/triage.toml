@@ -106,6 +106,11 @@ pattern = 'Torch not compiled with CUDA enabled'
 note = 'torch<=2.12 pipelining fork_rng assumes cuda (fixed in 2.13)'
 
 [[rule]]
+code = 'CANN'
+pattern = 'Context Parallel is not supported with ScaledDotProductAttention or VarlenAttention'
+note = 'CP requires FlexAttention; its document mask needs inductor indirect memory, which 910B2 lacks (needs Ascend950)'
+
+[[rule]]
 code = 'TT-CUDA'
 pattern = 'DistMuon requires one CUDA device per process'
 note = 'DistMuon hard-codes CUDA'
