@@ -169,9 +169,18 @@ Buffers cannot be created while lowering a pointwise subgraph.
 
 ### R5：GDN 没有融合算子
 
-`ascend_chunk_gdn` 是纯 torch 的 chunk 递推：chunk 之间的循环是串行 Python，循环里每个算子
-还要过一遍 activation-checkpoint 的 dispatch mode。步时正比于 `tokens / chunk_size`，
-而 chunk 尺寸被数值条件卡死在 64（上面第 1 节）——所以这条路走到头了。
+`ascend_chunk_gdn` 是纯 torch 的 chunk 递推，而且这里有**两层**串行循环：
+
+1. **每个文档一次**。真实 C4 经 `ConcatThenSplitPacking` 打包后，一个 4096 的窗口里有几十个
+   文档边界；delta rule 必须在每个边界重启递推，所以 `AscendGatedDeltaKernel.forward` 按段
+   循环。实测每步每层约 74 次调用（探针计数：单步 1332 次 ÷ 18 个 GDN 层）。
+2. **每个 chunk 一次**。段内再按 64 个 token 一块串行推。
+
+循环里每个算子还要过一遍 activation-checkpoint 的 dispatch mode，所以步时是被 Python
+派发次数支配的，不是算力。chunk 尺寸又被数值条件卡死在 64（上面第 1 节）——这条路走到头了。
+
+（早先我从 dataloader 的 batch 里没看到 `cu_seqlens`，据此以为走的是 dense 单次调用。
+错了：模型内部会从 `positions` 推出 `cu_seqlens`，packed 路径一直是激活的。）
 
 出路按可行性排：
 
