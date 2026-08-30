@@ -131,12 +131,45 @@ __INV__ solve_triangular finite=False max=nan
 ```
 
 `max|A|=nan` —— **逆的输入就已经是 NaN**，所以倍增法和求逆本身都是无辜的（顺带确认
-`torch.linalg.solve_triangular` 在昇腾上能跑，只是喂给它的已经是 NaN）。NaN 形成在更早的
-门控那一段。最可能的一步是 `cum_i - cum_j`：只要有一个 token 的 log-decay 是 `-inf`
-（`g = -exp(A_log) * softplus(a + dt_bias)`，`A_log` 一大 `exp` 就溢出），累加和就是 `-inf`，
-两个 `-inf` 相减就是 NaN。下一个探针在逐个查 log_decay / cumsum / 差矩阵 / decay_matrix。
+`torch.linalg.solve_triangular` 在昇腾上能跑，只是喂给它的已经是 NaN）。
 
-recipe 保持上游的值——把 lr 调低只是推迟它——这一格记 🟡。
+第三个探针逐个查门控那一段，答案更靠前：
+
+```
+__DECAY__ first non-finite at log_decay(in): nan=40960 inf=0 shape=(1, 16, 4096)
+```
+
+**`log_decay` 进到 chunk 递推时就已经是 NaN**（65536 个元素里 40960 个）。它由上游的表达式
+算出来，我们逐字抄的那一行：
+
+```python
+g_TN = -torch.exp(A_log_N.float()) * F.softplus(a_TN.float() + dt_bias_N)
+```
+
+机制在 CPU 上两行就能复现：
+
+| `A_log` | `a` | `exp(A_log)` | `softplus(a)` | `g` |
+|--:|--:|--:|--:|--:|
+| 4 | 0 | 5.46e+01 | 6.93e-01 | -37.8 |
+| 89 | 0 | inf | 6.93e-01 | **-inf** |
+| 100 | -200 | inf | 0 | **nan** |
+
+`A_log` 涨过 ~88，`exp` 就溢出成 inf；再乘一个下溢到 0 的 softplus，`inf × 0 = nan`。
+即使不到 NaN 而只是 `-inf`，后面 `cum_i - cum_j` 里两个 `-inf` 相减照样是 NaN。
+
+### 所以现在的结论
+
+NaN 的**出生地**是门控表达式，在我们的 chunk 递推之前，而且那一行是上游的。
+但要说清楚：`A_log` 能涨到 88 本身是前面几步梯度尖峰（grad_norm 2.5 → 25）的**后果**，
+所以这是"坏掉之后在哪里变成 NaN"，不一定是"为什么会坏"。两件事要分开继续查。
+
+**没有在这里加钳位**。把 `g` 夹到有限值会让训练继续跑下去，但那是把一个已经坏掉的运行
+变成静默的坏——上游的非有限检查现在正在做它该做的事。真要修，要么在 log 空间算这个门控
+（`-exp(A_log + log softplus(...))`，避开 `inf × 0`），要么先解决梯度为什么会尖峰；
+两条都要有实测才动。
+
+recipe 保持上游的值，这一格记 🟡。
+
 
 还没排除的两条，都需要现在没有的东西：
 
