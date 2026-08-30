@@ -22,11 +22,12 @@
 - 图模式（torchair）与多模态轴。
 - 上游回归自动二分：`python -m ascend_titan.tools.bisect --config <cfg> --good <sha> --bad origin/main`（在 scratch clone 上做，绝不动 `../torchtitan`）。
 
-未完成 / 阻塞
-- **OURS-10（gpt_oss + TP）二分**：8 张卡里 0–5 全程被其它作业占着（AICore ~100%），2 卡复现只得到 HCCL EI0006（HARNESS），等卡空再做。
-- **CP**：上游要求 CP 必须配 FlexAttention（`Context Parallel is not supported with ScaledDotProductAttention or VarlenAttention`），而模型级 flex 需要 inductor，所以 CP 完全卡在 Triton-Ascend 上——`parallel/` 里加机制解决不了，保持空目录。
-- **Triton-Ascend 装到 NIGHTLY**：`/opt/venv_ta` 里的 `triton_ascend 3.2.2` 绑 triton 3.5.0 + torch 2.13，而 nightly 是 triton 3.7.1；上游只有 `release/3.5.x`/`3.6.x` 分支，要从源码构建（含 LLVM），本轮没做。它同时挡着 inductor、CP、模型级 flex、fla-npu。
-- **OURS-13**：自定义算子没有 GE converter，整模型进不了 torchair 图。
+遗留问题处理（2026-08-30 晚）
+- ~~**OURS-10（gpt_oss + TP）**~~ **已关闭**：8 卡真跑 `tp=2 ep=4 dp_shard=4`，10 步 loss 8.26175 → 3.95126。原观测在正式版 torch 栈上。
+- ~~**Triton-Ascend 装到 NIGHTLY**~~ **已解决**：triton-ascend 3.2.2（自带 triton 3.2.0）与 torch 2.15 nightly + torch_npu master 共存可行，inductor 在 910B2 上能编前反向内核。环境 `/opt/venv-triton`，装法见 `constraints/npu-triton.txt`。
+- **NPU-9（新）**：`NPUCombinedScheduling` 未构造父类子调度器 → 编译 flex 抛 AttributeError。已修复 + UT + [issue #4447](https://gitcode.com/Ascend/pytorch/issues/4447) / [PR !45534](https://gitcode.com/Ascend/pytorch/merge_requests/45534)，修复后编译版 flex（causal mask）前反向通过。
+- **CP 与模型级 flex：910B2 上不可能**（新结论，归因硬件）。document mask 里的 `aten.index.Tensor` 需要 inductor 的 indirect-memory 路径，而该配置只在 `is_ascend950` 上启用；910B2 恒为 `None`。上游又强制 CP 必须配 flex。详见能力矩阵。`parallel/` 保持空目录。
+- **OURS-13**：自定义算子没有 GE converter，整模型进不了 torchair 图。仍待做。
 - **ops-nn `-std=c++17`**：远端是 `gitcode.com/cann/ops-nn`，不在授权范围（P10 只允许 `gitcode.com/ascend/*`），因此只本地修复 + 存 `patches/ops-nn/`，不提 issue。
 - **attn_res 融合算子**：ops-transformer 的 `block_attn_res_update` 只有前向，训练接不进来。
 
