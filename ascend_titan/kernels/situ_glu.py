@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import torch
 
-from ascend_titan.kernels._probe import optional_module
+from ascend_titan.kernels._probe import installed_modules, optional_module
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,9 @@ logger = logging.getLogger(__name__)
 # add-on: it needs its own run package plus a JIT build, and is not part of the
 # NIGHTLY baseline. It is therefore the one sanctioned "warn and degrade" path
 # (ADR-004), and it goes through the shared optional-dependency probe.
-_CANDIDATES = ("cann_ops_nn", "cann_ops_nn_ascend_titan", "cann_ops_nn_custom")
+# The wheel is named after the vendor the run package was built for
+# (`cann_ops_nn_<vendor>`), so discover it rather than guessing the suffix.
+_CANDIDATES = ("cann_ops_nn", *installed_modules("cann_ops_nn_"))
 _module, _err = optional_module(*_CANDIDATES)
 _AVAILABLE = (
     _module is not None

@@ -101,3 +101,19 @@ def npu_stub_missing_op(monkeypatch, forget_kernels):
 def no_torch_npu(monkeypatch, forget_kernels):
     """Make ``import torch_npu`` fail."""
     monkeypatch.setitem(sys.modules, "torch_npu", None)
+
+
+@pytest.fixture
+def no_ops_nn(monkeypatch):
+    """Block every ops-nn torch extension, whatever vendor suffix it carries.
+
+    The wheel is named ``cann_ops_nn_<vendor>``, so a test that only blocks the
+    bare name passes on a machine without ops-nn and fails on one with it.
+    """
+    import pkgutil
+
+    for name in [m.name for m in pkgutil.iter_modules() if m.name.startswith("cann_ops_nn")]:
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setitem(sys.modules, "cann_ops_nn", None)
+    for name in [m for m in list(sys.modules) if m.startswith("ascend_titan.kernels")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)

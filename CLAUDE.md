@@ -60,7 +60,7 @@ ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugm
 8. **单一事实来源**（P11）：版本只在 `constraints/`，问题状态只在 `STATUS.md`，其它文档只引用 ID。
 9. **基础依赖硬导入**（P14 / ADR-007）：`torch` / `torch_npu` / `torchtitan` 绝不写 `try: import`，不设 `_AVAILABLE` 降级开关——缺了就抛错。算子探测走 `kernels/_probe.require_op()`（缺算子 = 昇腾侧缺口，走硬规则 2）。只有真正可选的加速包（`cann_ops_nn`、Triton-Ascend）能用 `_probe.optional_module()` + WARNING 降级；诊断工具（doctor、`tests/repro/probe_*`）例外。
 10. **不加投机性的兜底。** 与上游同一标准：只校验显式契约。
-11. **pip 安装永远带 `-c constraints/<track>.txt`**——否则 torch 被升级、torch_npu ABI 损坏。
+11. **pip 安装永远带 `-c constraints/<track>.txt`**——否则 torch 被降级/升级、torch_npu ABI 损坏。**装第三方源码包（ops-nn 的 torch_extension 等）时最容易忘**：它们的 `requirements.txt` 里写着裸 `torch`/`torch_npu`，一次 `pip install .` 就把 NIGHTLY 换成 PyPI 版（2026-08-30 实际发生过：torch 2.15.0.dev → 2.10.0）。恢复：`pip install --pre -c constraints/nightly.txt torch --index-url .../nightly/cpu` + 重装 `/opt/wheels` 的 torch_npu wheel，并删掉残留的 `site-packages/torch_npu.egg-info`，然后跑一次 golden 确认。
 12. **验证先于断言**（P13）：任何 🟢 / "已修复" 附命令与输出，且在 NIGHTLY 上跑过。
 13. **归因规则是数据**：加/改归因写 `ascend_titan/tools/matrix/triage.toml`（第一条匹配的胜出），不动 Python；改完用 `--retriage` 重跑归因。
 

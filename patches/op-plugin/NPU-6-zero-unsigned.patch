@@ -1,46 +1,52 @@
-From f61138d648c86f25b35e3971bb8b1302cf7ddf7b Mon Sep 17 00:00:00 2001
+From 51c433eee299e62b9da9351d9e2052a0ef986a72 Mon Sep 17 00:00:00 2001
 From: JavaZeroo <2487163254@qq.com>
 Date: Sun, 30 Aug 2026 01:41:51 +0800
-Subject: [PATCH] fix: zero_ on uint16/uint32/uint64 tensors (aclnnInplaceZero
- has no unsigned kernel)
+Subject: [PATCH] fix: zero_ on the dtypes aclnnInplaceZero has no kernel for
+ (uint16/32/64, float8)
 
-torch.zeros(..., dtype=torch.uint64, device="npu") and Tensor.zero_() on the
-unsigned 16/32/64-bit dtypes fail with
+torch.zeros(..., dtype=torch.uint64, device="npu"), Tensor.zero_() on the
+unsigned 16/32/64-bit dtypes, and any float8 tensor creation on NPU fail with
 
   zero_: ... ZerosLikeKernelNpuOpApi.cpp NPU function error: call
   aclnnInplaceZero failed, error code is 161002
 
 PyTorch itself creates such tensors: torch.nn.attention.varlen.varlen_attn
 allocates its rng_state placeholder as uint64, so the stock varlen attention
-path cannot run on NPU even when the attention kernel is available.
+path cannot run on NPU even when the attention kernel is available; and
+torch.zeros(..., dtype=torch.float8_e4m3fn, device="npu") is the first thing any
+FP8 recipe does, so low-precision work cannot even allocate its tensors.
 
-Zeroing is a pure bit pattern, so for these dtypes zero the same storage
-through the signed dtype of equal width (view(kShort/kInt/kLong)); strides
-and shape are preserved by the view, so non-contiguous tensors work too.
+Zeroing is a pure bit pattern, and an all-zero byte pattern is 0 in every
+integer format and +0.0 in both float8 formats, so for these dtypes zero the
+same storage through an integer dtype of equal width (view(kShort/kInt/kLong)
+for the unsigned integers, view(kChar) for the 8-bit floats). Strides and shape
+are preserved by the view, so non-contiguous tensors work too.
 
-Test: test/test_base_ops/test_zero_unsigned.py (zero_, zeros, non-contiguous
-for uint16/uint32/uint64).
+Test: test/test_base_ops/test_zero_unsigned.py (zero_, zeros, non-contiguous for
+uint16/uint32/uint64; zero_ and zeros for float8_e4m3fn/float8_e5m2).
 
 Upstream-PR: https://gitcode.com/Ascend/op-plugin/merge_requests/5801
 Upstream-Issue: https://gitcode.com/Ascend/op-plugin/issues/467
 ---
- .../ops/opapi/ZerosLikeKernelNpuOpApi.cpp     | 24 +++++++++++++
- test/test_base_ops/test_zero_unsigned.py      | 36 +++++++++++++++++++
- 2 files changed, 60 insertions(+)
+ .../ops/opapi/ZerosLikeKernelNpuOpApi.cpp     | 31 +++++++++++
+ test/test_base_ops/test_zero_unsigned.py      | 53 +++++++++++++++++++
+ 2 files changed, 84 insertions(+)
  create mode 100644 test/test_base_ops/test_zero_unsigned.py
 
 diff --git a/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp b/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp
-index d7967d826..b96e7607c 100644
+index d7967d826..f5409d314 100644
 --- a/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp
 +++ b/op_plugin/ops/opapi/ZerosLikeKernelNpuOpApi.cpp
-@@ -20,8 +20,32 @@
+@@ -20,8 +20,39 @@
  namespace op_api {
  using npu_preparation = at_npu::native::OpPreparation;
  
 +namespace {
-+// aclnnInplaceZero has no kernel for the unsigned 16/32/64-bit dtypes (error 161002).
-+// Zeroing is a pure bit pattern, so the same storage is zeroed through the signed
-+// dtype of equal width instead.
++// aclnnInplaceZero has no kernel for the unsigned 16/32/64-bit dtypes nor for the
++// 8-bit float dtypes (error 161002). Zeroing is a pure bit pattern -- and an
++// all-zero byte pattern is +0.0 in both float8 formats as well as 0 in every
++// integer format -- so the same storage is zeroed through an integer dtype of
++// equal width instead.
 +c10::optional<at::ScalarType> signed_alias_dtype(at::ScalarType dtype) {
 +  switch (dtype) {
 +    case at::kUInt16:
@@ -49,6 +55,11 @@ index d7967d826..b96e7607c 100644
 +      return at::kInt;
 +    case at::kUInt64:
 +      return at::kLong;
++    case at::kFloat8_e4m3fn:
++    case at::kFloat8_e5m2:
++    case at::kFloat8_e4m3fnuz:
++    case at::kFloat8_e5m2fnuz:
++      return at::kChar;
 +    default:
 +      return c10::nullopt;
 +  }
@@ -68,10 +79,10 @@ index d7967d826..b96e7607c 100644
  }
 diff --git a/test/test_base_ops/test_zero_unsigned.py b/test/test_base_ops/test_zero_unsigned.py
 new file mode 100644
-index 000000000..6ca97dc6d
+index 000000000..71a5bb96a
 --- /dev/null
 +++ b/test/test_base_ops/test_zero_unsigned.py
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,53 @@
 +import torch
 +import torch_npu
 +
@@ -79,10 +90,13 @@ index 000000000..6ca97dc6d
 +
 +
 +class TestZeroUnsigned(TestCase):
-+    """zero_ / zeros on the unsigned 16/32/64-bit dtypes (aclnnInplaceZero has no kernel for
-+    them; op_api::zero_ zeroes the storage through the signed dtype of equal width)."""
++    """zero_ / zeros on the dtypes aclnnInplaceZero has no kernel for: the unsigned
++    16/32/64-bit integers and the 8-bit floats. op_api::zero_ zeroes the storage
++    through an integer dtype of equal width; an all-zero byte pattern is 0 for the
++    integer dtypes and +0.0 for both float8 formats."""
 +
 +    dtypes = [torch.uint16, torch.uint32, torch.uint64]
++    float8_dtypes = [torch.float8_e4m3fn, torch.float8_e5m2]
 +
 +    def test_zero_(self):
 +        for dtype in self.dtypes:
@@ -99,6 +113,20 @@ index 000000000..6ca97dc6d
 +            self.assertEqual(npu_output.shape, torch.Size([2, 5]))
 +            self.assertTrue(bool((npu_output.cpu() == 0).all()), msg=str(dtype))
 +
++    def test_zero_float8(self):
++        for dtype in self.float8_dtypes:
++            # built on CPU then moved: aclnnInplaceOne has no float8 kernel either
++            npu_input = torch.ones(4, 3, dtype=torch.float32).to(dtype).npu()
++            npu_input.zero_()
++            self.assertEqual(npu_input.dtype, dtype)
++            self.assertTrue(bool((npu_input.float().cpu() == 0).all()), msg=str(dtype))
++
++    def test_zeros_float8(self):
++        for dtype in self.float8_dtypes:
++            npu_output = torch.zeros((2, 5), dtype=dtype, device="npu")
++            self.assertEqual(npu_output.dtype, dtype)
++            self.assertTrue(bool((npu_output.float().cpu() == 0).all()), msg=str(dtype))
++
 +    def test_zero_noncontiguous(self):
 +        for dtype in self.dtypes:
 +            npu_input = torch.ones(6, 4, dtype=dtype).npu().transpose(0, 1)
@@ -109,5 +137,5 @@ index 000000000..6ca97dc6d
 +if __name__ == "__main__":
 +    run_tests()
 -- 
-2.43.0
+2.34.1
 

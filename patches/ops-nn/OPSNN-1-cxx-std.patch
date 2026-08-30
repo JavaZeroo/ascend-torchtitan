@@ -1,0 +1,64 @@
+From: ascend-torchtitan
+Subject: [PATCH] ops-nn: JIT builder must follow torch's required C++ standard
+
+Cannot be filed upstream from here: ops-nn lives at gitcode.com/cann/ops-nn, and
+this project's operating scope is gitcode.com/ascend only (P10). The fix is kept
+here so the build stays reproducible and so whoever can file it has it ready.
+
+Problem
+  torch_extension/cann_ops_nn/op_builder/builder.py hard-codes "-std=c++17" in
+  cxx_args(). torch's public headers have required C++20 since 2.9:
+
+    torch/include/ATen/ATen.h:5:2: error: #error C++20 or later compatible
+      compiler is required to use ATen.
+    c10/util/intrusive_ptr.h: 'strong_ordering' in namespace 'std' does not name a type
+    c10/util/TypeIndex.h: 'const string_view' has no member named 'starts_with'
+
+  so every JIT-built op fails on torch >= 2.9 with "Failed to JIT compile
+  operator 'situ_glu': Error building extension 'situ_glu'".
+
+Fix
+  Derive the standard from the installed torch (>= 2.9 -> c++20), with
+  CANN_OPS_NN_CXX_STD as an override.
+
+Verified
+  torch 2.15.0.dev20260812 + torch_npu master, CANN 9.1.0, 910B2: situ_glu and
+  situ_glu_grad build and register (torch.ops.cann_ops_nn.situ_glu present).
+
+---
+diff --git a/torch_extension/cann_ops_nn/op_builder/builder.py b/torch_extension/cann_ops_nn/op_builder/builder.py
+index c983a676f..bfd478e56 100644
+--- a/torch_extension/cann_ops_nn/op_builder/builder.py
++++ b/torch_extension/cann_ops_nn/op_builder/builder.py
+@@ -131,11 +131,30 @@ class OpBuilder(ABC):
+         )
+         return paths
+ 
++    @staticmethod
++    def _cpp_std_flag():
++        """Match the C++ standard the installed torch requires.
++
++        torch's public headers use C++20 constructs (std::strong_ordering,
++        string_view::starts_with) since 2.9 and refuse to compile with
++        -std=c++17: "#error C++20 or later compatible compiler is required to
++        use PyTorch". Hard-coding c++17 therefore breaks every JIT-built op on a
++        current torch. CANN_OPS_NN_CXX_STD overrides the choice.
++        """
++        override = os.environ.get("CANN_OPS_NN_CXX_STD")
++        if override:
++            return f"-std={override}"
++        try:
++            major, minor = (int(p) for p in torch.__version__.split(".")[:2])
++        except ValueError:
++            return "-std=c++20"
++        return "-std=c++17" if (major, minor) < (2, 9) else "-std=c++20"
++
+     def cxx_args(self):
+         args = [
+             "-O3",
+             "-w",
+-            "-std=c++17",
++            self._cpp_std_flag(),
+             "-fPIC",
+             "-fstack-protector-all",
+             "-Wl,-z,relro,-z,now,-z,noexecstack",

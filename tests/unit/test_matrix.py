@@ -184,3 +184,27 @@ def test_provenance_section_orders_ascend_first():
     assert "ascend_titan" in rows[0] and "| ascend |" in rows[0]
     assert "upstream-override" in rows[1]
     assert "CrossEntropyLoss" in rows[2]
+
+
+def test_bench_parses_and_takes_steady_state():
+    """Step 1 carries warm-up; the baseline must not report it as throughput."""
+    from ascend_titan.tools.bench import parse_steps, render, steady_state
+
+    log = (
+        "step:  1  loss:  7.53909  grad_norm:  9.7176  memory:  2.38GiB(3.90%)  "
+        "tps: 10,000  tflops: 5.00  mfu: 1.00%\n"
+        "step:  2  loss:  6.88108  grad_norm:  6.4899  memory:  2.38GiB(3.90%)  "
+        "tps: 50,000  tflops: 29.00  mfu: 9.00%\n"
+        "step:  3  loss:  5.10291  grad_norm:  3.3062  memory:  2.38GiB(3.90%)  "
+        "tps: 52,000  tflops: 30.00  mfu: 9.50%\n"
+    )
+    steps = parse_steps(log)
+    assert [s["step"] for s in steps] == [1, 2, 3]
+    s = steady_state(steps)
+    assert s["tps"] >= 50_000  # warm-up step excluded
+    assert s["loss"] == 5.10291  # loss is always the last step's
+
+    from ascend_titan.tools.bench import Row
+
+    md = render([Row(module="m", config="c", ngpu=1, note="boom")], "torchX_npuY")
+    assert "🔴" in md and "provenance" in md

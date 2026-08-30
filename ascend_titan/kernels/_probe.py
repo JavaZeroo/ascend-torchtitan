@@ -27,7 +27,13 @@ import torch_npu
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MissingNpuOpError", "require_op", "optional_module", "torch_npu"]
+__all__ = [
+    "MissingNpuOpError",
+    "installed_modules",
+    "optional_module",
+    "require_op",
+    "torch_npu",
+]
 
 
 class MissingNpuOpError(RuntimeError):
@@ -45,6 +51,18 @@ def require_op(name: str):
             f"gitcode.com/Ascend (principle P9). Do not work around it here."
         )
     return op
+
+
+def installed_modules(prefix: str) -> list[str]:
+    """Importable top-level module names starting with ``prefix``.
+
+    ops-nn names its torch extension after the vendor it was built for
+    (``cann_ops_nn_<vendor>``), so the module name depends on how the run
+    package was installed. Discover it instead of guessing.
+    """
+    import pkgutil
+
+    return sorted(m.name for m in pkgutil.iter_modules() if m.name.startswith(prefix))
 
 
 def optional_module(*candidates: str) -> tuple[ModuleType | None, Exception | None]:

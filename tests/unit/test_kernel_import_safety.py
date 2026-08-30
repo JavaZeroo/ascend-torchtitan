@@ -8,7 +8,6 @@ genuinely optional add-ons (ops-nn), covered at the bottom.
 """
 
 import importlib
-import sys
 
 import pytest
 
@@ -41,9 +40,8 @@ def test_import_with_incomplete_torch_npu_raises(npu_stub_missing_op, name, op):
 
 
 @pytest.mark.titan
-def test_optional_addon_still_degrades_loudly(monkeypatch, npu_stub):
+def test_optional_addon_still_degrades_loudly(npu_stub, no_ops_nn):
     """ops-nn needs its own run package + JIT build: optional, so ADR-004 applies."""
-    monkeypatch.setitem(sys.modules, "cann_ops_nn", None)
     mod = importlib.import_module("ascend_titan.kernels.situ_glu")
     assert mod._AVAILABLE is False
     assert not hasattr(mod, "ops_nn_situ_glu")
