@@ -86,15 +86,53 @@ def ascend_nodes(module: str, config: str) -> list[str]:
     return sorted({r.config_cls for r in rows if r.origin == "ascend"})
 
 
-def run_one(repo: Path, module: str, config: str, ngpu: int, cards: str, timeout: int) -> Row:
+def run_one(
+    repo: Path,
+    module: str,
+    config: str,
+    ngpu: int,
+    cards: str,
+    timeout: int,
+    steps: int = 30,
+    deterministic: bool = False,
+) -> Row:
+    """One recipe, ``steps`` steps, throughput read from the second half.
+
+    Not deterministic by default: ``--debug.deterministic`` calls
+    ``torch.use_deterministic_algorithms``, which changes which kernels run. It
+    is the right switch for comparing *numbers* and the wrong one for measuring
+    *time*. Determinism is covered by the golden curves instead.
+
+    The LR schedule is pinned to the recipe's own ``training.steps`` default so a
+    30-step probe does not compress warmup into the measured window (the same
+    trap documented in ``release_check``).
+    """
     row = Row(module=module, config=config, ngpu=ngpu)
     env = os.environ.copy()
     env.update(
-        {"MODULE": module, "CONFIG": config, "NPU": str(ngpu), "ASCEND_RT_VISIBLE_DEVICES": cards}
+        {
+            "MODULE": module,
+            "CONFIG": config,
+            "NPU": str(ngpu),
+            "ASCEND_RT_VISIBLE_DEVICES": cards,
+            # Last rank: under PP only the final stage has a real loss.
+            "LOG_RANK": str(ngpu - 1),
+        }
     )
+    args = [
+        "--debug.seed",
+        "42",
+        "--training.steps",
+        str(steps),
+        "--lr_scheduler.total_steps",
+        "1000",
+        "--checkpoint.no-enable",
+    ]
+    if deterministic:
+        args.append("--debug.deterministic")
     try:
         out = subprocess.run(
-            [str(repo / "scripts/run_train.sh"), "--debug.seed", "42", "--debug.deterministic"],
+            [str(repo / "scripts/run_train.sh"), *args],
             env=env,
             timeout=timeout,
             text=True,
@@ -123,10 +161,14 @@ def render(rows: list[Row], tag: str) -> str:
     lines = [
         f"# 性能基线 · {tag}",
         "",
-        f"生成于 {time.strftime('%Y-%m-%d %H:%M')}，"
-        "`--debug.seed 42 --debug.deterministic`，取后半程步的中位数。",
+        f"生成于 {time.strftime('%Y-%m-%d %H:%M')}，取后半程步的中位数（前半程当预热丢掉）。",
         "",
-        "| recipe | 卡 | step10 loss | tps | TFLOPs | MFU | 显存 | 生效的昇腾实现 |",
+        "**MFU 的分母不是 910B2 的峰值。** torchtitan 认不出 `Ascend910B2`，"
+        "回落到 A100 的 3.120e14 FLOPS（日志里有 "
+        "`Peak flops undefined for: Ascend910B2, fallback to A100`）。"
+        '所以这一列读作"相对 312 TFLOPS 的占比"，跨机器不可比；可比的是 tps 与 TFLOPs 本身。',
+        "",
+        "| recipe | 卡 | loss | tps | TFLOPs | MFU* | 显存 | 生效的昇腾实现 |",
         "|---|:--:|---|---|---|---|---|---|",
     ]
     for r in rows:
@@ -159,6 +201,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--cards", default="0")
     p.add_argument("--timeout", type=int, default=900)
+    p.add_argument("--steps", type=int, default=30)
+    p.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="run under --debug.deterministic (slower; changes kernel selection)",
+    )
     p.add_argument("--out", default=None, help="directory for the markdown + json (default stdout)")
     p.add_argument(
         "--recipe",
@@ -178,7 +226,9 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for module, config, ngpu in recipes:
         print(f"[bench] {config} on {ngpu} card(s)", flush=True)
-        rows.append(run_one(repo, module, config, ngpu, a.cards, a.timeout))
+        rows.append(
+            run_one(repo, module, config, ngpu, a.cards, a.timeout, a.steps, a.deterministic)
+        )
     tag = tuple_tag()
     report = render(rows, tag)
     print(report)

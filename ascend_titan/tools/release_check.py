@@ -37,17 +37,25 @@ class Check:
     seconds: float = 0.0
 
 
+# A short probe must keep the recipe's real LR curve. ``lr_scheduler.total_steps``
+# falls back to ``training.steps`` and clamps ``warmup_steps`` down to it, so
+# ``--training.steps 20`` on a recipe configured for 1000 steps with 20 warmup
+# steps reaches full LR immediately -- qwen3.5-0.8B (lr 5e-3) then goes non-finite
+# by step 4, which says nothing about Ascend. Pin the schedule to the recipe's own
+# ``training.steps`` default.
+_SHORT = ["--training.steps", "20", "--lr_scheduler.total_steps", "1000"]
+
 # (name, criterion, config, ngpu, extra args)
 PLANS: dict[str, list[tuple[str, str, str, int, list[str]]]] = {
     "qwen3": [
-        ("real-size 1 NPU", "R1", "qwen3_0_6b_npu", 1, ["--training.steps", "20"]),
-        ("FSDP2 x8", "R2", "qwen3_0_6b_npu_fsdp2", 8, ["--training.steps", "20"]),
-        ("FSDP2 x4 + TP2", "R2", "qwen3_0_6b_npu_tp2", 8, ["--training.steps", "20"]),
-        ("PP2 + FSDP2 x4", "R2", "qwen3_0_6b_npu_pp2", 8, ["--training.steps", "20"]),
+        ("real-size 1 NPU", "R1", "qwen3_0_6b_npu", 1, _SHORT),
+        ("FSDP2 x8", "R2", "qwen3_0_6b_npu_fsdp2", 8, _SHORT),
+        ("FSDP2 x4 + TP2", "R2", "qwen3_0_6b_npu_tp2", 8, _SHORT),
+        ("PP2 + FSDP2 x4", "R2", "qwen3_8b_npu_pp2", 8, _SHORT),
     ],
     "qwen3_5": [
-        ("real-size 1 NPU", "R1", "qwen35_0_8b_npu", 1, ["--training.steps", "20"]),
-        ("FSDP2 x8", "R2", "qwen35_0_8b_npu_fsdp2", 8, ["--training.steps", "20"]),
+        ("real-size 1 NPU", "R1", "qwen35_0_8b_npu", 1, _SHORT),
+        ("FSDP2 x8", "R2", "qwen35_0_8b_npu_fsdp2", 8, _SHORT),
     ],
 }
 MODULES = {"qwen3": "ascend_titan.models.qwen3", "qwen3_5": "ascend_titan.models.qwen3_5"}
@@ -60,7 +68,17 @@ def run(
     chk = Check(name=config, criterion="", command=cmd)
     env = os.environ.copy()
     env.update(
-        {"MODULE": module, "CONFIG": config, "NPU": str(ngpu), "ASCEND_RT_VISIBLE_DEVICES": cards}
+        {
+            "MODULE": module,
+            "CONFIG": config,
+            "NPU": str(ngpu),
+            "ASCEND_RT_VISIBLE_DEVICES": cards,
+            # Log the LAST rank, not rank 0. Under pipeline parallel only the final
+            # stage computes the loss; every other rank reports a placeholder
+            # (`loss: -4.00000`), so a rank-0 log makes a healthy PP run look like
+            # a broken one. For non-PP runs every rank logs the same number.
+            "LOG_RANK": str(ngpu - 1),
+        }
     )
     t0 = time.time()
     try:
@@ -113,6 +131,19 @@ def checkpoint_roundtrip(
     C's final loss must equal A's. Anything else means the checkpoint does not
     carry the full training state, which is the difference between a model you
     can hand over and a demo.
+
+    Two things make this comparison meaningless if you get them wrong, and both
+    cost a day to find:
+
+    * ``lr_scheduler.total_steps`` falls back to ``training.steps``, and
+      ``warmup_steps`` (200 by default) is clamped down to it. Run B with
+      ``--training.steps 5`` therefore warms up over 5 steps while run A warms up
+      over 10 -- different learning rates for the same five steps, so C lands
+      somewhere A never visits and the checkpoint looks broken when it is fine.
+      Pin ``--lr_scheduler.total_steps`` to 2*steps in all three runs.
+    * ``checkpoint.folder`` is resolved *inside* the dump folder, so runs must be
+      separated with ``--dump_folder``: A alone, B and C sharing one. Reusing a
+      folder makes C resume from the checkpoint C itself wrote last time.
     """
     import shutil
     import tempfile
@@ -123,13 +154,20 @@ def checkpoint_roundtrip(
         command=(
             f"NPU={ngpu} MODULE={module} CONFIG={config} ./scripts/run_train.sh "
             f"--checkpoint.enable --checkpoint.interval {steps} --training.steps {{N}} "
-            f"--debug.seed 42 --debug.deterministic"
+            f"--lr_scheduler.total_steps {2 * steps} --debug.seed 42 --debug.deterministic"
         ),
     )
-    folder = Path(tempfile.mkdtemp(prefix="ascend_titan_ckpt_", dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix="ascend_titan_ckpt_", dir="/tmp"))
     t0 = time.time()
     try:
-        common = ["--debug.seed", "42", "--debug.deterministic"]
+        # Same LR curve in all three runs regardless of how many steps each takes.
+        common = [
+            "--debug.seed",
+            "42",
+            "--debug.deterministic",
+            "--lr_scheduler.total_steps",
+            str(2 * steps),
+        ]
 
         def go(extra: list[str]) -> list[tuple[int, float]]:
             env = os.environ.copy()
@@ -139,6 +177,7 @@ def checkpoint_roundtrip(
                     "CONFIG": config,
                     "NPU": str(ngpu),
                     "ASCEND_RT_VISIBLE_DEVICES": cards,
+                    "LOG_RANK": str(ngpu - 1),
                 }
             )
             out = subprocess.run(
@@ -151,11 +190,25 @@ def checkpoint_roundtrip(
             log = re.sub(r"\x1b\[[0-9;]*m", "", out.stdout + out.stderr)
             steps_seen = [(int(m.group(1)), float(m.group(2))) for m in _STEP.finditer(log)]
             if out.returncode != 0 and not steps_seen:
-                named = [ln for ln in log.splitlines() if re.search(r"\w+Error", ln)]
+                named = [
+                    ln.strip(" \u2502|")
+                    for ln in log.splitlines()
+                    if re.search(r"\w+Error: |Error parsing Config|error is ", ln)
+                    and "ChildFailedError" not in ln
+                ]
                 raise RuntimeError(named[-1][:160] if named else f"rc={out.returncode}")
             return steps_seen
 
-        reference = go(["--training.steps", str(2 * steps), "--no-checkpoint.enable"])
+        reference = go(
+            [
+                "--training.steps",
+                str(2 * steps),
+                "--checkpoint.no-enable",
+                "--dump_folder",
+                str(root / "reference"),
+            ]
+        )
+        resumable = str(root / "resumed")
         go(
             [
                 "--training.steps",
@@ -163,8 +216,8 @@ def checkpoint_roundtrip(
                 "--checkpoint.enable",
                 "--checkpoint.interval",
                 str(steps),
-                "--checkpoint.folder",
-                str(folder),
+                "--dump_folder",
+                resumable,
             ]
         )
         resumed = go(
@@ -174,8 +227,8 @@ def checkpoint_roundtrip(
                 "--checkpoint.enable",
                 "--checkpoint.interval",
                 str(10**9),
-                "--checkpoint.folder",
-                str(folder),
+                "--dump_folder",
+                resumable,
             ]
         )
         if not reference or not resumed:
@@ -193,7 +246,119 @@ def checkpoint_roundtrip(
         chk.detail = f"{type(e).__name__}: {str(e)[:160]}"
     finally:
         chk.seconds = round(time.time() - t0, 1)
-        shutil.rmtree(folder, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
+    return chk
+
+
+def hf_roundtrip(
+    repo: Path, module: str, config: str, cards: str, ngpu: int, steps: int, timeout: int
+) -> Check:
+    """R4's third item: can the trained model leave torchtitan and come back?
+
+    Two runs:
+      A  0 -> steps, ``--checkpoint.last_save_in_hf``  -> HF safetensors
+      B  1 step, ``--checkpoint.initial_load_in_hf`` from A's directory
+    An HF export is model-only, so B starts with a fresh optimizer and a fresh
+    dataloader; its trajectory cannot match A's. What it *can* show, and what a
+    broken ``state_dict_adapter`` would fail, is that B starts from a trained
+    model rather than a random one: B's first loss must be near A's last, not
+    back up at ``ln(vocab_size)``.
+    """
+    import shutil
+    import tempfile
+
+    chk = Check(
+        name="HF export/import",
+        criterion="R4",
+        command=(
+            f"NPU={ngpu} MODULE={module} CONFIG={config} ./scripts/run_train.sh "
+            f"--checkpoint.enable --checkpoint.last_save_in_hf --training.steps {steps} "
+            f"# then --checkpoint.initial_load_in_hf --checkpoint.initial_load_path <dir>"
+        ),
+    )
+    root = Path(tempfile.mkdtemp(prefix="ascend_titan_hf_", dir="/tmp"))
+    t0 = time.time()
+    try:
+        common = ["--debug.seed", "42", "--lr_scheduler.total_steps", str(2 * steps)]
+
+        def go(extra: list[str]) -> list[tuple[int, float]]:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "MODULE": module,
+                    "CONFIG": config,
+                    "NPU": str(ngpu),
+                    "ASCEND_RT_VISIBLE_DEVICES": cards,
+                    "LOG_RANK": str(ngpu - 1),
+                }
+            )
+            out = subprocess.run(
+                [str(repo / "scripts/run_train.sh"), *common, *extra],
+                env=env,
+                timeout=timeout,
+                text=True,
+                capture_output=True,
+            )
+            log = re.sub(r"\x1b\[[0-9;]*m", "", out.stdout + out.stderr)
+            seen = [(int(m.group(1)), float(m.group(2))) for m in _STEP.finditer(log)]
+            if out.returncode != 0 and not seen:
+                named = [
+                    ln.strip(" \u2502|")
+                    for ln in log.splitlines()
+                    if re.search(r"\w+Error: |Error parsing Config|error is ", ln)
+                    and "ChildFailedError" not in ln
+                ]
+                raise RuntimeError(named[-1][:160] if named else f"rc={out.returncode}")
+            return seen
+
+        exported = str(root / "exported")
+        trained = go(
+            [
+                "--training.steps",
+                str(steps),
+                "--checkpoint.enable",
+                "--checkpoint.interval",
+                str(steps),
+                "--checkpoint.last_save_in_hf",
+                # last_save_in_hf is rejected without it: an HF export is a model
+                # snapshot, not a resumable checkpoint.
+                "--checkpoint.last_save_model_only",
+                "--dump_folder",
+                exported,
+            ]
+        )
+        loaded = go(
+            [
+                "--training.steps",
+                "1",
+                "--checkpoint.enable",
+                "--checkpoint.interval",
+                str(10**9),
+                "--checkpoint.initial_load_in_hf",
+                "--checkpoint.initial_load_path",
+                f"{exported}/checkpoint/step-{steps}",
+                "--dump_folder",
+                str(root / "reloaded"),
+            ]
+        )
+        if not trained or not loaded:
+            chk.detail = "no step lines"
+            return chk
+        chk.steps = loaded
+        before, after = trained[-1][1], loaded[0][1]
+        # Random init sits at ln(vocab); anything near it means the weights did
+        # not survive the trip. Half the gap back to random is the line.
+        untrained = trained[0][1]
+        chk.ok = after < before + 0.5 * max(untrained - before, 0.0)
+        chk.detail = (
+            f"exported at step {steps} loss {before:.5f}; reloaded loss {after:.5f} "
+            f"(untrained was {untrained:.5f})" + ("" if chk.ok else "  (LOST THE WEIGHTS)")
+        )
+    except Exception as e:  # noqa: BLE001 - the failure is the result
+        chk.detail = f"{type(e).__name__}: {str(e)[:160]}"
+    finally:
+        chk.seconds = round(time.time() - t0, 1)
+        shutil.rmtree(root, ignore_errors=True)
     return chk
 
 
@@ -270,6 +435,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         checks.append(chk)
         print(f"[{'ok   ' if chk.ok else 'FAIL '}] checkpoint: {chk.detail}", flush=True)
+
+        print("[run  ] HF export/import", flush=True)
+        chk = hf_roundtrip(
+            repo,
+            MODULES[a.model],
+            first[2],
+            ",".join(map(str, sorted(cards[:1]))),
+            1,
+            a.checkpoint_steps,
+            a.timeout,
+        )
+        checks.append(chk)
+        print(f"[{'ok   ' if chk.ok else 'FAIL '}] HF: {chk.detail}", flush=True)
 
     report = render(a.model, checks, tuple_tag())
     print(report)
