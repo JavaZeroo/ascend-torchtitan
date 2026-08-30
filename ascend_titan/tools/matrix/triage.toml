@@ -61,6 +61,11 @@ pattern = 'torchao is not installed'
 note = 'torchao missing (float8/mx/nvfp4 need it; CUDA-only formats anyway)'
 
 [[rule]]
+code = 'CANN'
+pattern = 'aclnnInplaceCopy failed, error code is 561103'
+note = 'no float8 cast kernel on this SoC: 910B2 stores float8 but cannot convert it (needs Ascend950)'
+
+[[rule]]
 code = 'NPU-OP'
 pattern = 'NPU function error: call (aclnn\w+) failed, error code is (\d+)'
 note = 'torch_npu op-plugin kernel failure (see note)'

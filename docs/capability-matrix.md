@@ -19,6 +19,38 @@
 - **模型级 flex（2026-08-30 更新）**：torchtitan 在三处无条件 `torch.compile`（`common/attention.py` 的 `_compiled_create_block_mask` 与 `FlexAttention._compiled_flex_attn`、`common/vision_encoder.py` 的 `compiled_create_block_mask`），都不看 `config.compile.enable`。shim `flex_block_mask_eager` 在 triton 没有可用后端时把这三处换回上游自己的未编译函数，模型级 flex 因此**可达**。但**可达不等于可用**：eager flex 会把 O(T²) 的分数矩阵实体化，qwen3 stock flex 因此由 `DEP-INDUCTOR` 变成 **OOM**。所以 `npu_minimal` 的 flex→varlen 转换条件是"设备白名单已解除**且** inductor 有可用后端"，两者缺一就仍然转换；视觉塔的 flex 节点例外（它拿到的是 BlockMask，那条路径没有 varlen 掩码）。
 - **CP 的阻塞链（2026-08-30 实测）**：上游明确 `Context Parallel is not supported with ScaledDotProductAttention or VarlenAttention. Use FlexAttention or disable CP.` → CP 必须用 flex → 模型级 flex 需要 inductor → 需要 Triton-Ascend。所以 CP 不是 `parallel/` 里加个机制能解决的，**唯一路径是 Triton-Ascend**（DEP-INDUCTOR）。
 
+## NIGHTLY 全量扫描（2026-08-30，8 卡，61 个上游用例）
+
+数据来源：`python -m ascend_titan.tools.matrix --suites features,models --cards 0-7 --mode minimal --provenance`，
+NIGHTLY track（torch 2.15.0.dev20260812 + torch_npu master + `patches/` 的八个修复），910B2 ×8 / CANN 9.1.0。
+原始报告：`docs/matrix/2026-08-30_nightly.md`。
+
+**28 🟢 · 28 🔴 · 5 ⚪**
+
+| 归因 | 数量 | 是什么 | 谁来修 |
+|---|:--:|---|---|
+| `CANN` | 13 | CP ×12（见下）+ `float8_emulate_lora`（float8 没有 cast 内核，`aclnnInplaceCopy 561103`） | **硬件**：都要 Ascend950，910B2 上没有路径 |
+| `DEP-INDUCTOR` | 5 | 四个 `*_compile` 用例 + `gpt_oss_fsdp+tp+ep+compile` | 装 Triton-Ascend（已验证可行，见"Triton-Ascend / inductor"一节） |
+| `DEP` | 5 | `fla`（qwen3_5 ×3）、`helion` ×2 | 昇腾替代属 L1（fla-npu 在路线图） |
+| `TT-CUDA` | 2 | `DistMuon requires one CUDA device per process` | 上游按设计 CUDA-only |
+| `TT-KERNEL` | 2 | `override_fused_swiglu` / `override_fused_grouped_experts`（上游树内 Triton 内核） | 昇腾替代属 L1（我们已有 `npu_swiglu` 版本） |
+| `OURS-9` | 1 | `deepseek_v3_fused_mla_swiglu`：上游 override 与我们的 RoPE override 抢同一个节点 | **本仓**，唯一属于我们的红格 |
+
+**`NPU` / `NPU-OP` 归因的红格 = 0，`UNKNOWN` = 0，`HARNESS` = 0。**
+
+⚪ 5 个：4 个上游自己禁用（`2d_asynctp_compile`、`pp_zbv`、`pp_custom_csv`、`pp_looped_zero_bubble`），
+1 个上游写死要 CUDA capability 10.0（`kimi_k3_mm_fsdp`）。
+
+绿的 28 个覆盖：FSDP2 / HSDP / DDP / TP+SP / PP（1F1B、GPipe、looped、PP+DP+TP）/ EP（deepseek_v3、gpt_oss）/
+checkpoint（full、optional、seed、HF、bf16-only）/ 梯度累积 / bf16 优化器状态 / varlen+SAC / SFT /
+多模态（muse_glimmer text 与 mm）。
+
+### 这一轮扫描顺带修掉的两个 harness 缺陷
+
+- 卡表非升序时 torch_npu 静默报告 0 设备（NPU-10）→ `CardPool` 强制 `sorted()`；上一轮 12 个 `UNKNOWN` 就是它。
+- HCCL 默认端口被机器上别人的作业占用 → runner 按卡分配 `HCCL_IF_BASE_PORT`；修完 `float8_emulate_lora`
+  才露出真实原因（float8 cast）。
+
 ## 历史数据（2026-08-29，正式版 torch，M2 扫描）
 
 数据来源：M2 全量扫描（`python -m ascend_titan.tools.matrix`，上游 `features` + `models` 套件共 61 个用例，对每个配置施加当时的 `npu_baseline`＝现在的 `npu_minimal` + `npu_rms_norm`），2026-08-29，torchtitan `13da2d77c`，Ascend 910B2 ×8 / CANN 9.1.0。原始报告：`docs/matrix/2026-08-29_stable.md`、`docs/matrix/2026-08-29_next.md`。

@@ -224,3 +224,12 @@ def test_card_pool_hands_out_ascending_lists():
 
     pool = CardPool([4, 5, 0, 1])
     assert pool.acquire(4) == [0, 1, 4, 5]
+
+
+def test_hccl_base_port_is_per_card_set_and_out_of_the_default_range():
+    """HCCL's default port collides with other jobs on a shared box (HARNESS reds)."""
+    from ascend_titan.tools.matrix import hccl_base_port
+
+    assert hccl_base_port([0, 1]) != hccl_base_port([2, 3])
+    assert hccl_base_port([4, 5]) == hccl_base_port([4, 5, 6, 7])  # keyed on the lowest card
+    assert all(hccl_base_port([c]) >= 61000 for c in range(8))

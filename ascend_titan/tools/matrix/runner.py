@@ -54,6 +54,16 @@ class CardPool:
             self._cv.notify_all()
 
 
+# Above HCCL's default base port and above this host's ephemeral range.
+_HCCL_PORT_BASE = 61000
+_HCCL_PORTS_PER_CARD = 8
+
+
+def hccl_base_port(cards: list[int]) -> int:
+    """A per-card-set HCCL base port, so concurrent cases never collide."""
+    return _HCCL_PORT_BASE + min(cards) * _HCCL_PORTS_PER_CARD
+
+
 def run_case(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) -> Result:
     r = Result(suite=case.suite, name=case.name, ngpu=case.ngpu, state="red")
     test_out = out / case.name
@@ -65,6 +75,13 @@ def run_case(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) 
         env = os.environ.copy()
         env.update(
             {
+                # HCCL binds a listening socket at HCCL_IF_BASE_PORT (default 60000) on
+                # the host IP. On a shared box that collides with somebody else's job --
+                # "The IP address ... and port 60001 have already been bound" -- and the
+                # case dies before step 1 (attributed HARNESS). Give each card set its
+                # own range, above the default, so our cases never collide with each
+                # other and we do not fight the next person either.
+                "HCCL_IF_BASE_PORT": str(hccl_base_port(cards)),
                 "MODULE": "ascend_titan.recipes.matrix",
                 "CONFIG": cfg,
                 "NPU": str(case.ngpu),
