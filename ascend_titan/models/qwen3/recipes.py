@@ -27,7 +27,11 @@ Full guide: ascend_titan/models/qwen3/README.md
 
 from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
 from torchtitan.models.qwen3 import model_registry
-from torchtitan.models.qwen3.config_registry import qwen3_0_6b, qwen3_debugmodel
+from torchtitan.models.qwen3.config_registry import (
+    qwen3_0_6b,
+    qwen3_14b,
+    qwen3_debugmodel,
+)
 from torchtitan.trainer import Trainer
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
@@ -138,4 +142,28 @@ def qwen3_0_6b_npu_pp2() -> Trainer.Config:
     config = qwen3_0_6b_npu()
     config.parallelism.pipeline_parallel_degree = 2
     config.parallelism.data_parallel_shard_degree = 4
+    # 上游的配置校验禁止 CUDA graphs 与 PP 并存（"CUDA graphs do not support pipeline
+    # parallelism yet"）。这个开关在昇腾上本来就不起作用——它门控的是 torch.cuda.CUDAGraph
+    # ——但校验是配置级的，与设备无关，所以 PP recipe 必须显式关掉。
+    config.training.disable_cuda_graphs = True
+    return config
+
+
+def qwen3_14b_npu_pp2() -> Trainer.Config:
+    """Qwen3-14B × (PP 2 × FSDP2 4)，8 卡 —— 流水并行的证据。
+
+    为什么不是 0.6B：0.6B / 1.7B / 4B 都 tie 了 embedding 与 lm_head，而上游明确
+    ``Weight tying is not supported with Pipeline Parallel``。14B 起不再 tie，所以
+    PP 的证据只能在这个尺寸上取。这是上游的限制，与昇腾无关。
+    """
+    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
+
+    config = qwen3_14b()
+    config.model_spec = model_registry("14B", attn_backend="varlen")
+    config.override.imports = [ATTENTION_OVERRIDE]
+    config.hf_assets_path = hf_assets_path("Qwen3-14B")
+    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
+    config.parallelism.pipeline_parallel_degree = 2
+    config.parallelism.data_parallel_shard_degree = 4
+    config.training.disable_cuda_graphs = True  # 同上：上游禁止 CUDA graphs + PP
     return config

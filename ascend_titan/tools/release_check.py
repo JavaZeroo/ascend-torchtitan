@@ -86,8 +86,18 @@ def run(
             chk.ok = False
             chk.detail += "  (loss did not decrease)"
     else:
-        tail = [ln for ln in log.splitlines() if "Error" in ln or "error is" in ln]
-        chk.detail = tail[-1][:200] if tail else f"rc={out.returncode}, no step lines"
+        # Prefer a line that names the actual problem over torchrun's wrapper
+        # (ChildFailedError says nothing): config validation prints "Error parsing
+        # Config", NPU errors print "error is <code>", python prints "<Name>Error: ".
+        lines = [ln.strip(" \u2502|") for ln in log.splitlines()]
+        named = [
+            ln
+            for ln in lines
+            if ("Error parsing Config" in ln or "error is" in ln or re.search(r"\w+Error: ", ln))
+            and "ChildFailedError" not in ln
+            and "lspci" not in ln
+        ]
+        chk.detail = named[-1][:200] if named else f"rc={out.returncode}, no step lines"
     return chk
 
 
