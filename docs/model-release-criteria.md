@@ -38,6 +38,18 @@ debugmodel 的 golden 仍然保留——它是最便宜的回归探测器——�
 
 我们现在的 recipe 一律 `checkpoint.enable = False`——那是冒烟配置，release 配置不能这样。
 
+对比时有两个坑，踩过一次要一天：
+
+- **LR 曲线绑在 `--training.steps` 上**。`lr_scheduler.total_steps` 缺省回落到 `training.steps`，
+  而 `warmup_steps`（默认 200）会被 clamp 到它。存档运行用 `--training.steps 5`，前 5 步是
+  5 步 warmup；参照运行用 `--training.steps 10`，同样这 5 步却是 10 步 warmup——学习率不同，
+  续训自然落在参照轨迹之外，看上去像 checkpoint 坏了。三个运行都要 `--lr_scheduler.total_steps`
+  钉死。
+- **`checkpoint.folder` 是相对 dump folder 解析的**，所以三个运行必须用 `--dump_folder` 分开
+  （参照单独一个，存档与续训共用一个）。复用同一个目录会让续训加载它自己上次写的 checkpoint。
+
+`python -m ascend_titan.tools.release_check` 已经按这个协议实现。
+
 ## R5 性能有基线
 
 真实尺寸下的 tps / TFLOPs / MFU / 显存，**带 provenance**（P7）。数字要能回答"跑的是不是我们

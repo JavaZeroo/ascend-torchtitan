@@ -110,18 +110,23 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 
 | 模型 | 状态 | recipe | 指南 | 说明 / 阻塞 |
 |---|:--:|---|:--:|---|
-| **Qwen3** | 🟢 | `models/qwen3` | [📖](ascend_titan/models/qwen3/README.md) | 参考模型：单卡 / FSDP2×2 golden 逐位冻结，门禁跑的就是它 |
-| **Llama 3** | 🟢 | `models/llama3` | [📖](ascend_titan/models/llama3/README.md) | **零 override** 的上游路径；上游 features 并行套件也跑在它上面 |
-| **Qwen3.5** | 🔴 | `models/qwen3_5` | [📖](ascend_titan/models/qwen3_5/README.md) | `DEP-FLA`：`gdn.py` 模块级 import `fla`（CUDA-only），昇腾替代 fla-npu 属 M4 |
-| **Kimi K3** | 🔴 | `models/kimi_k3` | [📖](ascend_titan/models/kimi_k3/README.md) | `TT-11`：模块级 import attn-gym cute 后端 → CUDA-only `cutlass`；SiTU-GLU 昇腾算子已就绪 |
+| **Qwen3** | 🟢 | `models/qwen3` | [📖](ascend_titan/models/qwen3/README.md) | **release 级**：0.6B 真实尺寸，R1–R8 全绿（单卡/FSDP2×8/TP2/PP2、golden 逐位、500 步长稳、checkpoint 与 HF 往返、性能基线带 provenance） |
+| **Llama 3** | 🟡 | `models/llama3` | [📖](ascend_titan/models/llama3/README.md) | **零 override** 的上游路径；上游 features 并行套件也跑在它上面。只有 debugmodel，R1–R8 未取 |
+| **Qwen3.5** | 🟡 | `models/qwen3_5` | [📖](ascend_titan/models/qwen3_5/README.md) | 语言侧 0.8B 路径打通（GDN / conv1d 走 `kernels/gdn.py`，对 attn_gym reference 逐项对拍）；从零训练第 5 步发散，定位中；视觉塔的 document mask 撞 910B2 限制；GDN 无融合算子 |
+| **Kimi K3** | 🔴 | `models/kimi_k3` | [📖](ascend_titan/models/kimi_k3/README.md) | KDA / MoE / `cutlass` 都不是问题；卡在视觉塔的 document mask（910B2 无 indirect-memory lowering）。2026-08-30 的绿 2026-08-31 不再复现，待二分 |
 | **DeepSeek-V3** | 🟡 | 矩阵覆盖 | — | MoE + EP（fsdp+ep、hsdp+ep）🟢；`fused_mla_swiglu` = OURS-9，MTP = DEP-HELION |
 | **GPT-OSS** | 🟡 | 矩阵覆盖 | — | `pp+fsdp+ep+sacop` 🟢（attention sinks 的 LSE 尾部已实现）；`fsdp+tp+ep` = OURS-10 |
 | **Kimi K2.7** | 🟡 | 矩阵覆盖 | — | muon / MoE 用例覆盖；DistMuon 是 CUDA-only |
 | **Muse Glimmer** | 🟡 | 矩阵覆盖 | — | text 变体覆盖；mm 变体走 CP，停在 DEP-INDUCTOR |
 | **Flux** | ⚪ | — | — | 扩散模型，尚未评估 |
 
-🟢 跑通且有 golden / 矩阵格子 · 🟡 部分跑通、未设门禁 · 🔴 阻塞（必须写归因）· ⚪ 未评估。
-"没测"和"测了不行"永远不共用一格（P2）。`python -m ascend_titan.models.registry` 打印这张表。
+🟢 **release 级**——[`docs/model-release-criteria.md`](docs/model-release-criteria.md) 的 R1–R8
+每条都有记录下来的命令与输出 · 🟡 能跑但有缺口（缺口必须列出来）· 🔴 阻塞（必须写归因）· ⚪ 未评估。
+"没测"和"测了不行"永远不共用一格（P2）。`python -m ascend_titan.models.registry` 打印这张表
+和逐条判据表。
+
+> 2026-08-31 起 🟢 只给 release 级。此前它的意思是"debugmodel 能跑"，所以几个模型从 🟢 降到
+> 🟡——尺子换了，不是退步了。
 
 ---
 

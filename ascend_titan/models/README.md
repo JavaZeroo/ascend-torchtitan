@@ -19,7 +19,7 @@ ascend_titan/models/
 
 | 模型 | 状态 | 我们的 recipe | 说明 / 阻塞 |
 |---|:--:|---|---|
-| **Qwen3** (`qwen3`) | 🟡 | `qwen3` | 参考模型：0.6B 真实尺寸 + 真实 tokenizer/C4，单卡 / FSDP2×8 / TP2 / PP2 全绿，golden 逐位冻结，500 步长稳与 checkpoint 续训逐位一致，性能基线带 provenance。只差 R4 的第三项：HF 导出/导入还没跑。 |
+| **Qwen3** (`qwen3`) | 🟢 | `qwen3` | 参考模型，release 级：0.6B 真实尺寸 + 真实 tokenizer/C4，单卡 / FSDP2×8 / TP2 / PP2 全绿，golden 逐位冻结，500 步长稳、checkpoint 续训逐位一致、HF 权重往返、性能基线带 provenance。 |
 | **Qwen3.5** (`qwen3_5`) | 🟡 | `qwen3_5` | 语言侧真实尺寸（0.8B + 真实 tokenizer/C4 + 4096 上下文）能跑，gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override。视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制），性能是主要缺口：GDN 没有融合算子。 |
 | **Llama 3** (`llama3`) | 🟡 | `llama3` | 零 override 的 stock 参考路径：复数 RoPE + ChunkedLoss + spmd_types 全部走上游默认实现。只有 debugmodel：R1–R8 一条都没取，按新判据是 🟡 而不是 🟢。 |
 | **Kimi K3** (`kimi_k3`) | 🔴 | `kimi_k3` | 多模态 + KDA + MoE。2026-08-30 曾跑通 10 步（单卡 loss 4.10312），2026-08-31 复测不再复现。 **阻塞：**视觉塔的 block-diagonal document mask：保留 flex 撞 `SubgraphLoweringException`（910B2 无 indirect-memory lowering），转 varlen 撞 `attention_masks must be VarlenMetadata, got BlockMask`。两条都实测过；需要二分定位从绿变红的那次改动。 |
@@ -37,7 +37,7 @@ ascend_titan/models/
 
 | 模型 | R1 | R2 | R3 | R4 | R5 | R6 | R7 | R8 | 证据 |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
-| **Qwen3** | 🟢 | 🟡 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | docs/release/qwen3_torch2.15.0.dev20260812_npu2.15.0.md |
+| **Qwen3** | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | docs/release/qwen3_torch2.15.0.dev20260812_npu2.15.0.md |
 | **Qwen3.5** | 🟡 | 🟡 | 🟡 | ⚪ | 🔴 | ⚪ | 🟢 | 🟢 | — |
 
 ⚪ 表示没测过，不表示坏（P2）。逐条判据的定义见 `docs/model-release-criteria.md`，

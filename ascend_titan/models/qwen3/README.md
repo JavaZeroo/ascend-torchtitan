@@ -1,8 +1,7 @@
 # Qwen3 on Ascend
 
-**状态 🟡** · 参考模型：NIGHTLY 门禁跑的就是它，golden loss 曲线逐位冻结。
-真实尺寸（0.6B）的 R1 / R3 / R4 / R5 / R6 都有记录，唯一缺口是流水并行——判据见
-`docs/model-release-criteria.md`，逐条状态见下面第 6 节。
+**状态 🟢 release 级** · 参考模型：NIGHTLY 门禁跑的就是它，golden loss 曲线逐位冻结。
+`docs/model-release-criteria.md` 的 R1–R8 每条都有记录下来的命令与输出，见下面第 6 节。
 
 | | |
 |---|---|
@@ -124,15 +123,16 @@ PP 本身在昇腾上是通的：能力矩阵里 llama3 的 `pp_1f1b`、`pp_dp_1
 | R1 真实形态 | 🟢 | `qwen3_0_6b_npu`：Qwen3-0.6B + 真实 HF tokenizer + 真实 C4 + 4096 上下文，20 步 loss 12.14616 → 7.73866 |
 | R2 并行覆盖 | 🟢 | 单卡 🟢；FSDP2×8 🟢（12.13871 → 7.72968）；FSDP2×4+TP2 🟢（12.14696 → 7.70340）；PP2×FSDP2-4 🟢 —— `qwen3_8b_npu_pp2` 20 步 rc=0，47.72 GiB，tps 1152 / 60.66 TFLOPs（8B 是第一个不共享 embedding 的尺寸，见下） |
 | R3 数值可信 | 🟢 | 四条 debugmodel golden 逐位冻结；500 步 loss 12.11569 → 6.28435 单调下降；`tests/npu/` 对 attention / rope / rms_norm / swiglu 逐个对上游 eager 对拍 |
-| R4 checkpoint | 🟡 | DCP 存取 + 续训 🟢：第 5 步存档 → 续训到第 10 步 loss `9.42568`，与一口气跑到底**逐位相同**。HF 导出/导入（`--checkpoint.last_save_in_hf` → `--checkpoint.initial_load_in_hf`）待跑，`release_check` 已经带上这一项 |
+| R4 checkpoint | 🟢 | DCP 存取 + 续训：第 5 步存档 → 续训到第 10 步 loss `9.42568`，与一口气跑到底**逐位相同**。HF 互操作：导出成 safetensors（`model-00001-of-00001.safetensors` + index）后用 `--checkpoint.initial_load_in_hf` 读回，第一步 loss `9.96045`（导出时 `10.23158`，随机初始是 `12.14`）——权重完整往返 |
 | R5 性能基线 | 🟢 | 10,307 tps / 65.91 TFLOPs / 19.08 GiB，provenance = `AscendFusionAttention`（`docs/bench/`）。MFU 21.12% 的分母是 torchtitan 回落的 A100 峰值，不是 910B2 的 |
 | R6 长稳 | 🟢 | 500 步 rc=0，无 NaN，显存自第 51 步起恒定 19.08 GiB |
 | R7 文档 | 🟢 | 本文每条结论都有可照抄的命令 |
 | R8 无隐藏降级 | 🟢 | `ascend-titan-provenance` 里注意力节点是 `ascend`，其余走上游默认 |
 
-HF 互操作是 R4 的第三项，也是"能不能交付出去"的分界。`release_check` 现在会跑它：
-导出成 HF safetensors，再用 `--checkpoint.initial_load_in_hf` 读回来跑一步，
-要求读回后的 loss 贴着导出时的值而不是弹回 `ln(vocab)`。
+HF 互操作是 R4 的第三项，也是"能不能交付出去"的分界。`release_check` 会跑它：导出成
+HF safetensors，再用 `--checkpoint.initial_load_in_hf` 读回来跑一步，要求 loss 贴着导出
+时的值而不是弹回 `ln(vocab)`。注意 `--checkpoint.last_save_in_hf` 必须配
+`--checkpoint.last_save_model_only`——HF 导出是模型快照，不是可续训的 checkpoint。
 
 ## 7. 待办
 

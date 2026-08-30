@@ -30,7 +30,7 @@
 | TT-6 | kimi_k3 attn_res 无 Configurable 节点 | 已确认 | 上游 ask（不提），等 kimi_k3 稳定 | — |
 | TT-7 | LM 移除 sdpa | 无需处理 | override 机制已覆盖 | ✅ |
 | TT-10 | 树内 Triton override / DistMuon 写死 CUDA | 无需处理 | 昇腾替代在 L1 | ✅（swiglu 已替代） |
-| TT-11 | kimi_k3 导入需要 `cutlass` | 已确认（NIGHTLY 仍在；DEP） | `patches/evidence/torchtitan/0005-TT-11-*.patch`；不提上游 ⇒ kimi_k3 保持 🔴 | — |
+| TT-11 | kimi_k3 导入需要 `cutlass` | **已关闭（证伪）** | `cutlass` 就是 `nvidia-cutlass-dsl`，有 aarch64 wheel；装上即可 import，会执行 cute 内核的节点由 `kernels/kda.py` override 掉 | ✅ kimi_k3 debugmodel 单卡 10 步 loss 4.10312 |
 | OURS-1 | attention host offsets D2H | 已修复（本仓） | custom_op 内部；每步一次 D2H 仍在 | — |
 | OURS-2/4/8/9 | LSE / provenance / compile graph break / override 冲突 | 已修复（本仓） | 见 CHANGELOG | ✅ |
 | OURS-3 | 滑窗 `sparse_mode=4` 未测 | 待确认 | 补 NPU 测试 | 待做 |
@@ -38,7 +38,7 @@
 | OURS-6 | issue 未提交 | 已关闭 | torch_npu / op-plugin 六项已按 P9 提交（见 NPU-* 行）；torchtitan / pytorch 按 P10 不提 | — |
 | OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | HARNESS | — |
 | OURS-10 | gpt_oss × TP | 已确认 | 排查中（NIGHTLY 上复测待做） | 待做 |
-| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 进行中 | `constraints/npu-triton.txt` → 待改 `extras/triton.txt`；torch_npu master 已先试 `tl.extra.cann` | 待做 |
+| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 部分关闭（2026-08-31） | **DEP-FLA 证伪**：`fla-core` 有 aarch64 wheel，import 正常；挡住的只是它的 CUDA Triton 内核，gated delta rule 与 causal conv1d 已由 `kernels/gdn.py` 的 override 接管。剩下的仍是 inductor / flex 需要 Triton-Ascend | ✅ `qwen35_debugmodel_npu_text` 10 步 loss 3.54783；`qwen35_0_8b_npu` 真实尺寸可跑 |
 | OURS-12 | **`npu_baseline` 违反 P1/P9**：展开 ChunkedLossWrapper（TT-4）、性能 override 混入 baseline | **已关闭（2026-08-30）** | TT-4 展开已删除；`npu_baseline` 拆成 `npu_minimal`（矩阵默认）+ `npu_fused`（opt-in），`npu_rms_norm` 已移出基线 | `tests/unit/test_matrix.py`：minimal 不含 RMSNorm override、fused 含 |
 | OURS-13 | 矩阵工具在 `setup()` 之前导入 torchtitan（F4 顺序），暴露了 NPU-8 | 已确认 | NPU-8 修复后可运行；工具本身也应先 `setup()`（待做） | 第二轮 |
 

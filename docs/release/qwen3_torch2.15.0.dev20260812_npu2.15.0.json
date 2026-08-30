@@ -2,280 +2,310 @@
   {
     "name": "real-size 1 NPU",
     "criterion": "R1",
-    "command": "NPU=1 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu ./scripts/run_train.sh --training.steps 20",
+    "command": "NPU=1 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu ./scripts/run_train.sh --training.steps 20 --lr_scheduler.total_steps 1000",
     "ok": true,
-    "detail": "step 1 loss 12.16065 -> step 20 loss 8.20184",
+    "detail": "step 1 loss 12.14616 -> step 20 loss 7.73866",
     "steps": [
       [
         1,
-        12.16065
+        12.14616
       ],
       [
         2,
-        11.58359
+        11.60337
       ],
       [
         3,
-        10.71392
+        10.77961
       ],
       [
         4,
-        10.07965
+        10.08608
       ],
       [
         5,
-        10.1735
+        10.15673
       ],
       [
         6,
-        9.89524
+        9.85114
       ],
       [
         7,
-        9.69078
+        9.64293
       ],
       [
         8,
-        9.34791
+        9.2212
       ],
       [
         9,
-        9.20962
+        9.00434
       ],
       [
         10,
-        9.0374
+        8.82811
       ],
       [
         11,
-        8.78281
+        8.51573
       ],
       [
         12,
-        8.82108
+        8.52504
       ],
       [
         13,
-        8.64622
+        8.2434
       ],
       [
         14,
-        8.56037
+        8.15656
       ],
       [
         15,
-        8.53063
+        8.11976
       ],
       [
         16,
-        8.50035
+        8.07458
       ],
       [
         17,
-        8.63208
+        8.30986
       ],
       [
         18,
-        8.32133
+        7.92197
       ],
       [
         19,
-        8.34942
+        7.94133
       ],
       [
         20,
-        8.20184
+        7.73866
       ]
     ],
-    "seconds": 74.0
+    "seconds": 61.9
   },
   {
     "name": "FSDP2 x8",
     "criterion": "R2",
-    "command": "NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu_fsdp2 ./scripts/run_train.sh --training.steps 20",
+    "command": "NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu_fsdp2 ./scripts/run_train.sh --training.steps 20 --lr_scheduler.total_steps 1000",
     "ok": true,
-    "detail": "step 1 loss 12.13415 -> step 20 loss 8.11547",
+    "detail": "step 1 loss 12.13871 -> step 20 loss 7.72968",
     "steps": [
       [
         1,
-        12.13415
+        12.13871
       ],
       [
         2,
-        11.51639
+        11.48896
       ],
       [
         3,
-        10.63414
+        10.65119
       ],
       [
         4,
-        10.19965
+        10.2456
       ],
       [
         5,
-        9.98329
+        9.98127
       ],
       [
         6,
-        9.7527
+        9.73413
       ],
       [
         7,
-        9.47071
+        9.41442
       ],
       [
         8,
-        9.20427
+        9.08908
       ],
       [
         9,
-        9.03732
+        8.86647
       ],
       [
         10,
-        8.85926
+        8.63567
       ],
       [
         11,
-        8.71881
+        8.45231
       ],
       [
         12,
-        8.56586
+        8.25129
       ],
       [
         13,
-        8.45715
+        8.09832
       ],
       [
         14,
-        8.39976
+        8.01611
       ],
       [
         15,
-        8.36789
+        7.96206
       ],
       [
         16,
-        8.27356
+        7.87039
       ],
       [
         17,
-        8.2345
+        7.8258
       ],
       [
         18,
-        8.13841
+        7.72598
       ],
       [
         19,
-        8.13107
+        7.74661
       ],
       [
         20,
-        8.11547
+        7.72968
       ]
     ],
-    "seconds": 74.0
+    "seconds": 69.4
   },
   {
     "name": "FSDP2 x4 + TP2",
     "criterion": "R2",
-    "command": "NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu_tp2 ./scripts/run_train.sh --training.steps 20",
+    "command": "NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu_tp2 ./scripts/run_train.sh --training.steps 20 --lr_scheduler.total_steps 1000",
     "ok": true,
-    "detail": "step 1 loss 12.13927 -> step 20 loss 8.12235",
+    "detail": "step 1 loss 12.14696 -> step 20 loss 7.70340",
     "steps": [
       [
         1,
-        12.13927
+        12.14696
       ],
       [
         2,
-        11.53427
+        11.53689
       ],
       [
         3,
-        10.64423
+        10.66425
       ],
       [
         4,
-        10.17637
+        10.20253
       ],
       [
         5,
-        10.02795
+        10.03357
       ],
       [
         6,
-        9.76692
+        9.75477
       ],
       [
         7,
-        9.52426
+        9.47787
       ],
       [
         8,
-        9.24479
+        9.15538
       ],
       [
         9,
-        9.05874
+        8.91307
       ],
       [
         10,
-        8.8544
+        8.66555
       ],
       [
         11,
-        8.75076
+        8.48775
       ],
       [
         12,
-        8.6014
+        8.31735
       ],
       [
         13,
-        8.54462
+        8.21759
       ],
       [
         14,
-        8.4089
+        8.04498
       ],
       [
         15,
-        8.37117
+        8.00105
       ],
       [
         16,
-        8.31923
+        7.94746
       ],
       [
         17,
-        8.26877
+        7.87542
       ],
       [
         18,
-        8.16201
+        7.7441
       ],
       [
         19,
-        8.13132
+        7.74166
       ],
       [
         20,
-        8.12235
+        7.7034
       ]
     ],
-    "seconds": 73.4
+    "seconds": 88.9
   },
   {
     "name": "PP2 + FSDP2 x4",
     "criterion": "R2",
-    "command": "NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu_pp2 ./scripts/run_train.sh --training.steps 20",
+    "command": "NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_14b_npu_pp2 ./scripts/run_train.sh --training.steps 20 --lr_scheduler.total_steps 1000",
     "ok": false,
-    "detail": "torch.distributed.elastic.multiprocessing.errors.ChildFailedError: ",
+    "detail": "torch.OutOfMemoryError: NPU out of memory. Tried to allocate 1.75 GiB (NPU 4; 60.96 GiB total capacity; 53.34 GiB already allocated; 53.34 GiB current active; 811.62 MiB free; 57.66 GiB reserved in to",
     "steps": [],
-    "seconds": 18.7
+    "seconds": 109.8
+  },
+  {
+    "name": "checkpoint save/resume",
+    "criterion": "R4",
+    "command": "NPU=1 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu ./scripts/run_train.sh --checkpoint.enable --checkpoint.interval 5 --training.steps {N} --lr_scheduler.total_steps 10 --debug.seed 42 --debug.deterministic",
+    "ok": true,
+    "detail": "uninterrupted step 10 loss 9.42568; resumed from step 5 -> step 10 loss 9.42568",
+    "steps": [
+      [
+        6,
+        9.97865
+      ],
+      [
+        7,
+        9.84066
+      ],
+      [
+        8,
+        9.55121
+      ],
+      [
+        9,
+        9.50112
+      ],
+      [
+        10,
+        9.42568
+      ]
+    ],
+    "seconds": 151.8
   }
 ]

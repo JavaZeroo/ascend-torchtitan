@@ -89,12 +89,11 @@ MODELS: dict[str, ModelEntry] = {
         name="qwen3",
         upstream="torchtitan.models.qwen3",
         title="Qwen3",
-        status="🟡",
+        status="🟢",
         summary=(
-            "参考模型：0.6B 真实尺寸 + 真实 tokenizer/C4，"
+            "参考模型，release 级：0.6B 真实尺寸 + 真实 tokenizer/C4，"
             "单卡 / FSDP2×8 / TP2 / PP2 全绿，golden 逐位冻结，"
-            "500 步长稳与 checkpoint 续训逐位一致，性能基线带 provenance。"
-            "只差 R4 的第三项：HF 导出/导入还没跑。"
+            "500 步长稳、checkpoint 续训逐位一致、HF 权重往返、性能基线带 provenance。"
         ),
         recipes="ascend_titan.models.qwen3.recipes",
         flavors=(
@@ -117,7 +116,7 @@ MODELS: dict[str, ModelEntry] = {
             "R1": "🟢",  # 0.6B + 真实 tokenizer + 真实 C4 + 4096 上下文
             "R2": "🟢",  # 1 卡 / FSDP2×8 / FSDP2×4+TP2 / PP2×FSDP2-4（8B）全绿
             "R3": "🟢",  # 四条 golden 逐位；500 步 12.12 → 6.28；tests/npu 算子对拍
-            "R4": "🟡",  # DCP 存取与续训逐位一致；HF 导出/导入待跑
+            "R4": "🟢",  # DCP 续训逐位一致；HF 导出/导入权重完整往返
             "R5": "🟢",  # 10,307 tps / 65.91 TFLOPs / 19.08 GiB，带 provenance
             "R6": "🟢",  # 500 步 rc=0，显存自第 51 步起恒定，无 NaN
             "R7": "🟢",  # models/qwen3/README.md

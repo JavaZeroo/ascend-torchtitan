@@ -1,0 +1,289 @@
+[
+  {
+    "module": "ascend_titan.models.qwen3",
+    "config": "qwen3_0_6b_npu",
+    "ngpu": 1,
+    "ok": true,
+    "loss": 7.76922,
+    "tps": 10307,
+    "tflops": 65.91,
+    "mfu": 21.12,
+    "memory_gib": 19.08,
+    "steps": [
+      {
+        "step": 1,
+        "loss": 12.1475,
+        "grad_norm": 4.2896,
+        "memory_gib": 13.85,
+        "tps": 1780,
+        "tflops": 11.38,
+        "mfu": 3.65
+      },
+      {
+        "step": 2,
+        "loss": 11.71412,
+        "grad_norm": 6.3682,
+        "memory_gib": 19.08,
+        "tps": 8787,
+        "tflops": 56.19,
+        "mfu": 18.01
+      },
+      {
+        "step": 3,
+        "loss": 10.76635,
+        "grad_norm": 2.7663,
+        "memory_gib": 19.08,
+        "tps": 10057,
+        "tflops": 64.31,
+        "mfu": 20.61
+      },
+      {
+        "step": 4,
+        "loss": 10.13232,
+        "grad_norm": 2.8407,
+        "memory_gib": 19.08,
+        "tps": 10425,
+        "tflops": 66.66,
+        "mfu": 21.37
+      },
+      {
+        "step": 5,
+        "loss": 10.22228,
+        "grad_norm": 2.3022,
+        "memory_gib": 19.08,
+        "tps": 10262,
+        "tflops": 65.63,
+        "mfu": 21.03
+      },
+      {
+        "step": 6,
+        "loss": 9.89443,
+        "grad_norm": 2.1,
+        "memory_gib": 19.08,
+        "tps": 9699,
+        "tflops": 62.02,
+        "mfu": 19.88
+      },
+      {
+        "step": 7,
+        "loss": 9.66082,
+        "grad_norm": 1.9727,
+        "memory_gib": 19.08,
+        "tps": 9769,
+        "tflops": 62.47,
+        "mfu": 20.02
+      },
+      {
+        "step": 8,
+        "loss": 9.2484,
+        "grad_norm": 2.4655,
+        "memory_gib": 19.08,
+        "tps": 10325,
+        "tflops": 66.03,
+        "mfu": 21.16
+      },
+      {
+        "step": 9,
+        "loss": 9.05878,
+        "grad_norm": 1.6005,
+        "memory_gib": 19.08,
+        "tps": 10157,
+        "tflops": 64.95,
+        "mfu": 20.82
+      },
+      {
+        "step": 10,
+        "loss": 8.83298,
+        "grad_norm": 1.2969,
+        "memory_gib": 19.08,
+        "tps": 10272,
+        "tflops": 65.69,
+        "mfu": 21.05
+      },
+      {
+        "step": 11,
+        "loss": 8.51385,
+        "grad_norm": 1.2463,
+        "memory_gib": 19.08,
+        "tps": 10062,
+        "tflops": 64.35,
+        "mfu": 20.62
+      },
+      {
+        "step": 12,
+        "loss": 8.53757,
+        "grad_norm": 1.4197,
+        "memory_gib": 19.08,
+        "tps": 10570,
+        "tflops": 67.59,
+        "mfu": 21.66
+      },
+      {
+        "step": 13,
+        "loss": 8.2812,
+        "grad_norm": 1.1689,
+        "memory_gib": 19.08,
+        "tps": 9391,
+        "tflops": 60.05,
+        "mfu": 19.25
+      },
+      {
+        "step": 14,
+        "loss": 8.18785,
+        "grad_norm": 0.9744,
+        "memory_gib": 19.08,
+        "tps": 10185,
+        "tflops": 65.13,
+        "mfu": 20.88
+      },
+      {
+        "step": 15,
+        "loss": 8.13551,
+        "grad_norm": 0.8968,
+        "memory_gib": 19.08,
+        "tps": 10414,
+        "tflops": 66.6,
+        "mfu": 21.34
+      },
+      {
+        "step": 16,
+        "loss": 8.10163,
+        "grad_norm": 0.9717,
+        "memory_gib": 19.08,
+        "tps": 9714,
+        "tflops": 62.12,
+        "mfu": 19.91
+      },
+      {
+        "step": 17,
+        "loss": 8.29488,
+        "grad_norm": 1.2728,
+        "memory_gib": 19.08,
+        "tps": 10636,
+        "tflops": 68.01,
+        "mfu": 21.8
+      },
+      {
+        "step": 18,
+        "loss": 7.92937,
+        "grad_norm": 0.9534,
+        "memory_gib": 19.08,
+        "tps": 10323,
+        "tflops": 66.02,
+        "mfu": 21.16
+      },
+      {
+        "step": 19,
+        "loss": 7.9384,
+        "grad_norm": 0.6826,
+        "memory_gib": 19.08,
+        "tps": 10094,
+        "tflops": 64.55,
+        "mfu": 20.69
+      },
+      {
+        "step": 20,
+        "loss": 7.74266,
+        "grad_norm": 0.8238,
+        "memory_gib": 19.08,
+        "tps": 10338,
+        "tflops": 66.11,
+        "mfu": 21.19
+      },
+      {
+        "step": 21,
+        "loss": 7.87745,
+        "grad_norm": 0.9937,
+        "memory_gib": 19.08,
+        "tps": 10307,
+        "tflops": 65.91,
+        "mfu": 21.12
+      },
+      {
+        "step": 22,
+        "loss": 7.9902,
+        "grad_norm": 0.7149,
+        "memory_gib": 19.08,
+        "tps": 9556,
+        "tflops": 61.11,
+        "mfu": 19.59
+      },
+      {
+        "step": 23,
+        "loss": 7.95039,
+        "grad_norm": 0.8934,
+        "memory_gib": 19.08,
+        "tps": 10273,
+        "tflops": 65.7,
+        "mfu": 21.06
+      },
+      {
+        "step": 24,
+        "loss": 7.75623,
+        "grad_norm": 1.0113,
+        "memory_gib": 19.08,
+        "tps": 10260,
+        "tflops": 65.61,
+        "mfu": 21.03
+      },
+      {
+        "step": 25,
+        "loss": 7.89635,
+        "grad_norm": 0.7904,
+        "memory_gib": 19.08,
+        "tps": 10180,
+        "tflops": 65.1,
+        "mfu": 20.87
+      },
+      {
+        "step": 26,
+        "loss": 8.23627,
+        "grad_norm": 0.7928,
+        "memory_gib": 19.08,
+        "tps": 10053,
+        "tflops": 64.29,
+        "mfu": 20.61
+      },
+      {
+        "step": 27,
+        "loss": 7.76995,
+        "grad_norm": 0.7984,
+        "memory_gib": 19.08,
+        "tps": 10744,
+        "tflops": 68.71,
+        "mfu": 22.02
+      },
+      {
+        "step": 28,
+        "loss": 8.02804,
+        "grad_norm": 1.0778,
+        "memory_gib": 19.08,
+        "tps": 10477,
+        "tflops": 67.0,
+        "mfu": 21.47
+      },
+      {
+        "step": 29,
+        "loss": 7.90087,
+        "grad_norm": 1.0068,
+        "memory_gib": 19.08,
+        "tps": 10429,
+        "tflops": 66.69,
+        "mfu": 21.38
+      },
+      {
+        "step": 30,
+        "loss": 7.76922,
+        "grad_norm": 1.3038,
+        "memory_gib": 19.08,
+        "tps": 10840,
+        "tflops": 69.32,
+        "mfu": 22.22
+      }
+    ],
+    "ascend_nodes": [
+      "ascend_titan.kernels.attention.AscendFusionAttention.Config"
+    ],
+    "note": ""
+  }
+]

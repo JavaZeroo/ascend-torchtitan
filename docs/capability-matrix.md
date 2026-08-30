@@ -114,12 +114,13 @@ triton-ascend 3.2.2（自带 triton 3.2.0）**可以和 torch 2.15 nightly + tor
 
 | 模型 / 路径 | NIGHTLY | 说明 |
 |---|:--:|---|
-| kimi_k3 debugmodel（视觉塔 + KDA + MoE） | 🟢 | 单卡 10 步 `loss 4.10312`；`ascend_titan.models.kimi_k3` |
-| 视觉塔的 BlockMask 构建 | 🟢 | 靠 shim `flex_block_mask_eager`（上游无条件 `torch.compile`，无开关） |
-| 视觉塔的 FlexAttention 节点 | 🟢 | `npu_minimal` 不转换它（那条路径没有 varlen 掩码），走 eager flex；视觉序列短，不会像 LM 那样 OOM |
+| kimi_k3 debugmodel（视觉塔 + KDA + MoE） | 🔴 | **2026-08-31 复测不再复现**（2026-08-30 曾记录单卡 10 步 `loss 4.10312`）。现在撞的是下面那行的视觉塔 document mask。两条路都堵：保留 flex → `SubgraphLoweringException`；把视觉塔的 flex 转成 varlen → `attention_masks must be VarlenMetadata, got BlockMask`（两个都实测过）。需要二分定位是哪次改动/哪个 wheel 让它从绿变红——在那之前不再声称它绿 |
+| 视觉塔的 BlockMask 构建 | 🟢 | 靠 shim `flex_block_mask_eager`（上游无条件 `torch.compile`，无开关）。注意它只解决**构建掩码**那一步，`flex_attention` 自身的 lowering 不在它管辖内 |
+| 视觉塔的 FlexAttention 节点 | 🟡 | `npu_minimal` 不转换它（那条路径没有 varlen 掩码），走 eager flex；视觉序列短，不会像 LM 那样 OOM。**但取决于 mask_mod 读不读张量**，见下一行 |
+| 视觉塔的 block-diagonal document mask | 🔴 | 910B2 硬件限制（同 CP / 模型级 flex）。`common/vision_encoder.py:57` 的 `mask_mod` 是 `segment_ids[q_idx] == segment_ids[kv_idx]`，读张量 ⇒ pointwise 子图里建 buffer ⇒ `SubgraphLoweringException`。2026-08-31 在 `qwen35_debugmodel_npu` 上实测。shim 把 `create_block_mask` 换成 eager 没用：报错发生在 `flex_attention` 自身的 lowering 里 |
 | KDA（Kimi Delta Attention） | 🟢 | `kernels/kda.py`：上游 kernel 要 CUDA + Blackwell，改走 attn_gym 的 `impl="reference"` + 自写 depthwise causal conv1d |
 | `nvidia-cutlass-dsl` | 🟢 | 有 aarch64 wheel；只 import 不执行（会执行 cute 内核的节点都被 override 掉） |
-| qwen3_5 多模态 collator | 🔴 | DEP-FLA：`gdn.py` 模块级 import `fla` |
+| qwen3_5 多模态 collator | 🔴 | 视觉塔的 document mask（上一行）。**不是 DEP-FLA**：`fla-core` 有 aarch64 wheel，装上就能 import，只是它的 Triton 内核编不出来——那条路已由 `kernels/gdn.py` 的 override 接管。qwen3_5 的语言侧真实尺寸可跑，见 `ascend_titan/models/qwen3_5/README.md` |
 
 ## 低精度 FP8（M5，2026-08-30 实测）
 

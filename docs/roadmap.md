@@ -13,6 +13,48 @@
 
 有意推迟、等有数据再定的决策：替换型 shim 的源码指纹（只在真出现替换型 shim 时做）、`AscendTrainer` 子类（尚无必要场景）、vendor 无关中间层（不做）。
 
+## 2026-08-31：从"能跑"到"能交付"
+
+`docs/model-release-criteria.md` 定义了 R1–R8，`registry.py` 的 🟢 从此只给 release 级；
+`tools/release_check.py` 把 R1 / R2 / R4 变成一条命令。今晚拿到的东西：
+
+**qwen3（参考模型）**
+- R1 真实形态：Qwen3-0.6B + 真实 HF tokenizer + 真实 C4 + 4096 上下文。
+- R2：单卡 / FSDP2×8 / FSDP2×4+TP2 / PP2×FSDP2-4 全绿。PP 的证据取在 **8B**：0.6B–4B（连
+  debugmodel）都 tie 了 embedding，上游禁止与 PP 并存；14B 在 8×910B2 上装不下（`FullAC` +
+  1×4096 微批仍 OOM，每卡 54.81 GiB 已分配）。8B 20 步 rc=0，47.72 GiB，tps 1152。
+  顺带修掉一个会误判的坑：PP 下只有最后一级算 loss，工具却在记录 rank 0（打出 `-4.00000`
+  占位符）——`release_check` / `bench` 现在记录最后一个 rank。
+- R4：DCP save/续训逐位一致（第 5 步存 → 第 10 步 loss `9.42568`）。HF 导出/导入是 R4 的
+  第三项，`release_check` 已经带上（`last_save_in_hf` 需要同时 `last_save_model_only`）。
+- R6：500 步 rc=0，loss 12.12 → 6.28，显存从第 51 步起恒定 19.08 GiB，无 NaN。
+
+**qwen3.5**
+- "阻塞在 `fla`" 这条结论是错的：`fla-core` 有 aarch64 wheel，import 正常，挡住的只是它的
+  Triton 内核。`kernels/gdn.py` 的 override 已经接管。
+- 0.8B 语言侧真实尺寸可跑。视觉侧 🔴：`common/vision_encoder.py` 的 block-diagonal
+  document mask 读张量，撞 910B2 的 indirect-memory 限制（与 CP / 模型级 flex 同根因）。
+- GDN 的 chunk 递推不再走 attn_gym 的 reference：它的 chunk 内求逆是 63 次带整块 `clone()`
+  的前代回代，0.8B 上一步十分钟跑不完。换成闭式（幂零矩阵的 Neumann 级数倍增）+ 闭式反向
+  （`grad_A = Xᵀ g Xᵀ`，反向不再经过那条幂次链），`tests/unit/test_kernel_gdn.py` +
+  `tests/npu/test_kernel_gdn.py` 对 attn_gym 前反向、以及对 fp64 真值钉住。
+- **从零训练第 5 步发散**（未定位）：8 卡与单卡都一样，grad_norm 0.85→1.11→2.98→19.98→非有限。
+  内核已排除（最坏参数下前反向都与 reference 一致且有限），嫌疑在我们把数据集从 cc12m 换成
+  C4 之后没动 lr 5e-3。`probes.py` 里有 LR 探针在夹。
+
+**两条被推翻的结论（记下来免得再犯）**
+- kimi_k3 的 🟢 不再复现：2026-08-30 记的单卡 loss 4.10312，今天撞视觉塔的 document mask。
+  保留 flex 与转 varlen 两条路都实测过，都失败。已降为 🔴 并记待二分，不再声称它绿。
+- "chunk 128/256 会 NaN 所以必须用 64" 是我先写错又改掉的：chunk 64 同样会在第 4 步炸。
+  chunk 尺寸留在 64 的理由是转移矩阵求逆的条件数（实测 5.7e3 / 5.7e6 / 5.7e15），
+  不是那个 NaN。
+
+**两个会让人白查一天的坑**（都已写进工具和文档）
+- `lr_scheduler.total_steps` 缺省回落到 `training.steps`，`warmup_steps` 被 clamp 到它：
+  短跑与长跑的**同一步**学习率不同。checkpoint 续训对比一度因此看起来是坏的。
+- `checkpoint.folder` 相对 dump folder 解析，三个运行必须用 `--dump_folder` 分开，
+  否则续训会加载自己上次写的 checkpoint。
+
 ## 2026-08-30：M3 / M4 收尾，M5 进行中
 
 已完成
