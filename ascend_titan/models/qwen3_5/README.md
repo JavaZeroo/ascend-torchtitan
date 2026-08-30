@@ -122,9 +122,19 @@ __NONFINITE__ step=6 at gdn.output (out) shape=(1, 16, 1372, 128)
 （探针先查 q/k/v/g/beta 再查输出。）这推翻了上面"不是内核"的判断：内核与
 attn_gym reference 一致这件事仍然成立，但那只说明**两边会一起炸**，不说明不炸。
 
-chunk 公式里唯一无界的量就是那个 `(I - A)^-1`。下一个探针在分辨两件事：
-是这个逆本身大到溢出（那是分块公式的问题，两个实现都躲不掉），还是倍增法的**中间幂**
-先溢出而最终的和其实有界（那换个稳定解法就能修）。
+再缩一次范围，答案不是那个逆：
+
+```
+__INV__ FIRST NON-FINITE INVERSE
+__INV__ shape=(1, 16, 25, 64, 64) max|A|=nan
+__INV__ solve_triangular finite=False max=nan
+```
+
+`max|A|=nan` —— **逆的输入就已经是 NaN**，所以倍增法和求逆本身都是无辜的（顺带确认
+`torch.linalg.solve_triangular` 在昇腾上能跑，只是喂给它的已经是 NaN）。NaN 形成在更早的
+门控那一段。最可能的一步是 `cum_i - cum_j`：只要有一个 token 的 log-decay 是 `-inf`
+（`g = -exp(A_log) * softplus(a + dt_bias)`，`A_log` 一大 `exp` 就溢出），累加和就是 `-inf`，
+两个 `-inf` 相减就是 NaN。下一个探针在逐个查 log_decay / cumsum / 差矩阵 / decay_matrix。
 
 recipe 保持上游的值——把 lr 调低只是推迟它——这一格记 🟡。
 
