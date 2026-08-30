@@ -70,7 +70,7 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh
 会被 clamp 到它。0.8B 的配置是 lr 5e-3 + 20 步 warmup + 1000 步，用 `--training.steps 5`
 跑就等于第一步直接满学习率。
 
-### 从零训练会在第 5 步发散（学习率，不是内核）
+### 从零训练会发散（不是内核；学习率能推迟，不能消除）
 
 即使把 LR 曲线钉对，`qwen35_0_8b_npu` 从随机初始化跑仍然会炸，且与卡数无关：
 
