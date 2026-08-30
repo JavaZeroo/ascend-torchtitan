@@ -121,8 +121,8 @@ PP 本身在昇腾上是通的：能力矩阵里 llama3 的 `pp_1f1b`、`pp_dp_1
 | 判据 | 状态 | 证据 |
 |---|:--:|---|
 | R1 真实形态 | 🟢 | `qwen3_0_6b_npu`：Qwen3-0.6B + 真实 HF tokenizer + 真实 C4 + 4096 上下文，20 步 loss 12.14616 → 7.73866 |
-| R2 并行覆盖 | 🟢 | 单卡 🟢；FSDP2×8 🟢（12.13871 → 7.72968）；FSDP2×4+TP2 🟢（12.14696 → 7.70340）；PP2×FSDP2-4 🟢 —— `qwen3_8b_npu_pp2` 20 步 rc=0，47.72 GiB，tps 1152 / 60.66 TFLOPs（8B 是第一个不共享 embedding 的尺寸，见下） |
-| R3 数值可信 | 🟢 | 四条 debugmodel golden 逐位冻结；500 步 loss 12.11569 → 6.28435 单调下降；`tests/npu/` 对 attention / rope / rms_norm / swiglu 逐个对上游 eager 对拍 |
+| R2 并行覆盖 | 🟢 | 单卡 🟢；FSDP2×8 🟢（12.13871 → 7.72968）；FSDP2×4+TP2 🟢（12.14696 → 7.70340）；PP2×FSDP2-4 🟢 —— `qwen3_8b_npu_pp2` 20 步 rc=0，47.72 GiB，tps 1152 / 60.66 TFLOPs，grad_norm 5.10 → 7.78（8B 是第一个不共享 embedding 的尺寸，见下。这一格的 loss 见 `docs/release/` 的报告：PP 下只有最后一级算 loss，早先的手工运行记的是 rank 0 的占位符 `-4.00000`） |
+| R3 数值可信 | 🟢 | 四条 debugmodel golden 逐位冻结；500 步 loss 12.11569 → 6.28435 稳定下降（中间有正常抖动，不是单调）；`tests/npu/` 对 attention / rope / rms_norm / swiglu 逐个对上游 eager 对拍 |
 | R4 checkpoint | 🟢 | DCP 存取 + 续训：第 5 步存档 → 续训到第 10 步 loss `9.42568`，与一口气跑到底**逐位相同**。HF 互操作：导出成 safetensors（`model-00001-of-00001.safetensors` + index）后用 `--checkpoint.initial_load_in_hf` 读回，第一步 loss `9.96045`（导出时 `10.23158`，随机初始是 `12.14`）——权重完整往返 |
 | R5 性能基线 | 🟢 | 10,307 tps / 65.91 TFLOPs / 19.08 GiB，provenance = `AscendFusionAttention`（`docs/bench/`）。MFU 21.12% 的分母是 torchtitan 回落的 A100 峰值，不是 910B2 的 |
 | R6 长稳 | 🟢 | 500 步 rc=0，无 NaN，显存自第 51 步起恒定 19.08 GiB |
@@ -136,7 +136,7 @@ HF safetensors，再用 `--checkpoint.initial_load_in_hf` 读回来跑一步，�
 
 ## 7. 待办
 
-- **PP**：14B 在 8×910B2 上的显存配平（`FullAC` + 1×4096 微批之后再试；参数与优化器状态
-  本身约 21 GiB/卡）。
+- **14B**：在 8×910B2 上的显存配平（`FullAC` + 1×4096 微批仍 OOM）。PP 的证据已经取在
+  8B 上，这条只是想把更大的尺寸也跑起来。
 - **DELTA 2** 随 RELEASE track 退役一并删除（NIGHTLY 上上游默认的 `spmd_types` 已可用）。
 - 1.7B / 32B / 30B-A3B 等其它真实尺寸（⚪）。

@@ -101,3 +101,35 @@ def test_override_replaces_the_whole_kda_subtree(npu_stub):
     assert isinstance(new, AscendInnerKDA.Config)
     assert isinstance(new.kernel, AscendKDAKernel.Config)
     assert new.kernel.lower_bound == -4.0  # deltas preserved
+
+
+def test_causal_conv1d_matches_upstreams_own_dense_expression(npu_stub):
+    """Dense branch must equal upstream's ``F.pad`` + ``F.conv1d`` + ``silu``.
+
+    The other tests here compare against ``_naive_causal_conv1d``, which is our
+    own reading of what the kernel should do -- same author, so the same
+    misreading would pass both. This one compares against the expression
+    torchtitan actually runs on the dense path
+    (``models/qwen3_5/gdn.py::InnerGatedDeltaNet.forward``), which is the thing
+    our override replaces.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    from ascend_titan.kernels.kda import ascend_causal_conv1d
+
+    gen = torch.Generator().manual_seed(3)
+    tokens, channels, width = 37, 8, 4
+    x_TC = torch.randn(tokens, channels, generator=gen)
+    weight_C1W = torch.randn(channels, 1, width, generator=gen)
+
+    x_1CT = F.pad(x_TC.transpose(0, 1).unsqueeze(0), [width - 1, 0])
+    want = (
+        F.silu(F.conv1d(x_1CT, weight_C1W, None, groups=channels))
+        .squeeze(0)
+        .transpose(0, 1)
+    )
+    got = ascend_causal_conv1d(
+        x_TC.unsqueeze(0), weight_C1W[:, 0], activation="silu"
+    ).squeeze(0)
+    torch.testing.assert_close(got, want, rtol=1e-5, atol=1e-5)

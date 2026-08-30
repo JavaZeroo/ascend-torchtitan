@@ -89,9 +89,28 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh
 seq 16384 的前向与 seq 4096 的梯度都与 attn_gym reference 一致（前向差 1.6e-7、梯度差 4.6e-5），
 两边都有限。这两条都固化在 `tests/unit/test_kernel_gdn.py` 里。
 
-嫌疑在我们自己改的那条增量：上游 0.8B 的 lr 5e-3 是配着**多模态 cc12m** 调的，我们换成了
-C4 纯文本。`probes.py` 里的 `qwen35_0_8b_lr_5e4` / `qwen35_0_8b_lr_1e3` 就是用来夹出它在
-哪里断的。结论落定前，这个 recipe 的定位是"路径通了"，不是"能拿去训练"。
+学习率能推迟它，但夹下来的形状说明不止是学习率（`probes.py` 里的两个探针）：
+
+| lr | 结局 |
+|---|---|
+| 5e-3（上游 0.8B 的值） | 第 4–5 步非有限 |
+| 1e-3 | 第 10 步非有限（第 7 步 grad_norm 已经 14.4） |
+| 5e-4 | 10 步跑完，但第 9 步 grad_norm 10.5 |
+
+**我们替换掉的每一块都已经单独验过，都不是它：**
+
+- GDN 递推：最坏门控（beta→1、decay→0）下，seq 16384 的前向与 seq 4096 的梯度都与
+  attn_gym reference 一致且有限（`tests/unit/test_kernel_gdn.py`）。
+- causal conv1d：与上游 dense 分支自己的 `F.pad` + `F.conv1d` + `silu` 逐位一致
+  （`tests/unit/test_kernel_kda.py`）——不是跟我自己写的 naive 版比。
+- 门控数学（`g_TN` / `beta_TN`）：从上游逐字抄的。
+- 同一套代码在 debugmodel 尺寸、同样 lr 5e-3 下 10 步稳定下降，golden 已冻结。
+
+所以现在的判断是：**这是 0.8B 这个配置在这份数据上从零训练的稳定性问题，不是昇腾侧的**。
+但没定位到之前，我们**不**偷偷把 recipe 的 lr 调低——那会把一个没查清的东西藏起来。
+recipe 保持上游的值，这一格记 🟡，探针留着当记录。下一步该做的是：把 warmup 拉长
+（上游 1000 步只 warmup 20 步）、或者拿一个已知能训的 0.8B 配置（多模态 cc12m）当对照，
+把"数据"和"学习率"这两个变量分开。
 
 ## 3. recipe
 
