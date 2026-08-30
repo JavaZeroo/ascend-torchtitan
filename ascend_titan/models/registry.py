@@ -118,15 +118,15 @@ MODELS: dict[str, ModelEntry] = {
         name="kimi_k3",
         upstream="torchtitan.models.kimi_k3",
         title="Kimi K3",
-        status="🔴",
-        summary="上游模型包在模块级 import attn-gym 的 cute 后端，需要 CUDA-only 的 `cutlass`。",
+        status="🟢",
+        summary=("多模态 + KDA + MoE，2026-08-30 在 910B2 上跑通 10 步（loss 9.51 → 4.35）。"),
         recipes="ascend_titan.models.kimi_k3.recipes",
-        flavors=("kimi_k3_debugmodel_npu",),
-        blocker=(
-            "TT-11 / DEP-CUTLASS：`ModuleNotFoundError: No module named 'cutlass'`"
-            "（github.com/pytorch 只读，P10：只记录，不提 issue）。"
+        flavors=("kimi_k3_debugmodel_npu", "kimi_k3_debugmodel_npu_fused"),
+        notes=(
+            "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
+            "KDA 走 `kernels/kda.py` 的 override，flex 路径靠 `flex_block_mask_eager` "
+            "shim 走 eager。性能极低（tps 45），Triton-Ascend 到位前不做性能基线。"
         ),
-        notes="SiTU-GLU 的昇腾融合算子（`kernels/situ_glu.py`，ops-nn）已经写好，等模型能 import。",
     ),
     "deepseek_v3": ModelEntry(
         name="deepseek_v3",

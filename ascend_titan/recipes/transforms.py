@@ -63,6 +63,20 @@ class Applied:
         return ", ".join(parts) or "no-op"
 
 
+def _flex_attention_runs_on_npu() -> bool:
+    """True when torch_npu has lifted torch's flex-attention device whitelist.
+
+    torch's ``_validate_device`` rejects any device outside
+    ``{cuda, cpu, xpu, hpu, mps}`` (TORCH-1); torch_npu master replaces it and
+    marks the module with ``_npu_device_patched``. Measured on NIGHTLY: eager
+    ``flex_attention`` forward and backward both run on 910B2
+    (tests/repro/probe_npu_gaps.py).
+    """
+    from torch.nn.attention import flex_attention
+
+    return getattr(flex_attention, "_npu_device_patched", False)
+
+
 def _torch_fsdp_reads_spmd_types() -> bool:
     """True when torch's FSDP2 builds DTensor shards from spmd_types annotations
     (``torch.distributed._is_spmd_types_available`` exists; nightly >= 2.14.0.dev)."""
@@ -80,17 +94,20 @@ def npu_minimal(config: Trainer.Config) -> Applied:
     """
     a = Applied()
 
-    # 1. FlexAttention nodes -> VarlenAttention (torch rejects npu in flex: TORCH-1).
-    #    Flex-only fields (block_size, kernel_options) are dropped; models that
-    #    depend on Flex-only features (sinks, custom mask mods) will fail later and
-    #    get attributed, which is the point of measuring them.
-    for _fqn, _cfg, parent, attr in list(config.traverse(FlexAttention.Config)):
-        new = VarlenAttention.Config()
-        if isinstance(parent, list):
-            parent[attr] = new  # type: ignore[index]
-        else:
-            setattr(parent, attr, new)
-        a.flex_to_varlen += 1
+    # 1. FlexAttention nodes -> VarlenAttention, but only while torch still rejects
+    #    npu in flex (TORCH-1). torch_npu master lifts that whitelist, and on such a
+    #    torch_npu the upstream default is left alone -- converting it would drop
+    #    Flex-only features (sinks, custom mask mods) for no reason (P12).
+    #    Flex-only fields (block_size, kernel_options) are dropped by the conversion;
+    #    models that depend on them fail later and get attributed, which is the point.
+    if not _flex_attention_runs_on_npu():
+        for _fqn, _cfg, parent, attr in list(config.traverse(FlexAttention.Config)):
+            new = VarlenAttention.Config()
+            if isinstance(parent, list):
+                parent[attr] = new  # type: ignore[index]
+            else:
+                setattr(parent, attr, new)
+            a.flex_to_varlen += 1
 
     # 2. Ascend fused attention on every VarlenAttention node (NPU-1).
     has_varlen = any(True for _ in config.traverse(VarlenAttention.Config))

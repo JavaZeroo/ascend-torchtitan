@@ -43,3 +43,28 @@
 
 ## TT-7 LM 的 `sdpa` inner attention 已移除 —— `info`
 - `models/common/config_utils.py:97`。对非 CUDA 后端的后果：上游不存在 eager 注意力路径。记录在案；override 机制是官方答案。
+
+
+## compiled-block-mask：flex 路径三处无条件 `torch.compile`，没有开关
+
+`torchtitan/models/common/attention.py`::
+
+    _compiled_create_block_mask = torch.compile(create_block_mask)
+    class FlexAttention:
+        _compiled_flex_attn: ClassVar[Callable] = torch.compile(flex_attention, options=inductor_configs)
+
+`torchtitan/models/common/vision_encoder.py`::
+
+    compiled_create_block_mask = torch.compile(create_block_mask)
+
+三处都在 import 时求值，且都不看 `config.compile.enable`。后果：任何没有可用 inductor
+后端的设备上，只要模型用 FlexAttention（或带视觉塔），第一个 forward 就死在
+`RuntimeError: 0 active drivers`，而 `create_block_mask` 与 `flex_attention` 本身在
+eager 下工作正常（昇腾上实测 fwd + bwd 通过）。
+
+**上游 ask**：让这三处尊重一个开关（`compile.enable`，或一个 `FlexAttention` 上的
+`compile: bool = True` 字段），或者惰性编译并在编译失败时退回 eager。
+
+按 P10，我们不向 github.com/pytorch 提 issue/PR，只在本仓记录，并用 shim
+`ascend_titan/compat/shims/flex_block_mask_eager.py` 在本地绕开（特性探测：
+triton 一有可用后端就自动让路）。

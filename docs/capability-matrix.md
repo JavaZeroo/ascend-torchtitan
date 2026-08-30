@@ -15,7 +15,8 @@
 - 版本差红格消失：TT-5/TORCH-6（14 个 CP 用例，待矩阵复测）、TORCH-5（6 个 PP 用例）、TT-9；两条 shim 自动 no-op。
 - TT-4（ChunkedLossWrapper）🔴 → 🟢：单卡与 FSDP2×2 通过；`npu_baseline` 不再展开 loss。**2026-08-30 起 chunked loss 是 qwen3 参考 recipe 的默认**（删除 DELTA 4，golden 已重录）；非 chunked 路径保留为探针 `qwen3_debugmodel_npu_ce_loss`。
 - torch_npu 侧修复（`patches/torch_npu/`、`patches/op-plugin/`）：NPU-1 stock varlen、NPU-2 fake_backend、NPU-3 stock ComplexRoPE、NPU-6 uint64、NPU-7 inductor 签名、NPU-8 spmd_types 循环导入——修复前后的格子见 `docs/issues/STATUS.md` 第二轮。
-- `flex` eager 在 torch_npu master 上可用（TORCH-1 被 torch_npu 侧绕开）；模型级 stock flex 走 inductor，仍需 Triton-Ascend（DEP-INDUCTOR）。
+- `flex` eager 在 torch_npu master 上可用（TORCH-1 被 torch_npu 侧绕开；op 级 fwd+bwd 实测通过），因此 `npu_minimal` 的 flex→varlen 改为特性探测，nightly 上不再转换。
+- **模型级 flex（2026-08-30 更新）**：torchtitan 在三处无条件 `torch.compile`（`common/attention.py` 的 `_compiled_create_block_mask` 与 `FlexAttention._compiled_flex_attn`、`common/vision_encoder.py` 的 `compiled_create_block_mask`），都不看 `config.compile.enable`。shim `flex_block_mask_eager` 在 triton 没有可用后端时把这三处换回上游自己的未编译函数，模型级 flex 因此可达。qwen3 stock flex 由 `DEP-INDUCTOR` 变为 **OOM**（eager flex 在该序列长度下显存不够）——可达但不可用，仍需 Triton-Ascend。
 
 ## 历史数据（2026-08-29，正式版 torch，M2 扫描）
 
