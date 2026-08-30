@@ -59,11 +59,16 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | 项 | 910B2 | 说明 |
 |---|:--:|---|
 | `torch.zeros(dtype=torch.float8_e4m3fn, device="npu")`、`zero_` | 🟢 | 需要 op-plugin 的 NPU-6 修复（本轮扩展到 float8：全零字节在两种 float8 格式里都是 +0.0，用 int8 视图零化）。修复前报 `aclnnInplaceZero ... 161002` |
+| float8 ↔ 其它 dtype 的转换（`copy_` / `.to()` / `.float()`） | 🔴 | `aclnnInplaceCopy failed, error code is 561103`，双向都不行（bf16↔fp8、fp32↔fp8）。归因 **CANN**：910B2 上没有 float8 的 cast 内核 |
 | `torch._scaled_mm`（FP8 GEMM） | 🔴 | `_scaled_mm is supported only on the Ascend950 platform and after` —— **硬件限制**，910B2 没有 FP8 计算单元。归因 CANN/HW，不是缺陷 |
+| 上游 `float8_emulate_lora` 用例（torchao 已装） | 🔴 | 停在同一个 561103：converter 树要把权重 cast 成 float8 |
 | `torch_npu.npu_quant_matmul` | 🟢（存在） | 昇腾自己的量化矩阵乘，INT8 路径；FP8 训练 recipe 需要 A3/950 才有意义 |
 
-结论：FP8 的**张量**在 910B2 上已经能用（这是 post-converter 树上做 FP8 override 的前提），
-**计算**要等 Ascend950。在此之前不写 FP8 recipe——写了也只能在没有的硬件上跑（P13）。
+结论：910B2 上 CANN 对 float8 的支持仅限于**按字节存储**——分配可以（靠我们扩展的 NPU-6 修复），
+**转换和计算都被 CANN 拒绝**。所以 post-converter 树上的 FP8 override 在这台硬件上无从验证，
+按 P13 不写：写了也只能在没有的硬件上跑。这条要到 Ascend950 / A3 上才有意义。
+归因链：`aclnnInplaceCopy 561103`（cast）→ `_scaled_mm` 明确要求 Ascend950 → **CANN / 硬件**，
+按失败处理表"记录错误码，停"。
 
 ## 图模式（M5，2026-08-30）
 

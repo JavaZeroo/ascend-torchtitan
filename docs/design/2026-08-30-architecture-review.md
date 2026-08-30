@@ -213,4 +213,6 @@
 | ~~P1~~ 已完成（2026-08-30 追加） | L3 按模型重组：`ascend_titan/models/<model>/`（recipes + probes + 必需 README）、`models/registry.py`、`models/_template/`；`recipes/` 只留跨模型机制。`tests/unit/test_models_registry.py` 强制登记与文档 | 代码 + 测试 |
 | ~~P2~~ 已完成（2026-08-30 追加） | README 重写：banner / 架构图 / golden 曲线（`docs/assets/`）、模型与特性支持表、上游修复表 | 文档 |
 | P2 | `constraints/workspace.lock` + `scripts/workspace.sh`；`outputs/*.py` → `tests/repro/` | 环境可复现 |
-| ~~P3~~ 部分完成 | `tools/matrix/` 拆分 + `triage.toml` 已落实；**待做**：provenance 接入报告、`npu-nightly.yml` 落到真实 runner 或 cron | 工具 |
+| ~~P3~~ 部分完成 | `tools/matrix/` 拆分 + `triage.toml`、provenance 接入报告（`--provenance`）与性能基线（`tools/bench.py`）已落实；**待做**：`npu-nightly.yml` 落到真实 runner 或 cron | 工具 |
+| ~~P1~~ 已完成（M4） | Kimi-K3 跑通：`kernels/kda.py`（KDA + causal conv1d override）、`models/kimi_k3/`、shim `flex_block_mask_eager`（上游三处无条件 `torch.compile`）、`tools/bisect.py` | NPU 实测 |
+| ~~P2~~ 已完成（M5） | 图模式 `ascend_titan/graph/`（torchair，loss 分量 🟢）、多模态轴（kimi_k3）、FP8 结论（张量可用、转换与 GEMM 在 910B2 上由 CANN 拒绝） | NPU 实测 |
