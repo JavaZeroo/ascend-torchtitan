@@ -114,7 +114,7 @@ def run_one(
             "MODULE": module,
             "CONFIG": config,
             "NPU": str(ngpu),
-            "ASCEND_RT_VISIBLE_DEVICES": cards,
+            "ASCEND_RT_VISIBLE_DEVICES": cards,  # already normalised by main()
             # Last rank: under PP only the final stage has a real loss.
             "LOG_RANK": str(ngpu - 1),
         }
@@ -216,6 +216,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     a = p.parse_args(argv)
 
+    # --cards takes the same "0-7" / "0,2,4" spec as the matrix runner, but
+    # ASCEND_RT_VISIBLE_DEVICES only understands a comma list -- and it must be
+    # ascending, or torch_npu reports zero devices (NPU-10). Passing "0-7"
+    # straight through is silently fatal: every multi-card row comes back
+    # "rc=1, 0 steps parsed".
+    from ascend_titan.tools.matrix import parse_cards
+
+    cards = sorted(parse_cards(a.cards))
+
     recipes = DEFAULT_RECIPES
     if a.recipe:
         recipes = []
@@ -226,8 +235,18 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for module, config, ngpu in recipes:
         print(f"[bench] {config} on {ngpu} card(s)", flush=True)
+        # A recipe that needs 8 cards gets the first 8, in ascending order.
         rows.append(
-            run_one(repo, module, config, ngpu, a.cards, a.timeout, a.steps, a.deterministic)
+            run_one(
+                repo,
+                module,
+                config,
+                ngpu,
+                ",".join(str(c) for c in cards[:ngpu]),
+                a.timeout,
+                a.steps,
+                a.deterministic,
+            )
         )
     tag = tuple_tag()
     report = render(rows, tag)

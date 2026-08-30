@@ -253,3 +253,19 @@ def test_npu_minimal_skips_both_attention_overrides_under_a_block_override(npu_s
     assert ROPE_OVERRIDE not in cfg.override.imports
     assert not a.attention_override and not a.rope_override
     assert any("attention block" in n for n in a.notes)
+
+
+def test_bench_normalises_the_card_spec():
+    """``--cards 0-7`` must become "0,1,...,7", not reach the env verbatim.
+
+    ``ASCEND_RT_VISIBLE_DEVICES`` understands a comma list only, and it must be
+    ascending or torch_npu reports zero devices (NPU-10). Passing the matrix's
+    range syntax straight through is silently fatal: every multi-card row comes
+    back "rc=1, 0 steps parsed" with nothing pointing at the cause.
+    """
+    from ascend_titan.tools.matrix import parse_cards
+
+    cards = sorted(parse_cards("0-7"))
+    assert ",".join(str(c) for c in cards[:8]) == "0,1,2,3,4,5,6,7"
+    assert ",".join(str(c) for c in cards[:1]) == "0"
+    assert sorted(parse_cards("4,5,0,1")) == [0, 1, 4, 5]
