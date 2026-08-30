@@ -66,19 +66,40 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 | `qwen3_debugmodel_npu_ce_loss` | 非 chunked 的 `CrossEntropyLoss` | 🟢 `5.10304 / 3.3061`——与删除 DELTA 4 之前的旧 golden 逐位相同，即这条探针精确保留了原路径 |
 | `qwen3_debugmodel_npu_fused_norm` | 只叠加 RMSNorm 一个算子 | 🟢 |
 
-## 5. 真实尺寸（⚪ 未评估）
+## 5. 真实尺寸（release 级）
 
-上游 registry 里还有 `qwen3_0_6b`、`qwen3_1_7b`、`qwen3_14b`、`qwen3_32b`、`qwen3_30b_a3b`、
-`qwen3_moe_debug` 等。它们**尚未在昇腾上跑过**，按 P2 记为 ⚪ 而不是 🟢。要跑的话不要新建配置，
-走矩阵 runner 直接跑上游配置 + `npu_minimal`：
+判据见 `docs/model-release-criteria.md`。资产先备好（这台机器访问不到 huggingface.co，脚本走镜像）：
 
 ```bash
-MODULE=ascend_titan.recipes.matrix \
-CONFIG=torchtitan.models.qwen3.config_registry__qwen3_0_6b \
-NPU=8 ./scripts/run_train.sh
+./scripts/fetch_assets.sh tokenizer Qwen/Qwen3-0.6B
+./scripts/fetch_assets.sh c4 1                 # 真实 C4 分片 + 50k 篇子集
+export ASCEND_TITAN_ASSETS=/opt/assets
 ```
 
-跑绿之后再决定要不要在 `recipes.py` 里固化成一条 recipe（附 golden + `validated:` 头行）。
+| recipe | 卡 | 说明 |
+|---|:--:|---|
+| `qwen3_0_6b_npu` | 1 | Qwen3-0.6B，真实 tokenizer + 真实 C4 + 4096 上下文 |
+| `qwen3_0_6b_npu_fsdp2` | 8 | FSDP2 8 路 |
+| `qwen3_0_6b_npu_tp2` | 8 | FSDP2 4 × TP 2 |
+| `qwen3_14b_npu_pp2` | 8 | Qwen3-14B × (PP 2 × FSDP2 4)，全量重计算 |
+
+```bash
+ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
+MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu ./scripts/run_train.sh --training.steps 20
+```
+
+一次跑完全部 release 检查并留档：
+
+```bash
+python -m ascend_titan.tools.release_check --model qwen3 --cards 0-7 --out docs/release
+```
+
+### 为什么 PP 的证据用 14B 而不是 0.6B
+
+0.6B / 1.7B / 4B 都 tie 了 embedding 与 lm_head，而上游明确
+`Weight tying is not supported with Pipeline Parallel`——这是上游限制，与昇腾无关。
+14B 起不再 tie。PP 本身在昇腾上是通的：能力矩阵里 llama3 的 `pp_1f1b`、`pp_dp_1f1b`、
+`pp_dp_tp`、`pp_looped_1f1b`、`pp_tp_gpipe`、`llama3_fsdp+tp+pp` 全绿。
 
 ## 6. 待办
 
