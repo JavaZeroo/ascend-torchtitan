@@ -29,7 +29,7 @@ MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_debugmodel_npu_fsdp2 ./scripts/run
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 ```
 
-预期输出（NIGHTLY，2026-08-30）：`step: 10  loss:  5.10304  grad_norm:  3.3061`，
+预期输出（NIGHTLY，2026-08-30）：`step: 10  loss:  5.10291  grad_norm:  3.3062`，
 `check_golden.sh` 打印 `GOLDEN MATCH: qwen3_debugmodel_npu @ torch2.15.0.dev20260812_npu2.15.0`。
 
 ## 2. 有哪些 recipe
@@ -50,7 +50,12 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 | 1 | `attn_backend="varlen"` + `kernels.attention` override | 上游只剩 `flex` / `varlen`；模型级 flex 走 inductor（DEP-INDUCTOR），stock varlen 需要 `aten::_flash_attention_forward`（NPU-1） | 装上 Triton-Ascend 后 flex 可评估；NPU-1 合入后 stock varlen 也能跑（见 `probes.py`），但融合算子仍是性能路径 |
 | 2 | `spmd_backend="partial_dtensor"` | 正式版 torch 上 `spmd_types` + FSDP2 拿到的是普通张量（TT-5）。NIGHTLY 上上游默认已可用（llama3 stock 就在用），这里保留只为让 golden 跨 track 可比 | 弃用 RELEASE track 时 |
 | 3 | `checkpoint.enable = False` | 冒烟不做 DCP I/O，DCP 是独立的矩阵格 | 有专门的 checkpoint recipe 后 |
-| 4 | `CrossEntropyLoss` 替代 `ChunkedLossWrapper` | 正式版 torch + NPU 上 chunked loss 的 backward 撞 "data is not allocated yet"（TT-4） | **NIGHTLY 上 TT-4 已 🟢**，见"待办" |
+
+> **loss 用上游默认的 `ChunkedLossWrapper`**（2026-08-30 起）。此前有一条 DELTA 4 把它换成
+> 普通 `CrossEntropyLoss`，原因是正式版 torch + NPU 上 chunked loss 的 backward 撞
+> "data is not allocated yet"（TT-4）——那是 torch 版本差，NIGHTLY 上不存在。按 P8/P12
+> 这条增量已删除：参考路径回到上游默认，chunked loss 是被支持并有 golden 门禁的。
+> 需要对比非 chunked 路径时用探针 `qwen3_debugmodel_npu_ce_loss`。
 
 ## 4. 探针（`probes.py`，别用来训练）
 
@@ -58,7 +63,7 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 |---|---|---|
 | `qwen3_debugmodel_stock_flex` | 上游默认 flex | 🔴 DEP-INDUCTOR（未装 Triton-Ascend） |
 | `qwen3_debugmodel_stock_varlen` | 零 override 的上游 varlen | 🟢（带 NPU-1 补丁）/ 🔴（stock torch_npu）——这是判断 NPU-1 有没有合入的格子 |
-| `qwen3_debugmodel_npu_chunked_loss` | 上游默认 chunked loss | 🟢（NIGHTLY）/ 🔴（正式版，TT-4） |
+| `qwen3_debugmodel_npu_ce_loss` | 非 chunked 的 `CrossEntropyLoss` | 🟢 `5.10304 / 3.3061`——与删除 DELTA 4 之前的旧 golden 逐位相同，即这条探针精确保留了原路径 |
 | `qwen3_debugmodel_npu_fused_norm` | 只叠加 RMSNorm 一个算子 | 🟢 |
 
 ## 5. 真实尺寸（⚪ 未评估）
@@ -77,7 +82,5 @@ NPU=8 ./scripts/run_train.sh
 
 ## 6. 待办
 
-- **删掉 DELTA 4**：NIGHTLY 上 `ChunkedLossWrapper` 已 🟢，参考 recipe 应回到上游默认。
-  需要重录 `qwen3_debugmodel_npu` / `_fsdp2` 的 golden，并同步 `probes.qwen3_debugmodel_npu_chunked_loss`（届时可删）。
-- **DELTA 2** 随 RELEASE track 退役一并删除。
+- **DELTA 2** 随 RELEASE track 退役一并删除（NIGHTLY 上上游默认的 `spmd_types` 已可用）。
 - 0.6B 起的真实尺寸扫描（上表第 5 节）。

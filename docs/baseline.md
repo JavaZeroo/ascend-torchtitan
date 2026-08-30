@@ -16,10 +16,26 @@
 
 | 路径 | 结果 |
 |---|---|
-| `qwen3_debugmodel_npu` 单卡 10 步（seed 42，deterministic） | 🟢 **与 2.13 golden 逐位一致**（step 10 loss 5.10304，grad_norm 3.3061）；golden `tests/assets/losses/npu/qwen3_debugmodel_npu__torch2.15.0.dev20260812_npu2.15.0.txt` |
+| `qwen3_debugmodel_npu` 单卡 10 步（seed 42，deterministic） | 🟢 当时与 2.13 golden 逐位一致（step 10 loss 5.10304，grad_norm 3.3061）。**2026-08-30 晚：recipe 删掉 DELTA 4，loss 回到上游 `ChunkedLossWrapper`，四条 golden 全部重录**（见下节） |
 | `qwen3_debugmodel_npu_fsdp2` ×2 | 🟢 逐位一致（step 10 loss 5.07792，grad_norm 3.3201） |
-| `qwen3_debugmodel_npu_fused` / `_fused_fsdp2`（RMSNorm + SwiGLU + rotary 三个融合算子） | 🟢 2026-08-30 补录 NIGHTLY golden，**同样与 2.13 golden 逐位一致**；四条 golden 曲线至此在 NIGHTLY 上全部齐备 |
-| `qwen3_debugmodel_npu_chunked_loss`（上游默认 ChunkedLossWrapper，TT-4） | 🟢 单卡 step 10 loss 5.10291；FSDP2×2 loss 5.07796（bf16 级差异）——TT-4 在 NIGHTLY 不复现，`npu_baseline` 不再展开 loss |
+| `qwen3_debugmodel_npu_fused` / `_fused_fsdp2`（RMSNorm + SwiGLU + rotary 三个融合算子） | 🟢 2026-08-30 补录 NIGHTLY golden，当时与 2.13 golden 逐位一致；随后随 DELTA 4 的删除一并重录 |
+
+### golden 重录（2026-08-30 晚，删除 DELTA 4 之后）
+
+参考 recipe 的 loss 回到上游默认 `ChunkedLossWrapper`（TT-4 只是正式版 torch 的版本差，P8/P12）。
+recipe 定义变了，旧 golden 随之失效，四条曲线在 NIGHTLY 上重录并复跑验证：
+
+| golden | step 10 loss / grad_norm |
+|---|---|
+| `qwen3_debugmodel_npu` | 5.10291 / 3.3062 |
+| `qwen3_debugmodel_npu_fsdp2` | 5.07796 / 3.3200 |
+| `qwen3_debugmodel_npu_fused` | 5.09586 / 3.2994 |
+| `qwen3_debugmodel_npu_fused_fsdp2` | 5.10656 / 3.3339 |
+
+前两条与上一轮 `qwen3_debugmodel_npu_chunked_loss` 探针的实测值（5.10291 / 5.07796）一致，互为交叉验证。
+正式版 torch（RELEASE track）上这条 recipe 会因 TT-4 失败——这正是 P8 说的“只在正式版上出现的问题不算问题”，
+因此 2.12 / 2.13 的旧 golden 一并删除，不再维护。
+| `qwen3_debugmodel_npu_chunked_loss`（上游默认 ChunkedLossWrapper，TT-4） | 🟢 单卡 step 10 loss 5.10291；FSDP2×2 loss 5.07796——TT-4 在 NIGHTLY 不复现。**该配置已升为参考 recipe 的默认**；探针反转为 `qwen3_debugmodel_npu_ce_loss`（测非 chunked 路径） |
 | `flex_attention` eager（torch_npu master 自带 `patch_flexattention`） | 🟢 op 级前反向（`tests/repro/probe_npu_gaps.py`） |
 | 原版 torch_npu master 上的 stock 路径 | 🔴 NPU-1（stock varlen）、NPU-2（fake_backend）、NPU-3（复数索引）、NPU-6（uint64）、NPU-7（stock flex → inductor lowering）、NPU-8（先 `import spmd_types`）——**六项全部在 torch_npu / op-plugin 侧修复**（`patches/`），修复后的结果见下节 |
 

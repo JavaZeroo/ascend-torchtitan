@@ -143,7 +143,7 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 <tr><td>varlen 注意力（上游 stock）</td><td align="center">🟢</td><td>靠 <b>NPU-1</b> 修复：为 PrivateUse1 注册 <code>aten::_flash_attention_forward/_backward</code></td></tr>
 <tr><td>RoPE：ComplexRoPE / CosSinRoPE</td><td align="center">🟢</td><td>实数缓存实现 + <code>npu_rotary_mul</code>；stock 复数索引靠 <b>NPU-3</b></td></tr>
 <tr><td>RMSNorm / SwiGLU（融合）</td><td align="center">🟢</td><td><code>npu_rms_norm</code> / <code>npu_swiglu</code>（性能 recipe，非 baseline）</td></tr>
-<tr><td>ChunkedLossWrapper（上游默认）</td><td align="center">🟢</td><td>TT-4 只在正式版 torch 上出现</td></tr>
+<tr><td>ChunkedLossWrapper（上游默认）</td><td align="center">🟢</td><td><b>参考 recipe 的默认</b>，golden 门禁覆盖；TT-4 只在正式版 torch 上出现</td></tr>
 <tr><td>SiTU-GLU（Kimi K3）</td><td align="center">🟡</td><td>ops-nn <code>aclnnSituGlu</code> 已封装；等模型包能 import</td></tr>
 <tr><td><code>torch.compile</code> / flex attention</td><td align="center">🔴</td><td><code>DEP-INDUCTOR</code>：需要 Triton-Ascend（M5）</td></tr>
 <tr><td>fake_backend 干跑（单卡模拟多卡）</td><td align="center">🟢</td><td>靠 <b>NPU-2</b> 修复</td></tr>

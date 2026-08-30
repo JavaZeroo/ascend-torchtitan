@@ -12,6 +12,8 @@ pytestmark = pytest.mark.titan
 
 
 def test_qwen3_npu_recipes_build():
+    from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
+
     from ascend_titan.models.qwen3 import (
         qwen3_debugmodel_npu,
         qwen3_debugmodel_npu_fsdp2,
@@ -25,7 +27,9 @@ def test_qwen3_npu_recipes_build():
     assert cfg.checkpoint.enable is False
     assert cfg.override.imports[0] == ATTENTION_OVERRIDE
     assert cfg.parallelism.spmd_backend == "partial_dtensor"
-    assert type(cfg.loss).__qualname__ == "CrossEntropyLoss.Config"
+    # The loss is upstream's default: TT-4 was a release-torch gap, not ours.
+    assert type(cfg.loss).__qualname__ == "ChunkedLossWrapper.Config"
+    assert type(cfg.loss) is type(qwen3_debugmodel().loss)
 
     assert qwen3_debugmodel_npu_fsdp2().parallelism.data_parallel_shard_degree == 2
     assert qwen3_debugmodel_stock_flex().override.imports == []
@@ -73,3 +77,18 @@ def test_llama3_stock_recipe_has_no_overrides():
     assert cfg.override.imports == []
     assert cfg.checkpoint.enable is False
     assert llama3_debugmodel_stock_npu_fsdp2().parallelism.data_parallel_shard_degree == 2
+
+
+def test_ce_loss_probe_is_the_only_place_that_unchunks_the_loss():
+    """Chunked loss is supported and default; the plain-CE path stays a probe."""
+    from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
+
+    from ascend_titan.models.qwen3 import (
+        qwen3_debugmodel_npu,
+        qwen3_debugmodel_npu_ce_loss,
+        recipes,
+    )
+
+    assert "config.loss" not in inspect.getsource(recipes.qwen3_debugmodel_npu)
+    assert type(qwen3_debugmodel_npu().loss) is type(qwen3_debugmodel().loss)
+    assert type(qwen3_debugmodel_npu_ce_loss().loss).__qualname__ == "CrossEntropyLoss.Config"

@@ -10,6 +10,8 @@ registry name (``debugmodel``, later ``0_6b`` ...), ``<variant>`` is a parallel
 or kernel delta (``fsdp2``, ``fused``). Measurement-only configs -- stock
 upstream, single-feature probes -- are NOT recipes and live in ``probes.py``.
 
+The loss is upstream's ``ChunkedLossWrapper`` -- supported, gated and golden-frozen.
+
 Why the attention delta exists: upstream language models offer only ``flex`` and
 ``varlen`` inner attention (``sdpa`` was removed, ``config_utils.py:97``).
 ``flex`` needs inductor (Triton-Ascend, DEP-INDUCTOR) at the model level, and
@@ -20,8 +22,6 @@ supported path, and ``probes.py`` keeps both stock cells measurable.
 Full guide: ascend_titan/models/qwen3/README.md
 """
 
-from torchtitan.components.loss import CrossEntropyLoss
-from torchtitan.models.common.config_utils import decoder_vocab_size
 from torchtitan.models.qwen3 import model_registry
 from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
 from torchtitan.trainer import Trainer
@@ -53,13 +53,13 @@ def qwen3_debugmodel_npu() -> Trainer.Config:
     # DELTA 3: no checkpoint I/O in the smoke run (DCP on NPU is its own cell).
     config.checkpoint.enable = False
 
-    # DELTA 4: plain CrossEntropyLoss instead of ChunkedLossWrapper. The chunked
-    # loss (upstream #4143, 2026-08-13) drives FSDP's lm_head unshard by hand and
-    # its backward hits "data is not allocated yet" on release torch + NPU (TT-4).
-    # TT-4 is 🟢 on NIGHTLY, so this delta is scheduled for removal -- it needs a
-    # re-recorded golden, see README.md "待办". (matrix: loss/chunked)
-    assert config.model_spec is not None
-    config.loss = CrossEntropyLoss.Config(global_vocab_size=decoder_vocab_size(config.model_spec))
+    # The loss stays upstream's ChunkedLossWrapper. It used to be swapped for a
+    # plain CrossEntropyLoss because the chunked loss (upstream #4143) drives
+    # FSDP's lm_head unshard by hand and its backward hit "data is not allocated
+    # yet" on release torch + NPU (TT-4) -- a torch version gap that does not
+    # exist on NIGHTLY, so carrying the delta only made the reference path differ
+    # from upstream for no reason (P8/P12). ``probes.qwen3_debugmodel_npu_ce_loss``
+    # keeps the non-chunked path measurable. (matrix: loss/chunked)
 
     return config
 

@@ -13,7 +13,7 @@
 
 **NIGHTLY 对红格的影响（2026-08-30 实测，`docs/baseline.md`）**：
 - 版本差红格消失：TT-5/TORCH-6（14 个 CP 用例，待矩阵复测）、TORCH-5（6 个 PP 用例）、TT-9；两条 shim 自动 no-op。
-- TT-4（ChunkedLossWrapper）🔴 → 🟢：单卡与 FSDP2×2 通过；`npu_baseline` 不再展开 loss。
+- TT-4（ChunkedLossWrapper）🔴 → 🟢：单卡与 FSDP2×2 通过；`npu_baseline` 不再展开 loss。**2026-08-30 起 chunked loss 是 qwen3 参考 recipe 的默认**（删除 DELTA 4，golden 已重录）；非 chunked 路径保留为探针 `qwen3_debugmodel_npu_ce_loss`。
 - torch_npu 侧修复（`patches/torch_npu/`、`patches/op-plugin/`）：NPU-1 stock varlen、NPU-2 fake_backend、NPU-3 stock ComplexRoPE、NPU-6 uint64、NPU-7 inductor 签名、NPU-8 spmd_types 循环导入——修复前后的格子见 `docs/issues/STATUS.md` 第二轮。
 - `flex` eager 在 torch_npu master 上可用（TORCH-1 被 torch_npu 侧绕开）；模型级 stock flex 走 inductor，仍需 Triton-Ascend（DEP-INDUCTOR）。
 

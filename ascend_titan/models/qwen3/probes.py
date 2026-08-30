@@ -13,8 +13,9 @@ Run one exactly like a recipe::
         NPU=1 ./scripts/run_train.sh
 """
 
+from torchtitan.components.loss import CrossEntropyLoss
+from torchtitan.models.common.config_utils import decoder_vocab_size
 from torchtitan.models.qwen3 import model_registry
-from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
 from torchtitan.trainer import Trainer
 
 from ascend_titan.models.qwen3.recipes import RMSNORM_OVERRIDE, qwen3_debugmodel_npu
@@ -44,14 +45,17 @@ def qwen3_debugmodel_stock_varlen() -> Trainer.Config:
     return config
 
 
-def qwen3_debugmodel_npu_chunked_loss() -> Trainer.Config:
-    """Cell loss/chunked: upstream ``ChunkedLossWrapper`` (the upstream default).
+def qwen3_debugmodel_npu_ce_loss() -> Trainer.Config:
+    """Cell loss/plain_ce: unchunked ``CrossEntropyLoss``.
 
-    🔴 on release torch (TT-4), 🟢 on NIGHTLY. When ``recipes.py`` drops DELTA 4
-    this probe becomes redundant and should be deleted.
+    The reference recipe runs upstream's ``ChunkedLossWrapper`` (TT-4 is a
+    release-torch-only gap). This probe keeps the unchunked path measurable --
+    it is what the pre-2026-08-30 golden was recorded against, and it is the
+    fallback to reach for when isolating a chunked-loss regression.
     """
     config = qwen3_debugmodel_npu()
-    config.loss = qwen3_debugmodel().loss
+    assert config.model_spec is not None
+    config.loss = CrossEntropyLoss.Config(global_vocab_size=decoder_vocab_size(config.model_spec))
     return config
 
 

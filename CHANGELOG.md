@@ -7,6 +7,7 @@
 - **P14 / ADR-007：基础依赖硬导入。** 删掉全部 `try: import torch_npu` + `_AVAILABLE` 降级开关；新增 `kernels/_probe.py`（`require_op()` 缺算子即抛 `MissingNpuOpError`，`optional_module()` 只给真正可选的加速包）。`setup()` 去掉 `require_npu` 参数（本来就不该可选）。`tests/unit/test_kernel_import_safety.py` 从"缺 torch_npu 也能安全 import"翻转为"必须抛错"；CPU 单测改用 `npu_stub` / `no_torch_npu` / `npu_stub_missing_op` fixture 提供依赖。
 - **按模型重组 L3**：新增 `ascend_titan/models/<model>/`（`recipes.py` + 可选 `probes.py` + **必需的 `README.md`**）。`recipes/qwen3.py` → `models/qwen3/`（4 个矩阵探针拆到 `probes.py`），`recipes/stock.py` → `models/llama3/`；新增 `models/qwen3_5/`、`models/kimi_k3/`（recipe 就绪，状态 🔴 + 归因）、`models/registry.py`（模型状态表，纯数据）、`models/_template/`（新模型骨架）。`ascend_titan/recipes/` 只保留跨模型机制（`transforms.py`、`matrix.py`）。`tests/unit/test_models_registry.py` 强制"每个模型包有 README 且已登记"。
   - 入口路径变化：`--module ascend_titan.recipes.qwen3` → `--module ascend_titan.models.qwen3`（`--config` 函数名不变，golden 不受影响）。
+- **支持并默认使用上游 `ChunkedLossWrapper`**：删除 qwen3 参考 recipe 的 DELTA 4（此前把 loss 换成普通 `CrossEntropyLoss`，只为绕开 TT-4——正式版 torch 的版本差，NIGHTLY 不复现）。四条 golden 已在 NIGHTLY 上重录并复跑验证（5.10291 / 5.07796 / 5.09586 / 5.10656）；2.12 / 2.13 的旧 golden 因 recipe 定义变更而删除。非 chunked 路径反转为探针 `qwen3_debugmodel_npu_ce_loss`。
 - 补录 NIGHTLY 的 `qwen3_debugmodel_npu_fused` / `_fused_fsdp2` golden：与 torch 2.13 的对应曲线逐位一致；四条 golden 在 NIGHTLY 上齐备。
 - **README 重写**：banner / 架构图 / golden loss 曲线（`docs/assets/*.svg`，曲线由冻结的 golden 数据生成）、徽章、模型支持表、特性支持表、上游修复表（六个 gitcode issue/PR）。
 
