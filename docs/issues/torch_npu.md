@@ -41,3 +41,20 @@
 - 根因（两条链）：(1) `torch_npu/distributed/tensor/{_matrix_ops,_moe_ops,_attention}.py` 从已弃用的 `torch.distributed._tensor` 导入，该包的 `__init__` 导入 `_shards_wrapper` → `torch.distributed.checkpoint` → `fsdp`；(2) `_init/patches/distributed_patches.py::_apply_sharded_grad_scaler_patch` 为替换 `ShardedGradScaler` 直接导入 `torch.distributed.fsdp.sharded_grad_scaler`。nightly 的 `_fsdp_state.py` 在模块级 `import spmd_types`；因为 torch_npu 是在 `import torch` 内部被自动加载的，这两条链变成了每一次 `import torch` 的副作用。
 - 修复：`patches/torch_npu/NPU-8-dtensor-public-imports.patch`——(1) 改用公开的 `torch.distributed.tensor{,.experimental,._dtensor_spec}`；(2) `ShardedGradScaler` 替换延后到用户导入该模块之后（新增 `torch_npu/utils/_import_hooks.py::run_after_import` meta-path 后置导入钩子）。UT 断言 `import torch` 后 `torch.distributed.{checkpoint,fsdp}` 不在 `sys.modules` 且替换仍生效。
 - 诉求：torch_npu 的 import 期足迹应最小化（自动加载 = 全局副作用）。
+
+
+## NPU-9：`NPUCombinedScheduling` 未构造父类的子调度器
+
+`torch_npu/_inductor/codegen/npu_combined_scheduling.py` 的 `NPUCombinedScheduling` 继承
+`CUDACombinedScheduling`，但 `__init__` 直接调 `BaseScheduling.__init__`，跳过父类构造函数，
+于是 `_cutlass_scheduling` / `_rocm_cpp_scheduling` / `_cutedsl_scheduling` 以及 torch 2.15 新增的
+`_nv_universal_gemm_scheduling` 都不存在。它只覆写了三个方法，其余继承方法无条件解引用这些属性。
+
+后果：NPU 上编译 FlexAttention 抛
+`AttributeError: 'NPUCombinedScheduling' object has no attribute '_nv_universal_gemm_scheduling'`。
+`can_fuse_reduction_epilogue` 是 torch 2.15 新增的方法——**torch 每加一个这样的方法，就会重现一次**。
+
+修复：`__init__` 先 `CUDACombinedScheduling.__init__`，再覆盖 NPU 自己的子调度器；父类那些
+`is_*_template()` 在 NPU 上都返回 False，调度行为不变。
+
+issue [#4447](https://gitcode.com/Ascend/pytorch/issues/4447) · PR [!45534](https://gitcode.com/Ascend/pytorch/merge_requests/45534)

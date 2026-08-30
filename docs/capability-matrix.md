@@ -43,6 +43,22 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 
 **结论：NPU/CANN 归因的红格为 0。** torch_npu 的三个缺陷（NPU-1 varlen 内核、NPU-2 fake 进程组、NPU-3 复数索引）都已通过上游本就存在的等价实现（varlen 节点 + `npu_fusion_attention`、实数缓存 RoPE）在 L1 层绕开，剩余红格全部归 torch 版本、上游 CUDA-only 组件或本仓自身待办。
 
+## Triton-Ascend / inductor（2026-08-30 实测）
+
+triton-ascend 3.2.2（自带 triton 3.2.0）**可以和 torch 2.15 nightly + torch_npu master 共存**。
+装法与两个坑见 `constraints/npu-triton.txt`；环境 `/opt/venv-triton`（从 `/opt/venv-nightly` 克隆而来）。
+
+| 项 | 结果 |
+|---|---|
+| `triton.backends` 里有 `ascend` 且 `is_active()` | 🟢 |
+| `torch.compile(f, backend="inductor")` 简单逐点 + 归约图（前反向） | 🟢 |
+| `torch.compile(flex_attention)` + causal block mask | 🔴 → **🟢（NPU-9 修复后）** |
+| `torch.compile(flex_attention)` + 读 buffer 的 mask_mod（document mask） | 🔴 `SubgraphLoweringException: Buffers cannot be created while lowering a pointwise subgraph` |
+| torchtitan `1d_compile` 用例（llama3 + `compile.enable`） | 🔴 同上（它的 flex 掩码就是 document mask） |
+
+也就是说：inductor 本身在昇腾上是通的，**卡点收敛到"带 buffer 读的 flex mask_mod 子图无法 lowering"这一个**。
+CP 依赖 flex（上游硬性要求），所以 CP 也卡在这里。
+
 ## 多模态（M5，2026-08-30 实测）
 
 | 模型 / 路径 | NIGHTLY | 说明 |

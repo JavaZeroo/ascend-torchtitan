@@ -1,0 +1,113 @@
+From de2456320ae7abf68f473a8e67ed4f59da980668 Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 16:05:45 +0800
+Subject: [PATCH] fix: NPUCombinedScheduling must construct the CUDA-side
+ sub-schedulers
+
+NPUCombinedScheduling extends CUDACombinedScheduling but calls
+BaseScheduling.__init__ directly, so none of the parent's sub-schedulers
+(_cutlass_scheduling, _rocm_cpp_scheduling, _cutedsl_scheduling and, since
+torch 2.15, _nv_universal_gemm_scheduling) are created. It overrides only
+choose_node_backend / can_fuse_vertical / can_fuse_horizontal; every other
+method is inherited and dereferences those attributes unconditionally.
+
+The result on torch 2.15 is that compiling FlexAttention on NPU dies in
+can_fuse_reduction_epilogue:
+
+  AttributeError: 'NPUCombinedScheduling' object has no attribute
+  '_nv_universal_gemm_scheduling'
+
+and any future method torch adds to CUDACombinedScheduling breaks the same way.
+
+Construct the parent's sub-schedulers, then replace the ones NPU implements
+itself. Their is_*_template() predicates all answer False on NPU, so scheduling
+behaviour is unchanged.
+
+Verified on Ascend 910B2, CANN 9.1.0, torch 2.15.0.dev20260812 + triton-ascend
+3.2.2: torch.compile(flex_attention) with a causal block mask now compiles and
+runs forward + backward; it raised the AttributeError above before.
+
+Test: test/_inductor/test_combined_scheduling_init.py
+
+Upstream-PR: https://gitcode.com/Ascend/pytorch/merge_requests/45534
+Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4447
+---
+ .../test_combined_scheduling_init.py          | 45 +++++++++++++++++++
+ .../codegen/npu_combined_scheduling.py        |  9 +++-
+ 2 files changed, 53 insertions(+), 1 deletion(-)
+ create mode 100644 test/_inductor/test_combined_scheduling_init.py
+
+diff --git a/test/_inductor/test_combined_scheduling_init.py b/test/_inductor/test_combined_scheduling_init.py
+new file mode 100644
+index 000000000..c14ddc372
+--- /dev/null
++++ b/test/_inductor/test_combined_scheduling_init.py
+@@ -0,0 +1,45 @@
++import torch
++import torch_npu
++from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedScheduling
++from torch_npu._inductor.codegen.npu_combined_scheduling import NPUCombinedScheduling
++from torch_npu.testing.testcase import TestCase, run_tests
++
++
++class TestNPUCombinedSchedulingInit(TestCase):
++    """NPUCombinedScheduling inherits most of CUDACombinedScheduling's methods.
++
++    Those methods dereference the parent's sub-scheduler attributes unconditionally,
++    so the NPU scheduler has to construct them. Skipping the parent constructor made
++    every inherited method a latent AttributeError -- torch 2.15 added
++    ``can_fuse_reduction_epilogue``/``_nv_universal_gemm_scheduling`` and compiling
++    FlexAttention on NPU started failing with
++
++      AttributeError: 'NPUCombinedScheduling' object has no attribute
++      '_nv_universal_gemm_scheduling'
++    """
++
++    def test_parent_sub_scheduler_attributes_exist(self):
++        sched = NPUCombinedScheduling(None)
++        missing = [
++            name
++            for name in vars(CUDACombinedScheduling(None))
++            if name.startswith("_") and not hasattr(sched, name)
++        ]
++        self.assertTrue(not missing, str(missing))
++
++    def test_npu_sub_schedulers_win(self):
++        from torch_npu._inductor.codegen.catlass.catlass_scheduling import CATLASSScheduling
++        from torch_npu._inductor.codegen.scheduling import NPUTritonScheduling
++
++        sched = NPUCombinedScheduling(None)
++        self.assertTrue(isinstance(sched._triton_scheduling, NPUTritonScheduling))
++        self.assertTrue(isinstance(sched._catlass_scheduling, CATLASSScheduling))
++
++    def test_inherited_methods_do_not_raise(self):
++        sched = NPUCombinedScheduling(None)
++        for name in ("can_fuse_reduction_epilogue", "codegen_template"):
++            self.assertTrue(callable(getattr(sched, name)), name)
++
++
++if __name__ == "__main__":
++    run_tests()
+diff --git a/torch_npu/_inductor/codegen/npu_combined_scheduling.py b/torch_npu/_inductor/codegen/npu_combined_scheduling.py
+index def3bbb85..c7851362d 100644
+--- a/torch_npu/_inductor/codegen/npu_combined_scheduling.py
++++ b/torch_npu/_inductor/codegen/npu_combined_scheduling.py
+@@ -35,7 +35,14 @@ class NPUCombinedScheduling(CUDACombinedScheduling, TritonScheduling):
+     """
+ 
+     def __init__(self, scheduler: Scheduler | None) -> None:
+-        BaseScheduling.__init__(self, scheduler)
++        # Initialise the CUDA-side sub-schedulers as well, then replace the ones NPU
++        # implements itself. Most of CUDACombinedScheduling's methods are inherited
++        # unchanged (can_fuse_reduction_epilogue, codegen_template, ...) and they
++        # dereference those attributes unconditionally, so skipping the parent
++        # constructor turns every such method -- including any that torch adds later --
++        # into an AttributeError. Their is_*_template() predicates all answer False on
++        # NPU, so behaviour is unchanged; only the crash goes away.
++        CUDACombinedScheduling.__init__(self, scheduler)
+         self._nolinear_triton_scheduling = NPUNoLinearTritonScheduling(scheduler)
+         self._triton_scheduling = NPUTritonScheduling(scheduler)
+         self._catlass_scheduling = CATLASSScheduling(scheduler)
+-- 
+2.34.1
+

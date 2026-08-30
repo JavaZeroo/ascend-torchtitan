@@ -1,17 +1,33 @@
-# TRITON track: NEXT + Triton-Ascend（inductor 图模式、attn_gym/fla 的 Triton 内核）
-# 安装顺序很关键：triton-ascend 自带完整的 triton 3.5 发行版（含 _C/libtriton.so 与
-# backends/ascend），之后**不能**再装 PyPI 的 triton（会覆盖 _C）。
-#   pip install -c constraints/npu-triton.txt torch --index-url https://download.pytorch.org/whl/cpu
-#   pip install --pre -c constraints/npu-triton.txt torch_npu
-#   pip install triton-ascend==3.2.2 --extra-index-url https://triton-ascend.osinfra.cn/pypi/simple
-#   pip install --no-deps -e ../torchtitan
-#   grep -v '^triton$' constraints/titan-deps.txt > /tmp/deps.txt && pip install -c constraints/npu-triton.txt -r /tmp/deps.txt torchvision --extra-index-url https://download.pytorch.org/whl/cpu
-# 已知：torch_npu 2.13.0rc1 的 _inductor/runtime/triton_helpers.py 只认 tl.extra.ascend，
-# triton-ascend 3.2.2 提供 tl.extra.cann；torch_npu main 已改为先试 cann（见 docs/issues/STATUS.md OURS-11）。
-# 验证前先用 torch_npu main 的该文件覆盖（或等新版 torch_npu）。
-torch==2.13.0
-torch_npu==2.13.0rc1
+# TRITON track = NIGHTLY + Triton-Ascend（inductor 图模式、flex / CP、fla-npu 的 Triton 内核）
+#
+# 2026-08-30 实测：triton-ascend 3.2.2（自带 triton 3.2.0）与 **torch 2.15 nightly +
+# torch_npu master** 可以共存，inductor 在 NPU 上能编出前反向内核。
+#   /opt/venv-triton/bin/python -m ascend_titan.tools.doctor
+#   torch.compile(f, backend="inductor") 在 910B2 上跑通（fwd + bwd）
+#
+# 安装顺序很关键，两个坑都踩过：
+#   1) triton-ascend 自带**完整的 triton 发行版**（含 `_C/libtriton.so` 与 `backends/ascend`）。
+#      装它之前必须先卸干净 PyPI 的 triton，否则 `triton/__init__.py` 还是 PyPI 那份，
+#      `triton.backends` 里只有 amd/nvidia，报 "0 active drivers"。
+#   2) `pip` 一定用 `<venv>/bin/python -m pip` 并先 `pip show` 确认 `Location:`——
+#      克隆 venv 时 `bin/*` 的 shebang 若没改干净，pip 会装到**原来那个 venv** 里。
+#
+# 从 NIGHTLY 环境派生一个 TRITON 环境：
+#   cp -a /opt/venv-nightly /opt/venv-triton
+#   sed -i 's|/opt/venv-nightly|/opt/venv-triton|g' /opt/venv-triton/pyvenv.cfg /opt/venv-triton/bin/activate*
+#   for f in /opt/venv-triton/bin/*; do head -c2 "$f" | grep -q '#!' && sed -i "1s|venv-nightly|venv-triton|" "$f"; done
+#   /opt/venv-triton/bin/python -m pip uninstall -y triton
+#   rm -rf /opt/venv-triton/lib/python3.12/site-packages/triton*
+#   /opt/venv-triton/bin/python -m pip install --no-deps triton-ascend==3.2.2 \
+#       --extra-index-url https://triton-ascend.osinfra.cn/pypi/simple
+#   /opt/venv-triton/bin/python -m pip install pybind11        # backends/ascend/utils.py 需要
+#
+# 注意：不能把本文件当 `-c` 约束去装 torch —— NIGHTLY 的 torch 只在 nightly index 上有。
+# 这里记录的是 TRITON 环境**应该长成什么样**，用 doctor 核对。
+torch==2.15.0.dev20260812+cpu
+torch_npu==2.15.0
 triton-ascend==3.2.2
+pybind11
 spmd_types==0.2.5
 attn-gym==0.0.5
 grain==0.2.18
