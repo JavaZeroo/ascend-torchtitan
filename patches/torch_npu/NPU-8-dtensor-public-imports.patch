@@ -1,4 +1,4 @@
-From ec6cec05c852454287d79313c113fbb3f7f8116a Mon Sep 17 00:00:00 2001
+From 68622f532e7a3f1c1304bc6e8a2add6629e832d5 Mon Sep 17 00:00:00 2001
 From: JavaZeroo <2487163254@qq.com>
 Date: Sun, 30 Aug 2026 01:42:39 +0800
 Subject: [PATCH] fix: keep torch.distributed.checkpoint/fsdp out of
@@ -46,11 +46,11 @@ Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4441
 ---
  test/test_autoload.py                         | 23 ++++++
  .../_init/patches/distributed_patches.py      | 13 +++-
- torch_npu/distributed/tensor/_attention.py    |  4 +-
+ torch_npu/distributed/tensor/_attention.py    | 12 +--
  torch_npu/distributed/tensor/_matrix_ops.py   |  2 +-
  torch_npu/distributed/tensor/_moe_ops.py      |  4 +-
  torch_npu/utils/_import_hooks.py              | 77 +++++++++++++++++++
- 6 files changed, 115 insertions(+), 8 deletions(-)
+ 6 files changed, 119 insertions(+), 12 deletions(-)
  create mode 100644 torch_npu/utils/_import_hooks.py
 
 diff --git a/test/test_autoload.py b/test/test_autoload.py
@@ -119,10 +119,13 @@ index 8e0dcb5d7..479cd3505 100644
  
  @PatchManager.register_patch("distributed")
 diff --git a/torch_npu/distributed/tensor/_attention.py b/torch_npu/distributed/tensor/_attention.py
-index 7649d9e28..807fb1e9f 100644
+index 7649d9e28..00b43b705 100644
 --- a/torch_npu/distributed/tensor/_attention.py
 +++ b/torch_npu/distributed/tensor/_attention.py
-@@ -3,8 +3,8 @@ from typing import cast, Any, Dict, Tuple
+@@ -1,21 +1,21 @@
+ import itertools
+-from typing import cast, Any, Dict, Tuple
++from typing import cast, Any, Dict, Tuple  # noqa: F401
  
  import torch
  from torch.distributed.device_mesh import DeviceMesh
@@ -131,8 +134,22 @@ index 7649d9e28..807fb1e9f 100644
 +from torch.distributed.tensor.experimental import register_sharding
 +from torch.distributed.tensor._dtensor_spec import DTensorSpec
  from torch.distributed.tensor import DTensor, Replicate, Shard
- from torch.distributed.tensor._op_schema import (
+-from torch.distributed.tensor._op_schema import (
++from torch.distributed.tensor._op_schema import (  # noqa: F401
      OpInfo,
+     OpSchema,
+     OutputSharding
+ )
+-from torch.distributed.tensor._redistribute import redistribute_local_tensor
++from torch.distributed.tensor._redistribute import redistribute_local_tensor  # noqa: F401
+ 
+ import torch_npu
+ 
+-from ._common import (
++from ._common import (  # noqa: F401
+     get_redistributed_local_args,
+     get_redistributed_local_kwargs,
+     get_empty_local_results
 diff --git a/torch_npu/distributed/tensor/_matrix_ops.py b/torch_npu/distributed/tensor/_matrix_ops.py
 index 7c66adb2e..84da138b4 100644
 --- a/torch_npu/distributed/tensor/_matrix_ops.py
@@ -243,5 +260,5 @@ index 000000000..669d94908
 +        sys.meta_path.insert(0, _finder)
 +    _finder.register(module_name, callback)
 -- 
-2.43.0
+2.34.1
 
