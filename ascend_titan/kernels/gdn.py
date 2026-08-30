@@ -10,6 +10,17 @@ attn_gym ships a device-agnostic implementation of the same recurrence,
 PyTorch" with FP32 recurrence math. So this override keeps upstream's *math* and
 only selects the implementation -- the same shape as the KDA and RoPE overrides.
 
+We do not call attn_gym's reference at runtime, though: it is written to be read,
+not to be fast. Its intra-chunk step inverts the unit lower-triangular transition
+matrix by forward substitution -- ``for row in range(1, chunk_size)``, each
+iteration cloning the whole ``[B, H, chunks, C, C]`` block. At debugmodel size
+that is invisible; at 0.8B (24 layers, 4096 context, under SelectiveAC, which
+routes every one of those ops through a ``__torch_dispatch__`` mode) a single
+step did not finish in 10 minutes. ``ascend_chunk_gdn`` below is the same
+decomposition with that one loop replaced by a closed form, and
+``tests/unit/test_kernel_gdn.py`` pins it against attn_gym's reference -- which
+stays the oracle, exactly what a readable reference implementation is for.
+
 Two things need replacing, and they sit on top of each other in the config tree,
 so a single override claims both (torchtitan rejects an override whose ancestor
 another override already claims):
@@ -31,14 +42,196 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
-from attn_gym.linear.gdn import chunk_gdn
+import torch.nn.functional as F
 from torchtitan.config import derive, override
 from torchtitan.models.qwen3_5.gdn import GatedDeltaKernel, InnerGatedDeltaNet
 
 from ascend_titan.kernels._probe import require_op  # noqa: F401  (P14: hard dependency)
 from ascend_titan.kernels.kda import ascend_causal_conv1d, l2norm
 
-__all__ = ["AscendGatedDeltaKernel", "AscendInnerGatedDeltaNet", "npu_gated_delta_net"]
+__all__ = [
+    "AscendGatedDeltaKernel",
+    "AscendInnerGatedDeltaNet",
+    "ascend_chunk_gdn",
+    "npu_gated_delta_net",
+]
+
+CHUNK_SIZE = 64
+"""Tokens per chunk -- the same default as ``attn_gym`` and fla.
+
+Bigger chunks are faster here: the chunk loop is sequential Python and every op
+inside it pays torchtitan's activation-checkpoint dispatch mode, so step time
+tracks ``tokens / chunk_size``. Measured on qwen3.5-0.8B, 910B2, one card
+(step-1 tps): 64 -> 231, 128 -> 314, 256 -> 385.
+
+We stay at 64 anyway, for conditioning. The intra-chunk transition matrix is
+``(I - A)^-1`` for a strictly lower-triangular ``A`` whose entries are
+``beta * (k_i . k_j) * decay``, so bounded by one; its largest entry grows fast
+with the chunk size -- measured 5.7e3 (C=64), 5.7e6 (C=128), 5.7e15 (C=256) --
+and everything downstream multiplies by it. That is a property of the
+decomposition, not of how we invert: forward substitution produces the same
+numbers, which is why fla and attn_gym also use 64. It is also the size our
+alignment tests target.
+
+(An earlier note here blamed the step-4 non-finite loss in qwen3.5-0.8B on
+raising this value. That was wrong: C=64 diverges at step 4 too. The divergence
+is in the training configuration, not the chunk size -- see
+models/qwen3_5/README.md.)
+"""
+
+
+class _UnitLowerInverse(torch.autograd.Function):
+    """``(I - A)^-1`` for a *strictly* lower-triangular ``A``, with an exact backward.
+
+    Forward: ``A`` is nilpotent (``A**C == 0``), so the Neumann series terminates::
+
+        (I - A)^-1 = I + A + A^2 + ... + A^(C-1)
+
+    and doubling evaluates it in ``log2(C)`` steps -- with ``S_m = sum_{k<m} A^k``,
+    ``S_2m = S_m + A^m @ S_m``. For C=64 that is 10 batched matmuls against the 63
+    masked row updates (each cloning the full block) that forward substitution
+    needs.
+
+    Backward is *not* differentiated through that chain. ``X = (I - A)^-1`` has
+    ``dX = X dA X``, so ``grad_A = X^T @ grad_X @ X^T`` masked back to strictly
+    lower -- two matmuls, and nothing that saw ``A^32``. Letting autograd walk the
+    doubling instead would both keep every intermediate power alive for the
+    backward pass and push their magnitudes through it; the powers are much larger
+    than the sum they telescope into, which is exactly how a finite loss ends up
+    with a non-finite gradient.
+    """
+
+    @staticmethod
+    def forward(ctx, strictly_lower_NCC: torch.Tensor) -> torch.Tensor:
+        size = strictly_lower_NCC.shape[-1]
+        eye = torch.eye(size, dtype=strictly_lower_NCC.dtype, device=strictly_lower_NCC.device)
+        inverse = eye + strictly_lower_NCC
+        power = strictly_lower_NCC
+        covered = 2
+        while covered < size:
+            power = power @ power
+            inverse = inverse + power @ inverse
+            covered *= 2
+        ctx.save_for_backward(inverse)
+        return inverse
+
+    @staticmethod
+    def backward(ctx, grad_NCC: torch.Tensor) -> torch.Tensor:
+        (inverse,) = ctx.saved_tensors
+        transposed = inverse.transpose(-1, -2)
+        return (transposed @ grad_NCC @ transposed).tril(-1)
+
+
+def _unit_lower_inverse(strictly_lower_NCC: torch.Tensor) -> torch.Tensor:
+    """See :class:`_UnitLowerInverse`."""
+    return _UnitLowerInverse.apply(strictly_lower_NCC)
+
+
+def _chunk_forward(
+    query_BHTK: torch.Tensor,
+    key_BHTK: torch.Tensor,
+    value_BHTV: torch.Tensor,
+    log_decay_BHT: torch.Tensor,
+    beta_BHT: torch.Tensor,
+    *,
+    chunk_size: int,
+) -> torch.Tensor:
+    """The chunk-parallel gated delta rule, in ``attn_gym``'s decomposition.
+
+    Mirrors ``attn_gym.linear.gdn.impl.reference.chunk_forward`` step for step;
+    the only difference is ``_unit_lower_inverse`` in place of its row loop.
+    Kept in the same variable names so the two read side by side.
+    """
+    batch, heads, sequence, key_dimension = query_BHTK.shape
+    value_dimension = value_BHTV.shape[-1]
+    scale = key_dimension**-0.5
+
+    padding = (-sequence) % chunk_size
+    if padding:
+        query_BHTK, key_BHTK, value_BHTV = (
+            F.pad(t, (0, 0, 0, padding)) for t in (query_BHTK, key_BHTK, value_BHTV)
+        )
+        beta_BHT, log_decay_BHT = (F.pad(t, (0, padding)) for t in (beta_BHT, log_decay_BHT))
+
+    padded_length = query_BHTK.shape[-2]
+    chunk_count = padded_length // chunk_size
+    query = query_BHTK * scale
+    value = value_BHTV * beta_BHT[..., None]
+    beta_key = key_BHTK * beta_BHT[..., None]
+
+    query, key, value, beta_key = (
+        t.reshape(batch, heads, chunk_count, chunk_size, t.shape[-1])
+        for t in (query, key_BHTK, value, beta_key)
+    )
+    cumulative_decay = log_decay_BHT.reshape(batch, heads, chunk_count, chunk_size).cumsum(-1)
+    decay_matrix = (
+        (cumulative_decay.unsqueeze(-1) - cumulative_decay.unsqueeze(-2)).tril().exp().tril()
+    )
+
+    diagonal_and_upper = torch.triu(
+        torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device)
+    )
+    transition = _unit_lower_inverse(
+        -((beta_key @ key.transpose(-1, -2)) * decay_matrix).masked_fill(diagonal_and_upper, 0)
+    )
+    value = transition @ value
+    decayed_key = transition @ (beta_key * cumulative_decay.exp()[..., None])
+
+    state = query.new_zeros(batch, heads, key_dimension, value_dimension)
+    outputs = []
+    strictly_upper = torch.triu(
+        torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=1
+    )
+    for chunk in range(chunk_count):
+        chunk_query = query[:, :, chunk]
+        chunk_key = key[:, :, chunk]
+        chunk_value = value[:, :, chunk]
+        attention = (
+            (chunk_query @ chunk_key.transpose(-1, -2)) * decay_matrix[:, :, chunk]
+        ).masked_fill(strictly_upper, 0)
+        corrected_value = chunk_value - (decayed_key[:, :, chunk] @ state)
+        prior_output = (chunk_query * cumulative_decay[:, :, chunk, :, None].exp()) @ state
+        outputs.append(prior_output + attention @ corrected_value)
+
+        final_decay = cumulative_decay[:, :, chunk, -1, None]
+        state = (
+            state * final_decay[..., None].exp()
+            + (
+                chunk_key * (final_decay - cumulative_decay[:, :, chunk]).exp()[..., None]
+            ).transpose(-1, -2)
+            @ corrected_value
+        )
+
+    output = torch.stack(outputs, dim=2).reshape(batch, heads, padded_length, value_dimension)
+    return output[:, :, :sequence]
+
+
+def ascend_chunk_gdn(
+    query_BHTK: torch.Tensor,
+    key_BHTK: torch.Tensor,
+    value_BHTV: torch.Tensor,
+    log_decay_BHT: torch.Tensor,
+    beta_BHT: torch.Tensor,
+    *,
+    chunk_size: int = CHUNK_SIZE,
+) -> torch.Tensor:
+    """``chunk_gdn(impl="reference")``'s contract: SDPA layout, FP32 recurrence."""
+    output_dtype = query_BHTK.dtype
+    compute_dtype = torch.promote_types(output_dtype, torch.float32)
+    query_BHTK, key_BHTK, value_BHTV, log_decay_BHT, beta_BHT = (
+        t.to(compute_dtype) for t in (query_BHTK, key_BHTK, value_BHTV, log_decay_BHT, beta_BHT)
+    )
+    # Explicit casts do not stop autocast from selecting low-precision contractions.
+    with torch.autocast(device_type=query_BHTK.device.type, enabled=False):
+        output = _chunk_forward(
+            query_BHTK,
+            key_BHTK,
+            value_BHTV,
+            log_decay_BHT,
+            beta_BHT,
+            chunk_size=chunk_size,
+        )
+    return output.to(output_dtype)
 
 
 def _chunk_gdn_btnk(
@@ -47,18 +240,18 @@ def _chunk_gdn_btnk(
     v_BTNV: torch.Tensor,
     g_BTN: torch.Tensor,
     beta_BTN: torch.Tensor,
+    *,
+    chunk_size: int,
 ) -> torch.Tensor:
-    """``chunk_gdn`` on upstream's ``[B, T, N, *]`` layout."""
-    out = chunk_gdn(
+    """``ascend_chunk_gdn`` on upstream's ``[B, T, N, *]`` layout."""
+    return ascend_chunk_gdn(
         l2norm(q_BTNK).transpose(1, 2),
         l2norm(k_BTNK).transpose(1, 2),
         v_BTNV.transpose(1, 2),
         g_BTN.transpose(1, 2),
         beta_BTN.transpose(1, 2),
-        impl="reference",
-    )
-    out = out[0] if isinstance(out, tuple) else out
-    return out.transpose(1, 2)
+        chunk_size=chunk_size,
+    ).transpose(1, 2)
 
 
 class AscendGatedDeltaKernel(GatedDeltaKernel):
@@ -66,7 +259,12 @@ class AscendGatedDeltaKernel(GatedDeltaKernel):
 
     @dataclass(kw_only=True, slots=True)
     class Config(GatedDeltaKernel.Config):
-        pass
+        chunk_size: int = CHUNK_SIZE
+        """See ``CHUNK_SIZE``. Lower it to compare against fla/attn_gym defaults."""
+
+    def __init__(self, config: Config):
+        super().__init__(config)
+        self.chunk_size = config.chunk_size
 
     def forward(
         self,
@@ -99,6 +297,7 @@ class AscendGatedDeltaKernel(GatedDeltaKernel):
                 xv_TNV.unsqueeze(0),
                 g_TN.unsqueeze(0),
                 beta_TN.unsqueeze(0),
+                chunk_size=self.chunk_size,
             ).squeeze(0)
 
         # Packed input: the recurrence must restart at every sequence boundary, so
@@ -116,6 +315,7 @@ class AscendGatedDeltaKernel(GatedDeltaKernel):
                     xv_TNV[begin:end].unsqueeze(0),
                     g_TN[begin:end].unsqueeze(0),
                     beta_TN[begin:end].unsqueeze(0),
+                    chunk_size=self.chunk_size,
                 ).squeeze(0)
             )
         return torch.cat(pieces, dim=0)
@@ -180,8 +380,8 @@ class AscendInnerGatedDeltaNet(InnerGatedDeltaNet):
 @override(
     target=InnerGatedDeltaNet.Config,
     exact=True,
-    description="Gated DeltaNet on Ascend: torch depthwise causal conv1d + attn_gym's reference "
-    "recurrence (fla's kernels are CUDA-only)",
+    description="Gated DeltaNet on Ascend: torch depthwise causal conv1d + the chunk-parallel "
+    "delta rule in plain torch (fla's kernels are CUDA-only)",
 )
 def npu_gated_delta_net(cfg: InnerGatedDeltaNet.Config) -> AscendInnerGatedDeltaNet.Config:
     """One override for the whole subtree; see kernels/kda.py for why it must be one."""
