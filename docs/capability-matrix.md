@@ -43,6 +43,17 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 
 **结论：NPU/CANN 归因的红格为 0。** torch_npu 的三个缺陷（NPU-1 varlen 内核、NPU-2 fake 进程组、NPU-3 复数索引）都已通过上游本就存在的等价实现（varlen 节点 + `npu_fusion_attention`、实数缓存 RoPE）在 L1 层绕开，剩余红格全部归 torch 版本、上游 CUDA-only 组件或本仓自身待办。
 
+## 多模态（M5，2026-08-30 实测）
+
+| 模型 / 路径 | NIGHTLY | 说明 |
+|---|:--:|---|
+| kimi_k3 debugmodel（视觉塔 + KDA + MoE） | 🟢 | 单卡 10 步 `loss 4.10312`；`ascend_titan.models.kimi_k3` |
+| 视觉塔的 BlockMask 构建 | 🟢 | 靠 shim `flex_block_mask_eager`（上游无条件 `torch.compile`，无开关） |
+| 视觉塔的 FlexAttention 节点 | 🟢 | `npu_minimal` 不转换它（那条路径没有 varlen 掩码），走 eager flex；视觉序列短，不会像 LM 那样 OOM |
+| KDA（Kimi Delta Attention） | 🟢 | `kernels/kda.py`：上游 kernel 要 CUDA + Blackwell，改走 attn_gym 的 `impl="reference"` + 自写 depthwise causal conv1d |
+| `nvidia-cutlass-dsl` | 🟢 | 有 aarch64 wheel；只 import 不执行（会执行 cute 内核的节点都被 override 掉） |
+| qwen3_5 多模态 collator | 🔴 | DEP-FLA：`gdn.py` 模块级 import `fla` |
+
 ## 低精度 FP8（M5，2026-08-30 实测）
 
 | 项 | 910B2 | 说明 |

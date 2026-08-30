@@ -119,13 +119,13 @@ MODELS: dict[str, ModelEntry] = {
         upstream="torchtitan.models.kimi_k3",
         title="Kimi K3",
         status="🟢",
-        summary=("多模态 + KDA + MoE，2026-08-30 在 910B2 上跑通 10 步（loss 9.51 → 4.35）。"),
+        summary=("多模态 + KDA + MoE，2026-08-30 在 910B2 上跑通 10 步（单卡 loss 4.10312）。"),
         recipes="ascend_titan.models.kimi_k3.recipes",
         flavors=("kimi_k3_debugmodel_npu", "kimi_k3_debugmodel_npu_fused"),
         notes=(
             "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
             "KDA 走 `kernels/kda.py` 的 override，flex 路径靠 `flex_block_mask_eager` "
-            "shim 走 eager。性能极低（tps 45），Triton-Ascend 到位前不做性能基线。"
+            "shim 走 eager。性能极低（tps 47），Triton-Ascend 到位前不做性能基线。"
         ),
     ),
     "deepseek_v3": ModelEntry(
