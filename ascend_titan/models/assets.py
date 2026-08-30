@@ -52,12 +52,45 @@ def c4_shards(count: int = 2) -> list[str]:
     return [str(p) for p in shards[:count]]
 
 
-def local_c4_dataset(count: int = 2):
-    """A ``SingleDatasetConfig`` reading the local C4 shards.
+DEFAULT_SUBSET_DOCS = 50_000
 
-    Upstream's ``DATASETS['c4']`` streams from huggingface.co, which is not
-    reachable from this network; the shards are downloaded once through a mirror
-    and read locally, which is also the more reproducible input for a benchmark.
+
+def c4_subset(docs: int = DEFAULT_SUBSET_DOCS) -> str:
+    """Path to a plain-json subset of real C4, building it once if needed.
+
+    Why a subset instead of the raw shards: a shard is ~360k documents, and
+    ``load_dataset("json", ...)`` is a random-access source, so **every rank**
+    materialises the whole thing into its own arrow cache before step 1. On 8
+    ranks that is minutes of CPU and gigabytes of cache for a run that will read
+    a few tens of thousands of documents. 50k real C4 documents at 4096 context
+    is ~10^8 tokens -- far more than any of our runs consume -- and loads in
+    seconds.
+
+    This is still *real* C4 text, which is what R1 asks for; only the quantity
+    is cut. A genuine pretraining run would stream the full dataset.
+    """
+    out = assets_root() / "c4" / f"c4-subset-{docs}.json"
+    if out.is_file():
+        return str(out)
+    import gzip
+    import itertools
+
+    shard = c4_shards(1)[0]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".json.partial")
+    with gzip.open(shard, "rt", encoding="utf-8") as src, open(tmp, "w", encoding="utf-8") as dst:
+        for line in itertools.islice(src, docs):
+            dst.write(line)
+    tmp.rename(out)
+    return str(out)
+
+
+def local_c4_dataset(docs: int = DEFAULT_SUBSET_DOCS):
+    """A ``SingleDatasetConfig`` reading real C4 text from local disk.
+
+    Upstream's ``DATASETS['c4']`` streams from huggingface.co, which this network
+    cannot reach; the shards are fetched once through a mirror and read locally,
+    which is also the more reproducible input for a benchmark.
     """
     from torchtitan.components.data import SingleDatasetConfig
     from torchtitan.components.data.sources import HuggingFaceRandomAccessSource
@@ -67,7 +100,7 @@ def local_c4_dataset(count: int = 2):
         source=HuggingFaceRandomAccessSource.Config(
             path="json",
             split="train",
-            load_dataset_kwargs={"data_files": c4_shards(count)},
+            load_dataset_kwargs={"data_files": c4_subset(docs)},
         ),
         processor=TextProcessor.Config(),
         post_filters=(lambda sample: sample is not None,),

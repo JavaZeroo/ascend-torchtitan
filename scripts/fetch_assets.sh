@@ -37,9 +37,25 @@ for i in range(n):
 PY
 }
 
+# 把 C4 分片一次性物化成 arrow 缓存。必须**单进程**先做：`load_dataset("json", ...)` 是
+# 随机访问源，多卡训练时每个 rank 都会去建同一份缓存，然后互相等 builder.lock——
+# 表现为"训练卡在 step 0 不动"。600MB gz 大约 10 分钟、约 1.5GB 缓存。
+prepare_c4() {
+  python - "${1:-2}" <<'PY'
+import sys, time
+from ascend_titan.models.assets import c4_shards
+from datasets import load_dataset
+t0 = time.time()
+ds = load_dataset("json", split="train", data_files=c4_shards(int(sys.argv[1])))
+print(f"c4 arrow cache ready: {len(ds)} docs in {time.time() - t0:.0f}s")
+PY
+}
+
 case "${1:-all}" in
   tokenizer) fetch_tokenizer "${2:?repo id, e.g. Qwen/Qwen3-0.6B}" ;;
-  c4)        fetch_c4 "${2:-2}" ;;
-  all)       fetch_tokenizer Qwen/Qwen3-0.6B; fetch_tokenizer Qwen/Qwen3.5-0.8B; fetch_c4 2 ;;
-  *) echo "usage: $0 {tokenizer <repo>|c4 [n]|all}"; exit 2 ;;
+  c4)        fetch_c4 "${2:-2}"; prepare_c4 "${2:-2}" ;;
+  prepare)   prepare_c4 "${2:-2}" ;;
+  all)       fetch_tokenizer Qwen/Qwen3-0.6B; fetch_tokenizer Qwen/Qwen3.5-0.8B
+             fetch_c4 2; prepare_c4 2 ;;
+  *) echo "usage: $0 {tokenizer <repo>|c4 [n]|prepare [n]|all}"; exit 2 ;;
 esac
