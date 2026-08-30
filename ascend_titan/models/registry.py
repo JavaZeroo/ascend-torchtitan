@@ -144,10 +144,11 @@ MODELS: dict[str, ModelEntry] = {
             "qwen35_0_8b_npu",
             "qwen35_0_8b_npu_fsdp2",
         ),
+        golden=("qwen35_debugmodel_npu_text",),
         criteria={
             "R1": "🟡",  # 0.8B 语言侧形态齐了，但从零训练第 5 步发散（学习率待定位）
             "R2": "🟡",  # 单卡与 FSDP2×8 都能推进，撞同一个发散；TP/PP/EP 未测
-            "R3": "🟡",  # 对 attn_gym reference 的前反向对拍 🟢；golden 未冻结
+            "R3": "🟡",  # 对拍 🟢 + 语言侧 golden 已冻结；缺真实尺寸的长步数曲线
             "R4": "⚪",
             "R5": "🔴",  # 纯 torch chunk 递推，无融合算子
             "R6": "⚪",  # 被 R5 卡住：一步约 2 分钟，500 步要十几个小时

@@ -53,6 +53,10 @@ fla 与 attn_gym 都用 64。性能要从别处来，见第 5 节。
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_debugmodel_npu_text ./scripts/run_train.sh
 
+# 与冻结的 golden 逐位对比
+MODULE=ascend_titan.models.qwen3_5 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
+./scripts/check_golden.sh qwen35_debugmodel_npu_text
+
 # 真实尺寸（真实 tokenizer + 真实 C4）
 ./scripts/fetch_assets.sh tokenizer Qwen/Qwen3.5-0.8B
 ./scripts/fetch_assets.sh c4 1
@@ -95,7 +99,7 @@ C4 纯文本。`probes.py` 里的 `qwen35_0_8b_lr_5e4` / `qwen35_0_8b_lr_1e3` �
 |---|:--:|---|
 | `qwen35_debugmodel_npu` | 1 | 上游 `qwen35_debugmodel`（多模态）+ varlen 注意力 + GDN override |
 | `qwen35_debugmodel_npu_fsdp2` | 2 | 同上 + 2 路 FSDP2 |
-| `qwen35_debugmodel_npu_text` | 1 | 同尺寸但**只跑语言侧**——GDN 的廉价回归探测器。10 步 loss 3.54783（`--debug.seed 42 --debug.deterministic`，2026-08-31） |
+| `qwen35_debugmodel_npu_text` | 1 | 同尺寸但**只跑语言侧**——GDN 的廉价回归探测器。golden 已冻结：10 步 13.03767 → 3.54950，`check_golden.sh` 逐位复现 |
 | `qwen35_0_8b_npu` | 1 | Qwen3.5-0.8B，真实 tokenizer + 真实 C4 + 4096 上下文 |
 | `qwen35_0_8b_npu_fsdp2` | 8 | 上面 × FSDP2 8 路 |
 
@@ -124,7 +128,7 @@ Buffers cannot be created while lowering a pointwise subgraph.
 |---|:--:|---|
 | R1 真实形态 | 🟡 | 形态齐了（0.8B + 真实 tokenizer + 真实 C4 + 4096 上下文），但从零训练第 5 步发散——见上面第 2 节，先要定位到学习率还是别的 |
 | R2 并行覆盖 | 🟡 | 单卡与 FSDP2×8 都能起来并推进（8 卡逐步日志见第 2 节），但都在第 5 步撞上同一个发散；TP / PP / EP 未测 |
-| R3 数值可信 | 🟡 | 算子级对拍 🟢：`tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2，fp32/bf16 前向 + 梯度）都对 attn_gym reference 通过；golden 曲线未冻结；长步数下降曲线未取 |
+| R3 数值可信 | 🟡 | 算子级对拍 🟢：`tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2，fp32/bf16 前向 + 梯度）都对 attn_gym reference 通过；语言侧 golden 已冻结并逐位复现（`qwen35_debugmodel_npu_text`）。缺的是**真实尺寸**下的长步数下降曲线——它卡在下面那条发散上 |
 | R4 checkpoint | ⚪ | 未跑 |
 | R5 性能 | 🔴 | **主要缺口**，见下 |
 | R6 长稳 | ⚪ | **被 R5 卡住**：0.8B 一步约 2 分钟，500 步要十几个小时。等 GDN 快起来再取；用 debugmodel 跑 500 步不算数（判据要求真实尺寸） |
