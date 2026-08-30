@@ -1,4 +1,4 @@
-From 6fab15e32bc3041d7fe65b9900617fd92aa9a3c0 Mon Sep 17 00:00:00 2001
+From 6d8a8403b7832c65bf9b9c5b72392f2c5cdf799d Mon Sep 17 00:00:00 2001
 From: JavaZeroo <2487163254@qq.com>
 Date: Sun, 30 Aug 2026 01:44:30 +0800
 Subject: [PATCH] fix: implement aten::_flash_attention_forward/_backward on
@@ -43,14 +43,14 @@ Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4439
 
 diff --git a/test/npu/test_flash_attention_privateuse1.py b/test/npu/test_flash_attention_privateuse1.py
 new file mode 100644
-index 000000000..75d580509
+index 000000000..b5d9866a6
 --- /dev/null
 +++ b/test/npu/test_flash_attention_privateuse1.py
 @@ -0,0 +1,98 @@
 +import unittest
 +
-+import torch
-+import torch_npu
++import torch  # noqa: F401
++import torch_npu  # noqa: F401
 +from torch_npu.testing.testcase import TestCase, run_tests
 +
 +try:
@@ -374,5 +374,5 @@ index 000000000..781f1ee60
 +    torch.ops.aten._npu_flash_attention_registered = True
 +    _register_npu_flash_attention._lib = lib  # keep the Library object alive
 -- 
-2.43.0
+2.34.1
 

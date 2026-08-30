@@ -1,4 +1,4 @@
-From de2456320ae7abf68f473a8e67ed4f59da980668 Mon Sep 17 00:00:00 2001
+From 7ed2a0945cfca49b25c2afa7156f797708bae752 Mon Sep 17 00:00:00 2001
 From: JavaZeroo <2487163254@qq.com>
 Date: Sun, 30 Aug 2026 16:05:45 +0800
 Subject: [PATCH] fix: NPUCombinedScheduling must construct the CUDA-side
@@ -39,12 +39,12 @@ Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4447
 
 diff --git a/test/_inductor/test_combined_scheduling_init.py b/test/_inductor/test_combined_scheduling_init.py
 new file mode 100644
-index 000000000..c14ddc372
+index 000000000..a5ceccbcb
 --- /dev/null
 +++ b/test/_inductor/test_combined_scheduling_init.py
 @@ -0,0 +1,45 @@
-+import torch
-+import torch_npu
++import torch  # noqa: F401
++import torch_npu  # noqa: F401
 +from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedScheduling
 +from torch_npu._inductor.codegen.npu_combined_scheduling import NPUCombinedScheduling
 +from torch_npu.testing.testcase import TestCase, run_tests
