@@ -31,7 +31,7 @@ NIGHTLY track（torch 2.15.0.dev20260812 + torch_npu master + `patches/` 的八�
 |---|:--:|---|---|
 | `CANN` | 13 | CP ×12（见下）+ `float8_emulate_lora`（float8 没有 cast 内核，`aclnnInplaceCopy 561103`） | **硬件**：都要 Ascend950，910B2 上没有路径 |
 | `DEP-INDUCTOR` | 5 | 四个 `*_compile` 用例 + `gpt_oss_fsdp+tp+ep+compile` | 装 Triton-Ascend（已验证可行，见"Triton-Ascend / inductor"一节） |
-| `DEP` | 5 | `fla`（qwen3_5 ×3）、`helion` ×2 | 昇腾替代属 L1（fla-npu 在路线图） |
+| `DEP` | 5 | ~~`fla`（qwen3_5 ×3）~~ 已证伪（2026-08-31，见语言侧那行）、`helion` ×2 | 昇腾替代属 L1 |
 | `TT-CUDA` | 2 | `DistMuon requires one CUDA device per process` | 上游按设计 CUDA-only |
 | `TT-KERNEL` | 3 | `override_fused_swiglu` / `override_fused_grouped_experts` / `deepseek_v3_fused_mla_swiglu`（上游树内 Triton 内核） | 昇腾替代属 L1（我们已有 `npu_swiglu` 版本） |
 
@@ -71,7 +71,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 |---|---|---|---|
 | `spmd_types` 后端需要 nightly 的 FSDP2（CP、muse_glimmer、validation_tp_cp_pp、qwen3/llama3/deepseek/gpt_oss 的所有 CP 组合） | 14 | TT-5 / TORCH-6 | torch 2.14+ 或 torchtitan 给 CP 一条不依赖 spmd_types 的路径 |
 | `torch.compile`：inductor 后端需要 Triton-Ascend（M3 已解决我们自己的 graph break） | 6 | DEP-INDUCTOR | M5：Triton-Ascend / torchair |
-| CUDA-only 依赖缺失：`fla`（qwen3_5 GDN）、`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1（fla-npu 已在路线图） |
+| CUDA-only 依赖缺失：~~`fla`（qwen3_5 GDN）~~ 已证伪、`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1 |
 | 上游树内 CUDA-only 组件：`fused_swiglu`/`fused_grouped_experts` Triton 内核、DistMuon | 4 | TT-KERNEL / TT-CUDA | 上游按设计为 CUDA；昇腾替代属 L1 |
 | gpt_oss + TP：路由 softmax backward 形状不匹配（LSE 尾部已实现后新暴露） | 1 | OURS-10 | 本仓，待查 |
 | 上游 `fused_mla` override 与我们的 RoPE override 节点冲突（该用例本身 CUDA-only） | 1 | OURS-9 / TT-9 | `npu_minimal` 检测到上游 override 时跳过 RoPE override |
@@ -183,7 +183,8 @@ GE 运行时还需要 venv 里有 `decorator`、`scipy`。用法是上游自带�
 | deepseek_v3 fused_mla_swiglu | 🔴 | 🔴 | NEXT：OURS-9（override 节点冲突）；STABLE：TT-9（nightly-only `torch.Tag.inplace`） |
 | deepseek_v3 mtp + compile（helion_rope） | 🔴 | 🔴 | DEP：helion |
 | qwen3 fsdp+tp+cp（含 fused/non-fused qkv、MoE param groups） | 🔴 | 🔴 | TT-5 |
-| qwen3_5（GDN，需要 `fla`） | 🔴 | 🔴 | DEP：fla（昇腾侧对应 fla-npu，M4） |
+| qwen3_5 语言侧（GDN + causal conv1d） | 🟡 | ⚪ | **DEP-FLA 已证伪**：`fla-core` 有 aarch64 wheel，import 正常；只有它的 CUDA Triton 内核编不出来，已由 `kernels/gdn.py` 的 override 接管。debugmodel 语言侧 golden 已冻结；0.8B 真实尺寸能起来但从零训练第 4–10 步发散（未定位，见 `models/qwen3_5/README.md`） |
+| qwen3_5 多模态（视觉塔） | 🔴 | ⚪ | 视觉塔的 block-diagonal document mask，910B2 无 indirect-memory lowering |
 | gpt_oss fsdp+tp+ep | 🔴 | 🔴 | OURS-10（M3 后新暴露）：TP2+EP4 下某处 softmax backward 形状 [512,8] vs [256,8]，待查；sinks 尾部本身已实现 |
 | gpt_oss pp+fsdp+ep+sacop | 🟢 | 🔴 | NEXT：M3 的 LSE 尾部后通过（PP + EP + attention sinks + per-op SAC）；STABLE：TORCH-5 |
 | kimi_k2_5 muon（fsdp+ep、pp+fsdp+ep） | 🔴 | 🔴 | TT-CUDA：`DistMuon requires one CUDA device per process` |
