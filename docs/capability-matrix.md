@@ -16,7 +16,8 @@
 - TT-4（ChunkedLossWrapper）🔴 → 🟢：单卡与 FSDP2×2 通过；`npu_baseline` 不再展开 loss。**2026-08-30 起 chunked loss 是 qwen3 参考 recipe 的默认**（删除 DELTA 4，golden 已重录）；非 chunked 路径保留为探针 `qwen3_debugmodel_npu_ce_loss`。
 - torch_npu 侧修复（`patches/torch_npu/`、`patches/op-plugin/`）：NPU-1 stock varlen、NPU-2 fake_backend、NPU-3 stock ComplexRoPE、NPU-6 uint64、NPU-7 inductor 签名、NPU-8 spmd_types 循环导入——修复前后的格子见 `docs/issues/STATUS.md` 第二轮。
 - `flex` eager 在 torch_npu master 上可用（TORCH-1 被 torch_npu 侧绕开；op 级 fwd+bwd 实测通过），因此 `npu_minimal` 的 flex→varlen 改为特性探测，nightly 上不再转换。
-- **模型级 flex（2026-08-30 更新）**：torchtitan 在三处无条件 `torch.compile`（`common/attention.py` 的 `_compiled_create_block_mask` 与 `FlexAttention._compiled_flex_attn`、`common/vision_encoder.py` 的 `compiled_create_block_mask`），都不看 `config.compile.enable`。shim `flex_block_mask_eager` 在 triton 没有可用后端时把这三处换回上游自己的未编译函数，模型级 flex 因此可达。qwen3 stock flex 由 `DEP-INDUCTOR` 变为 **OOM**（eager flex 在该序列长度下显存不够）——可达但不可用，仍需 Triton-Ascend。
+- **模型级 flex（2026-08-30 更新）**：torchtitan 在三处无条件 `torch.compile`（`common/attention.py` 的 `_compiled_create_block_mask` 与 `FlexAttention._compiled_flex_attn`、`common/vision_encoder.py` 的 `compiled_create_block_mask`），都不看 `config.compile.enable`。shim `flex_block_mask_eager` 在 triton 没有可用后端时把这三处换回上游自己的未编译函数，模型级 flex 因此**可达**。但**可达不等于可用**：eager flex 会把 O(T²) 的分数矩阵实体化，qwen3 stock flex 因此由 `DEP-INDUCTOR` 变成 **OOM**。所以 `npu_minimal` 的 flex→varlen 转换条件是"设备白名单已解除**且** inductor 有可用后端"，两者缺一就仍然转换；视觉塔的 flex 节点例外（它拿到的是 BlockMask，那条路径没有 varlen 掩码）。
+- **CP 的阻塞链（2026-08-30 实测）**：上游明确 `Context Parallel is not supported with ScaledDotProductAttention or VarlenAttention. Use FlexAttention or disable CP.` → CP 必须用 flex → 模型级 flex 需要 inductor → 需要 Triton-Ascend。所以 CP 不是 `parallel/` 里加个机制能解决的，**唯一路径是 Triton-Ascend**（DEP-INDUCTOR）。
 
 ## 历史数据（2026-08-29，正式版 torch，M2 扫描）
 
@@ -41,6 +42,17 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | 上游 `fused_mla` override 与我们的 RoPE override 节点冲突（该用例本身 CUDA-only） | 1 | OURS-9 / TT-9 | `npu_minimal` 检测到上游 override 时跳过 RoPE override |
 
 **结论：NPU/CANN 归因的红格为 0。** torch_npu 的三个缺陷（NPU-1 varlen 内核、NPU-2 fake 进程组、NPU-3 复数索引）都已通过上游本就存在的等价实现（varlen 节点 + `npu_fusion_attention`、实数缓存 RoPE）在 L1 层绕开，剩余红格全部归 torch 版本、上游 CUDA-only 组件或本仓自身待办。
+
+## 低精度 FP8（M5，2026-08-30 实测）
+
+| 项 | 910B2 | 说明 |
+|---|:--:|---|
+| `torch.zeros(dtype=torch.float8_e4m3fn, device="npu")`、`zero_` | 🟢 | 需要 op-plugin 的 NPU-6 修复（本轮扩展到 float8：全零字节在两种 float8 格式里都是 +0.0，用 int8 视图零化）。修复前报 `aclnnInplaceZero ... 161002` |
+| `torch._scaled_mm`（FP8 GEMM） | 🔴 | `_scaled_mm is supported only on the Ascend950 platform and after` —— **硬件限制**，910B2 没有 FP8 计算单元。归因 CANN/HW，不是缺陷 |
+| `torch_npu.npu_quant_matmul` | 🟢（存在） | 昇腾自己的量化矩阵乘，INT8 路径；FP8 训练 recipe 需要 A3/950 才有意义 |
+
+结论：FP8 的**张量**在 910B2 上已经能用（这是 post-converter 树上做 FP8 override 的前提），
+**计算**要等 Ascend950。在此之前不写 FP8 recipe——写了也只能在没有的硬件上跑（P13）。
 
 ## 图模式（M5，2026-08-30）
 

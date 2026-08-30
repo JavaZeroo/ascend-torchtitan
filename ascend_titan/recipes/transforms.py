@@ -37,6 +37,9 @@ RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
 # Upstream overrides that replace a whole attention block (which owns the RoPE node);
 # adding our RoPE override on top would be a per-node conflict (OURS-9).
 _ATTENTION_BLOCK_OVERRIDES = ("torchtitan.overrides.fused_mla.",)
+# Subtrees whose FlexAttention nodes must stay flex: their masks are BlockMasks
+# and the surrounding code has no varlen path (kimi_k3 / kimi_k2_7 vision towers).
+_KEEP_FLEX_FQNS = ("vision_encoder",)
 
 
 @dataclass
@@ -63,18 +66,30 @@ class Applied:
         return ", ".join(parts) or "no-op"
 
 
-def _flex_attention_runs_on_npu() -> bool:
-    """True when torch_npu has lifted torch's flex-attention device whitelist.
+def _flex_attention_is_usable() -> bool:
+    """True when upstream's FlexAttention is a *usable* choice on this machine.
 
-    torch's ``_validate_device`` rejects any device outside
-    ``{cuda, cpu, xpu, hpu, mps}`` (TORCH-1); torch_npu master replaces it and
-    marks the module with ``_npu_device_patched``. Measured on NIGHTLY: eager
-    ``flex_attention`` forward and backward both run on 910B2
-    (tests/repro/probe_npu_gaps.py).
+    Two conditions, and both matter:
+
+    * torch_npu must have lifted torch's device whitelist (``_validate_device``
+      rejects anything outside ``{cuda, cpu, xpu, hpu, mps}``, TORCH-1); master
+      patches it and marks the module with ``_npu_device_patched``.
+    * inductor must have a backend. Eager flex attention materialises the full
+      O(T^2) score matrix -- it passes at op scale (fwd + bwd measured on 910B2,
+      tests/repro/probe_npu_gaps.py) and then OOMs at model scale. "Runs" is not
+      the same as "usable", so the conversion below stays until Triton-Ascend is
+      installed (DEP-INDUCTOR).
     """
     from torch.nn.attention import flex_attention
 
-    return getattr(flex_attention, "_npu_device_patched", False)
+    if not getattr(flex_attention, "_npu_device_patched", False):
+        return False
+    try:
+        from triton.runtime import driver
+
+        return driver.active is not None
+    except Exception:  # noqa: BLE001 - no usable triton backend
+        return False
 
 
 def _torch_fsdp_reads_spmd_types() -> bool:
@@ -94,14 +109,20 @@ def npu_minimal(config: Trainer.Config) -> Applied:
     """
     a = Applied()
 
-    # 1. FlexAttention nodes -> VarlenAttention, but only while torch still rejects
-    #    npu in flex (TORCH-1). torch_npu master lifts that whitelist, and on such a
-    #    torch_npu the upstream default is left alone -- converting it would drop
-    #    Flex-only features (sinks, custom mask mods) for no reason (P12).
-    #    Flex-only fields (block_size, kernel_options) are dropped by the conversion;
-    #    models that depend on them fail later and get attributed, which is the point.
-    if not _flex_attention_runs_on_npu():
+    # 1. FlexAttention nodes -> VarlenAttention while flex is not usable here
+    #    (TORCH-1 + DEP-INDUCTOR, see _flex_attention_is_usable). Flex-only fields
+    #    (block_size, kernel_options) are dropped by the conversion; models that
+    #    depend on Flex-only features (sinks, custom mask mods) fail later and get
+    #    attributed, which is the point of measuring them.
+    #    Vision encoders are excluded: their attention is fed a BlockMask built by
+    #    `create_block_diagonal_mask`, and there is no varlen mask on that path, so
+    #    converting the node just swaps one failure for a worse one
+    #    ("attention_masks must be VarlenMetadata, got BlockMask").
+    if not _flex_attention_is_usable():
         for _fqn, _cfg, parent, attr in list(config.traverse(FlexAttention.Config)):
+            if any(marker in _fqn for marker in _KEEP_FLEX_FQNS):
+                a.notes.append(f"flex kept at {_fqn} (no varlen mask on this path)")
+                continue
             new = VarlenAttention.Config()
             if isinstance(parent, list):
                 parent[attr] = new  # type: ignore[index]

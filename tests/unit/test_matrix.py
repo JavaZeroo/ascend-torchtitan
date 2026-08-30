@@ -46,16 +46,16 @@ def test_npu_minimal_transform_on_upstream_recipes():
 
     from ascend_titan.recipes.transforms import (
         ATTENTION_OVERRIDE,
-        _flex_attention_runs_on_npu,
+        _flex_attention_is_usable,
         npu_minimal,
     )
 
     cfg = llama3_debugmodel()
     assert any(True for _ in cfg.traverse(FlexAttention.Config))
     a = npu_minimal(cfg)
-    if _flex_attention_runs_on_npu():
-        # torch_npu master lifted torch's flex device whitelist, so the upstream
-        # default stays: converting it would drop flex-only features for nothing.
+    if _flex_attention_is_usable():
+        # flex is usable here (device whitelist lifted *and* inductor has a
+        # backend), so the upstream default stays.
         assert a.flex_to_varlen == 0
         assert any(True for _ in cfg.traverse(FlexAttention.Config))
         assert ATTENTION_OVERRIDE not in cfg.override.imports

@@ -8,7 +8,7 @@
 | 我们的 recipe | `ascend_titan/models/kimi_k3/recipes.py` |
 | 昇腾算子 | `kernels/kda.py`（KDA + causal conv1d）、`kernels/situ_glu.py`（ops-nn `aclnnSituGlu`） |
 | 额外依赖 | `nvidia-cutlass-dsl`（有 aarch64 wheel；只 import 不执行） |
-| 实测 | 单卡 10 步，loss 9.51 → 4.35，显存 12.87 GiB，**tps 45** |
+| 实测 | 单卡 10 步 `loss 4.10312 / grad_norm 4.5312`，显存 12.88 GiB，**tps 47**（LM 走昇腾融合 varlen 注意力，视觉塔保留 flex） |
 
 ## 1. 跑
 
