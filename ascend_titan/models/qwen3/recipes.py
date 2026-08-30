@@ -25,8 +25,9 @@ supported path, and ``probes.py`` keeps both stock cells measurable.
 Full guide: ascend_titan/models/qwen3/README.md
 """
 
+from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
 from torchtitan.models.qwen3 import model_registry
-from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
+from torchtitan.models.qwen3.config_registry import qwen3_0_6b, qwen3_debugmodel
 from torchtitan.trainer import Trainer
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
@@ -91,4 +92,50 @@ def qwen3_debugmodel_npu_fused_fsdp2() -> Trainer.Config:
     """Fused perf recipe under FSDP2 x2 (golden-tracked)."""
     config = qwen3_debugmodel_npu_fused()
     config.parallelism.data_parallel_shard_degree = 2
+    return config
+
+
+# --- release 级 recipe（docs/model-release-criteria.md R1）---------------------
+# debugmodel 是冒烟件：玩具 tokenizer、几百条样本、2048 上下文。下面的 recipe 用真实
+# tokenizer、真实 C4 分片和该尺寸的真实上下文长度，是"这个模型在昇腾上能用"的证据。
+
+
+def qwen3_0_6b_npu() -> Trainer.Config:
+    """Qwen3-0.6B，真实 tokenizer + 真实 C4。单卡或 FSDP2 都跑得动。"""
+    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
+
+    config = qwen3_0_6b()
+
+    # DELTA 1: 与 debugmodel 相同的注意力增量（同样的理由，见文件头）。
+    config.model_spec = model_registry("0.6B", attn_backend="varlen")
+    config.override.imports = [ATTENTION_OVERRIDE]
+
+    # DELTA 2: 资产落到本地（上游默认路径是 torchtitan 检出里的 ./assets/hf/...，
+    # 那是固定上游，我们不往里写东西）。
+    config.hf_assets_path = hf_assets_path("Qwen3-0.6B")
+    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
+
+    return config
+
+
+def qwen3_0_6b_npu_fsdp2() -> Trainer.Config:
+    """0.6B × FSDP2 8 卡。"""
+    config = qwen3_0_6b_npu()
+    config.parallelism.data_parallel_shard_degree = 8
+    return config
+
+
+def qwen3_0_6b_npu_tp2() -> Trainer.Config:
+    """0.6B × (FSDP2 4 × TP 2)，8 卡。"""
+    config = qwen3_0_6b_npu()
+    config.parallelism.data_parallel_shard_degree = 4
+    config.parallelism.tensor_parallel_degree = 2
+    return config
+
+
+def qwen3_0_6b_npu_pp2() -> Trainer.Config:
+    """0.6B × (PP 2 × FSDP2 4)，8 卡。"""
+    config = qwen3_0_6b_npu()
+    config.parallelism.pipeline_parallel_degree = 2
+    config.parallelism.data_parallel_shard_degree = 4
     return config
