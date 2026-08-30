@@ -116,8 +116,9 @@ seq 16384 的前向与 seq 4096 的梯度都与 attn_gym reference 一致（前�
 还没排除的两条，都需要现在没有的东西：
 
 1. **attn_gym 的 reference 与 fla 的真实内核是否等价。** 我们对拍的是 reference，如果
-   reference 本身与 fla 的分块公式有稳定性差异，两边会一起错而我们看不出来。要证伪需要
-   一张能跑 fla 的 CUDA 卡。
+   reference 本身与 fla 的分块公式有稳定性差异，两边会一起错而我们看不出来。
+   本来以为要一张 CUDA 卡才能证伪，但 `../flash-linear-attention-npu` 提供了昇腾上的第二
+   实现（见第 5 节），装上就能直接对拍。
 2. **上游这个配置在 C4 上本来能不能训。** 上游 0.8B 配的是多模态 cc12m；拿它当对照跑一次
    就能把"数据"这个变量分开，但 cc12m 是图文数据集，不在这台机器的下载预算里。
 
@@ -172,15 +173,22 @@ Buffers cannot be created while lowering a pointwise subgraph.
 还要过一遍 activation-checkpoint 的 dispatch mode。步时正比于 `tokens / chunk_size`，
 而 chunk 尺寸被数值条件卡死在 64（上面第 1 节）——所以这条路走到头了。
 
-三条可能的出路，按可行性排：
+出路按可行性排：
 
-1. **昇腾侧的 gated-delta-rule 融合算子**——真正的答案，属 L1 任务。
+1. **`flash-linear-attention-npu`**——这台机器上就有一份（`../flash-linear-attention-npu`）：
+   天津大学主导的昇腾原生线性注意力算子库，AscendC 实现，`fla/ops/ascendc/` 下有 `gdn` 与
+   `kda`，导出 `causal_conv1d`、`chunk_bwd_dqkwg` 等，`examples/flash_gated_delta_rule.py`
+   是整网示例。还没装（venv 里只有 `fla-core`）。入口是 `build.sh --soc`（910B2 选 A2）
+   与 `gdn-verify.sh`（一键编译+装包+单算子测试）。
+   这条同时解两件事：性能，以及给 GDN 一个**独立于 attn_gym reference 的第二实现**——
+   我们现在能证明自己和 reference 一致，证明不了 reference 和 fla 的分块公式等价，而这正是
+   上面那个发散还没排除的一条。
 2. **torchair 图模式**：chunk 循环里全是标准 aten 算子（没有 custom_op），理论上可以整段进图，
    把 per-op dispatch 开销消掉。注意力那条 override 是 `custom_op`，缺 GE converter（OURS-13），
    所以要先确认能不能只把 GDN 子图交给 torchair。
-3. **Triton-Ascend 编 fla 的内核**——试过，`bishengir-compile` 不收。
+3. **Triton-Ascend 编 fla（CUDA 版）的内核**——试过，`bishengir-compile` 不收。
 
-在那之前，这个模型能训、能对，但不快。
+在那之前，这个模型能对，但不快，而且训不稳。
 
 ## 6. 上游还有什么
 
