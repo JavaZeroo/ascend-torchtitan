@@ -1,7 +1,7 @@
 # 矩阵扫描
 
 `python -m ascend_titan.tools.matrix` 把**上游**的集成测试配置（固定 SHA 的 torchtitan 中的
-`tests/integration_tests/{features,models}.py`）搬到 NPU 上运行，对每个配置施加 `npu_baseline`
+`tests/integration_tests/{features,models}.py`）搬到 NPU 上运行，对每个配置施加 `npu_minimal`
 （`ascend_titan/recipes/transforms.py`），把每个失败自动归因到一个代码，并输出 `report.md` + `results.json`。
 
 ```bash

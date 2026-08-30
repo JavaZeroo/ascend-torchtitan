@@ -26,7 +26,8 @@ def test_qwen3_npu_recipes_build():
     assert cfg.training.steps == 10
     assert cfg.checkpoint.enable is False
     assert cfg.override.imports[0] == ATTENTION_OVERRIDE
-    assert cfg.parallelism.spmd_backend == "partial_dtensor"
+    # Upstream's spmd backend: TT-5 / TORCH-6 was a release-torch gap, not ours.
+    assert cfg.parallelism.spmd_backend == qwen3_debugmodel().parallelism.spmd_backend
     # The loss is upstream's default: TT-4 was a release-torch gap, not ours.
     assert type(cfg.loss).__qualname__ == "ChunkedLossWrapper.Config"
     assert type(cfg.loss) is type(qwen3_debugmodel().loss)
@@ -34,6 +35,26 @@ def test_qwen3_npu_recipes_build():
     assert qwen3_debugmodel_npu_fsdp2().parallelism.data_parallel_shard_degree == 2
     assert qwen3_debugmodel_stock_flex().override.imports == []
     assert qwen3_debugmodel_stock_varlen().override.imports == []
+
+
+def test_reference_recipe_keeps_only_two_deltas():
+    """P12: every delta needs a reason to exist. Two are left, and both are named
+    in models/qwen3/README.md with their disappearance condition."""
+    from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
+
+    from ascend_titan.models.qwen3 import (
+        qwen3_debugmodel_npu,
+        qwen3_debugmodel_npu_partial_dtensor,
+    )
+
+    up, cfg = qwen3_debugmodel(), qwen3_debugmodel_npu()
+    assert type(cfg.loss) is type(up.loss)
+    assert cfg.parallelism.spmd_backend == up.parallelism.spmd_backend
+    assert cfg.optimizer == up.optimizer and cfg.lr_scheduler == up.lr_scheduler
+    assert cfg.training == up.training
+    # delta 1 (attention node + override) and delta 2 (no checkpoint I/O)
+    assert cfg.override.imports and cfg.checkpoint.enable is False
+    assert qwen3_debugmodel_npu_partial_dtensor().parallelism.spmd_backend == "partial_dtensor"
 
 
 def test_upstream_lm_attention_backends_are_what_we_think():

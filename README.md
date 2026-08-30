@@ -173,7 +173,7 @@ flowchart LR
 | **L0** compat | `ascend_titan.compat` | 受治理的 monkeypatch，每条挂上游 issue —— **NIGHTLY 上生效数 = 0** |
 | **L1** kernels | `ascend_titan.kernels` | torchtitan `@override` 工厂；`_probe.py` 做依赖探测（torch_npu 硬依赖，P14） |
 | **L2** parallel / graph | `ascend_titan.parallel`、`.graph` | `ModelSpec.parallelize_fn` 替换、torchair 后端（M4/M5） |
-| **L3** models / recipes | `ascend_titan.models.<model>`、`ascend_titan.recipes` | 内容在 `models/`（每模型一个包 + README），机制在 `recipes/`（`npu_baseline`、矩阵解析器） |
+| **L3** models / recipes | `ascend_titan.models.<model>`、`ascend_titan.recipes` | 内容在 `models/`（每模型一个包 + README），机制在 `recipes/`（`npu_minimal` / `npu_fused`、矩阵解析器） |
 | **L4** tools | `ascend_titan.tools` | `doctor`、矩阵扫描与归因、provenance |
 
 ---

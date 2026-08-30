@@ -70,7 +70,7 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 
 上游 registry 里还有 `qwen3_0_6b`、`qwen3_1_7b`、`qwen3_14b`、`qwen3_32b`、`qwen3_30b_a3b`、
 `qwen3_moe_debug` 等。它们**尚未在昇腾上跑过**，按 P2 记为 ⚪ 而不是 🟢。要跑的话不要新建配置，
-走矩阵 runner 直接跑上游配置 + `npu_baseline`：
+走矩阵 runner 直接跑上游配置 + `npu_minimal`：
 
 ```bash
 MODULE=ascend_titan.recipes.matrix \

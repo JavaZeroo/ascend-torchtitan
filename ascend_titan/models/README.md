@@ -1,6 +1,6 @@
 # models —— 每个模型一个包（L3）
 
-`ascend_titan/models/<model>/` 放一个模型族的全部内容；跨模型的机制（`npu_baseline`、矩阵解析器）
+`ascend_titan/models/<model>/` 放一个模型族的全部内容；跨模型的机制（`npu_minimal` / `npu_fused`、矩阵解析器）
 留在 `ascend_titan/recipes/`。**内容在 `models/`，机制在 `recipes/`。**
 
 ```
@@ -43,7 +43,7 @@ MODULE=ascend_titan.models.<model> CONFIG=<fn> NPU=<n> ./scripts/run_train.sh
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh <fn>      # 与冻结曲线逐位对比
 ```
 
-没有专属 recipe 的模型（🟡 那几个）直接跑上游配置 + `npu_baseline`：
+没有专属 recipe 的模型（🟡 那几个）直接跑上游配置 + `npu_minimal`（加 `__fused` 后缀则叠加融合算子，`__stock` 则完全不改）：
 
 ```bash
 MODULE=ascend_titan.recipes.matrix \

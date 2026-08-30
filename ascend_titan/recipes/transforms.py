@@ -3,11 +3,20 @@
 Every delta here must name the issue that makes it necessary and disappear by feature
 detection once the fix is present (P12: the goal state is the identity transform).
 
-``npu_baseline`` is the M1 delta set applied generically (by traversal, not by
-rebuilding the model spec), so any upstream recipe — including the 57 upstream
-integration-test configs — can be measured on NPU with the *same* baseline.
-Everything else in the config (parallelism, AC, compile, checkpointing) is left
-untouched: those are the matrix axes.
+Two transforms, deliberately separate (P12):
+
+``npu_minimal``  only what an upstream config cannot run without on NPU. This is
+                 what the capability matrix applies, so a red cell means "upstream
+                 feature X does not work here", never "our perf kernel broke it".
+                 The goal state is the identity transform.
+``npu_fused``    performance overrides (drop-in fused kernels). Opt-in, never part
+                 of a measurement baseline, and numerics may differ at bf16
+                 rounding level from the un-fused run.
+
+Both are applied generically by traversal, not by rebuilding the model spec, so any
+upstream recipe -- including the upstream integration-test configs -- can be measured
+on NPU. Everything else in the config (parallelism, AC, compile, checkpointing) is
+left untouched: those are the matrix axes.
 """
 
 from __future__ import annotations
@@ -62,8 +71,13 @@ def _torch_fsdp_reads_spmd_types() -> bool:
     return hasattr(dist, "_is_spmd_types_available")
 
 
-def npu_baseline(config: Trainer.Config) -> Applied:
-    """Apply the M1 deltas in place. Idempotent."""
+def npu_minimal(config: Trainer.Config) -> Applied:
+    """Apply, in place, only the deltas an upstream config cannot run without. Idempotent.
+
+    Every step names the issue that makes it necessary and must disappear by
+    feature detection once that issue is fixed (P12). Nothing here may exist for
+    performance, and nothing here may hide a torch_npu defect (P9).
+    """
     a = Applied()
 
     # 1. FlexAttention nodes -> VarlenAttention (torch rejects npu in flex: TORCH-1).
@@ -98,12 +112,6 @@ def npu_baseline(config: Trainer.Config) -> Applied:
         config.override.imports = [*config.override.imports, ROPE_OVERRIDE]
     a.rope_override = has_complex_rope and not block_override
 
-    # 2c. RMSNorm -> npu_rms_norm (fused kernel; pure drop-in).
-    has_rms = any(type(c) is RMSNorm.Config for _f, c, _p, _a in config.traverse(RMSNorm.Config))
-    if has_rms and RMSNORM_OVERRIDE not in config.override.imports:
-        config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
-    a.rms_norm_override = has_rms
-
     # 3. spmd_types needs FSDP2 to read spmd_types annotations, which only torch
     #    nightly (>= 2.14.0.dev) does (TT-5 / TORCH-6: a torch-version gap, not an
     #    NPU one). Feature-check, like upstream's check_if_feature_in_pytorch: on a
@@ -121,5 +129,27 @@ def npu_baseline(config: Trainer.Config) -> Applied:
     #  unwrapping the loss here was a P1/P9 violation: it worked around a suspected torch_npu
     #  defect inside the baseline.)
 
-    logger.info("[ascend_titan] npu_baseline: %s", a.summary())
+    logger.info("[ascend_titan] npu_minimal: %s", a.summary())
+    return a
+
+
+def npu_fused(config: Trainer.Config) -> Applied:
+    """Apply, in place, the drop-in fused-kernel overrides. Idempotent.
+
+    Opt-in only. These change nothing about *whether* a config runs, so they must
+    never be part of the measurement baseline: a matrix cell has to be able to
+    fail on upstream's own implementation (P12). Numerics differ from the un-fused
+    run at bf16 rounding level, which is why the fused recipes carry their own
+    golden curves.
+    """
+    a = Applied()
+
+    # RMSNorm -> npu_rms_norm (pure drop-in: same parameter name, shape and
+    # checkpoint layout; Meta + autograd registered in torch_npu).
+    has_rms = any(type(c) is RMSNorm.Config for _f, c, _p, _a in config.traverse(RMSNorm.Config))
+    if has_rms and RMSNORM_OVERRIDE not in config.override.imports:
+        config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
+    a.rms_norm_override = has_rms
+
+    logger.info("[ascend_titan] npu_fused: %s", a.summary())
     return a

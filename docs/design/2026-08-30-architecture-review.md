@@ -72,7 +72,7 @@
 | `ascend_titan/compat/` | 注册表 172 行 + 2 条 shim（163 行） | 两条 shim 在 nightly 上都 no-op；`pp_step_presplit.py` 复刻 torch 内部逻辑，属"替换型"却标 `wrap` | 注册表保留（便宜且是治理机制）；两条 shim 文件待 RELEASE 退役后删除；**已加**门禁测试 `tests/unit/test_nightly_gate.py`：NIGHTLY 上 shim 必须是 no-op |
 | `ascend_titan/kernels/` | 5 个 override 模块 | 5 份相同的 `try: import torch_npu … _AVAILABLE` 样板；`attention.py:255-257` 无条件转 bf16（fp32 输入静默降精度）；`rope.py` 未做可用性探测（与 `.claude/rules/kernels.md` 第 1 条不一致） | **已落实（ADR-007/P14）**：抽 `kernels/_probe.py::require_op(name)`，缺模块 / 缺算子一律抛错，不再有 `_AVAILABLE` 降级开关；bf16 转换改为"仅当输入是 fp16/bf16 以外时 raise 或显式 WARNING"；`rope.py` 用同一探测器 |
 | `ascend_titan/parallel/`、`graph/` | 空包 + README | 空包会进 wheel；按 YAGNI 本不该建 | 可接受（README 说明了用途）；但 M4/M5 前不要再加空目录 |
-| `ascend_titan/recipes/transforms.py` | `npu_baseline` 6 步 | 见 §4.4：混入了 P1 违规项与性能项 | 拆成 `npu_minimal`（只含"不加就跑不起来"）与 `npu_fused`（性能）；每条增量挂 issue ID 与**消失条件** |
+| `ascend_titan/recipes/transforms.py` | `npu_baseline` 6 步 | 见 §4.4：混入了 P1 违规项与性能项 | **已落实（2026-08-30）**：拆成 `npu_minimal`（矩阵默认，只含"不加就跑不起来"）与 `npu_fused`（性能，opt-in，`--mode fused`）；每条增量挂 issue ID 与**消失条件** |
 | `ascend_titan/tools/matrix.py` | 440 行，`TRIAGE` 正则表 107 行 + 运行器 + 报告 + CLI | 数据（归因规则）写在代码里，ruff 重排导致 `CLAUDE.md` 硬规则 10 那种"用行定位插入"的怪规矩；一个文件五种职责 | `TRIAGE` 迁到 `docs/issues/issues.toml`（见下），`tools/matrix/` 拆成 `triage.py`、`runner.py`、`report.py`、`cli.py` |
 | `patches/` | torchtitan 5 / pytorch 2 / torch_npu 3 | 三种归属混在一个目录但**政策完全不同**：torch_npu 的要提 PR，torchtitan/pytorch 的按用户决定不提；torchtitan/pytorch 补丁没有任何产品路径会应用它，只是"证据" | `patches/torch_npu/`：**在途补丁**，每个必须带 gitcode issue + PR URL，合入即删；`patches/evidence/{torchtitan,pytorch}/`：只读证据，README 明说"永不应用于安装路径"；切 nightly 后 TT-2/8/9 三个补丁删除 |
 | `constraints/` | 4 个 txt + sha | §2.3 | §2.4 |
@@ -209,7 +209,7 @@
 | ~~P1~~ 已完成 | NPU-1/2/3/6/7/8 在 master 上重验并修复 → gitcode issue + PR（Ascend/pytorch !45526–!45529、Ascend/op-plugin !5800–!5801；CLA ✅，CI 运行中） | `STATUS.md` |
 | P1 | `docs/issues/issues.toml` + 生成器；`TRIAGE` 迁出 `matrix.py` | `STATUS.md` 由生成 |
 | ~~P1~~ 已完成 | `PRINCIPLES.md` P8–P13、`ADR-006`、`CLAUDE.md` 工作流、skill `torch-npu-fix` | 文档 |
-| P2（部分完成） | ~~`kernels/_probe.py`~~、~~`train.py` 硬依赖~~ 已落地（P14 / ADR-007：改成硬导入 + `require_op`，而不是原方案的"只 WARNING 一次"）；**待做**：`npu_baseline` → `npu_minimal` + `npu_fused` | 代码 + 测试 |
+| ~~P2~~ 已完成 | `kernels/_probe.py`、`train.py` 硬依赖（P14 / ADR-007：硬导入 + `require_op`，而不是原方案的"只 WARNING 一次"）；`npu_baseline` → `npu_minimal` + `npu_fused`（矩阵 `--mode minimal\|stock\|fused`） | 代码 + 测试 |
 | ~~P1~~ 已完成（2026-08-30 追加） | L3 按模型重组：`ascend_titan/models/<model>/`（recipes + probes + 必需 README）、`models/registry.py`、`models/_template/`；`recipes/` 只留跨模型机制。`tests/unit/test_models_registry.py` 强制登记与文档 | 代码 + 测试 |
 | ~~P2~~ 已完成（2026-08-30 追加） | README 重写：banner / 架构图 / golden 曲线（`docs/assets/`）、模型与特性支持表、上游修复表 | 文档 |
 | P2 | `constraints/workspace.lock` + `scripts/workspace.sh`；`outputs/*.py` → `tests/repro/` | 环境可复现 |

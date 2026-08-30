@@ -19,7 +19,7 @@
 
 ## 历史数据（2026-08-29，正式版 torch，M2 扫描）
 
-数据来源：M2 全量扫描（`python -m ascend_titan.tools.matrix`，上游 `features` + `models` 套件共 61 个用例，对每个配置施加 `npu_baseline`），2026-08-29，torchtitan `13da2d77c`，Ascend 910B2 ×8 / CANN 9.1.0。原始报告：`docs/matrix/2026-08-29_stable.md`、`docs/matrix/2026-08-29_next.md`。
+数据来源：M2 全量扫描（`python -m ascend_titan.tools.matrix`，上游 `features` + `models` 套件共 61 个用例，对每个配置施加当时的 `npu_baseline`＝现在的 `npu_minimal` + `npu_rms_norm`），2026-08-29，torchtitan `13da2d77c`，Ascend 910B2 ×8 / CANN 9.1.0。原始报告：`docs/matrix/2026-08-29_stable.md`、`docs/matrix/2026-08-29_next.md`。
 
 | track | torch | torch_npu | 🟢 | 🔴 | ⚪ |
 |---|---|---|---|---|---|
@@ -37,7 +37,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 | CUDA-only 依赖缺失：`fla`（qwen3_5 GDN）、`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1（fla-npu 已在路线图） |
 | 上游树内 CUDA-only 组件：`fused_swiglu`/`fused_grouped_experts` Triton 内核、DistMuon | 4 | TT-KERNEL / TT-CUDA | 上游按设计为 CUDA；昇腾替代属 L1 |
 | gpt_oss + TP：路由 softmax backward 形状不匹配（LSE 尾部已实现后新暴露） | 1 | OURS-10 | 本仓，待查 |
-| 上游 `fused_mla` override 与我们的 RoPE override 节点冲突（该用例本身 CUDA-only） | 1 | OURS-9 / TT-9 | npu_baseline 检测到上游 override 时跳过 RoPE override |
+| 上游 `fused_mla` override 与我们的 RoPE override 节点冲突（该用例本身 CUDA-only） | 1 | OURS-9 / TT-9 | `npu_minimal` 检测到上游 override 时跳过 RoPE override |
 
 **结论：NPU/CANN 归因的红格为 0。** torch_npu 的三个缺陷（NPU-1 varlen 内核、NPU-2 fake 进程组、NPU-3 复数索引）都已通过上游本就存在的等价实现（varlen 节点 + `npu_fusion_attention`、实数缓存 RoPE）在 L1 层绕开，剩余红格全部归 torch 版本、上游 CUDA-only 组件或本仓自身待办。
 
@@ -130,7 +130,7 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 
 | loss | 状态 | 归因 / 备注 |
 |---|---|---|
-| CrossEntropyLoss | 🟢 | M1 默认；`npu_baseline` 把 ChunkedLossWrapper 展开为其内层 loss |
+| CrossEntropyLoss | 🟢 | 2026-08-30 起不再是默认（上游 `ChunkedLossWrapper` 才是）；保留为探针 `qwen3_debugmodel_npu_ce_loss` |
 | ChunkedLossWrapper（上游默认） | 🟢（NIGHTLY）/ 🔴（RELEASE：TT-4） | NIGHTLY 单卡 + FSDP2×2 通过；RELEASE 上 backward "data is not allocated yet"（版本差，P8 不处理） |
 
 ## 激活检查点

@@ -18,7 +18,7 @@
 | `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention = custom_op、rope、rms_norm、swiglu、situ_glu）；`_probe.py` = 依赖探测（`require_op` 硬 / `optional_module` 可选，P14） |
 | `ascend_titan/parallel/`、`graph/` | L2 | 并行策略、torchair（M4/M5，目前空） |
 | `ascend_titan/models/<model>/` | L3 | **内容**：每个模型一个包 = `recipes.py`（支持的入口）+ `probes.py`（只做测量）+ `README.md`（必需，使用指南）；`registry.py` 是模型状态表（纯数据）；`_template/` 是新模型骨架 |
-| `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`transforms.npu_baseline`（每条增量挂 issue + 特性探测消失条件，P12）、`matrix.py` 动态 recipe |
+| `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`transforms.npu_minimal`（只含"不加就跑不起来"的增量，挂 issue + 特性探测消失条件）与 `transforms.npu_fused`（性能 override，opt-in，P12）、`matrix.py` 动态 recipe（`__stock` / `__fused` 后缀） |
 | `ascend_titan/tools/` | L4 | `doctor`、`matrix`（扫描 + 归因）、`provenance` |
 | `constraints/` | — | `nightly.txt` + `torchtitan.sha` + `torch_npu.sha` = 版本三元组（**唯一事实来源**，P11） |
 | `scripts/build_torch_npu.sh` | — | 源码构建 torch_npu（本地盘 `/opt/build/torch_npu`，wheel → `/opt/wheels/` + 元数据 json）；`WITH_PATCHES=1` 叠加在途补丁 |
@@ -43,7 +43,7 @@ pytest tests/unit -x                      # CPU 单测
 ruff check . && ruff format --check .
 ASCEND_TITAN_SKIP_SHIMS=1 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu   # NIGHTLY 上 shim 必须全关也能过
 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_debugmodel_npu NPU=8 ./scripts/run_train.sh
-python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4   # 上游用例搬到 NPU 扫描（docs/matrix/）
+python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4   # 上游用例搬到 NPU 扫描（--mode minimal|stock|fused）
 ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugmodel_npu
 # tyro：`activation-checkpoint:none` 之类的子命令必须放在所有 --flag 之后
 ```
@@ -55,7 +55,7 @@ ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugm
 3. **上游边界**（P10）：只能操作 `gitcode.com/ascend/*`；`github.com/pytorch/*` 只读（不提 issue / PR / 评论）。
 4. **先在 NIGHTLY 复现再处理**（P8）：TT/TORCH 类失败先在 NIGHTLY 上确认存在；不存在 ⇒ 关闭；存在 ⇒ `docs/issues/` + `patches/evidence/`。
 5. **先配置再 shim**（P0）；**shim 用包装并挂上游链接**（P3/P4）；**override 只针对已有的 `Configurable` 节点**（P6）；**recipe 是增量**。
-6. **baseline 最小化**（P12）：`npu_baseline` 只允许"不加就跑不起来"的增量，每条挂 issue ID，用特性探测（不是版本号）决定何时消失。
+6. **baseline 最小化**（P12）：矩阵默认施加的是 `npu_minimal`，只允许"不加就跑不起来"的增量，每条挂 issue ID，用特性探测（不是版本号）决定何时消失；性能 override 一律进 `npu_fused`（opt-in，`--mode fused`）。
 7. **版本三元组一起升级，走带矩阵结果的 PR**（P5）。绝不随手改 `constraints/*.sha`。
 8. **单一事实来源**（P11）：版本只在 `constraints/`，问题状态只在 `STATUS.md`，其它文档只引用 ID。
 9. **基础依赖硬导入**（P14 / ADR-007）：`torch` / `torch_npu` / `torchtitan` 绝不写 `try: import`，不设 `_AVAILABLE` 降级开关——缺了就抛错。算子探测走 `kernels/_probe.require_op()`（缺算子 = 昇腾侧缺口，走硬规则 2）。只有真正可选的加速包（`cann_ops_nn`、Triton-Ascend）能用 `_probe.optional_module()` + WARNING 降级；诊断工具（doctor、`tests/repro/probe_*`）例外。

@@ -6,7 +6,8 @@ every failure to an attribution code, and write a report.
 
 Reads the upstream test lists (``tests/integration_tests/{features,models}.py``
 at ``TITAN_DIR``) so the case set follows upstream automatically; applies
-``npu_baseline`` to each config through ``ascend_titan.recipes.matrix``.
+``npu_minimal`` to each config through ``ascend_titan.recipes.matrix`` (``--mode``
+selects stock / minimal / fused).
 """
 
 from __future__ import annotations
@@ -174,7 +175,7 @@ class Result:
     runs: list[dict] = field(default_factory=list)
 
 
-def load_cases(titan_dir: Path, suites: list[str], *, stock: bool) -> list[Case]:
+def load_cases(titan_dir: Path, suites: list[str], *, mode: str = "minimal") -> list[Case]:
     sys.path.insert(0, str(titan_dir))
     from ascend_titan.recipes.matrix import encode
 
@@ -201,7 +202,7 @@ def load_cases(titan_dir: Path, suites: list[str], *, stock: bool) -> list[Case]
                     name=d.test_name,
                     descr=d.test_descr,
                     ngpu=d.ngpu,
-                    configs=[encode(fn, stock=stock) for fn in d.configs],
+                    configs=[encode(fn, mode=mode) for fn in d.configs],
                     override_args=[list(a) for a in d.override_args],
                     skip=skip,
                 )
@@ -394,7 +395,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--timeout", type=int, default=900, help="seconds per run")
     p.add_argument("--jobs", type=int, default=8, help="max concurrent cases")
     p.add_argument("--filter", default=None, help="regex on case name")
-    p.add_argument("--stock", action="store_true", help="run upstream configs unmodified")
+    p.add_argument(
+        "--mode",
+        default="minimal",
+        choices=("minimal", "stock", "fused"),
+        help="minimal: only what NPU cannot run without (default, P12); "
+        "stock: upstream unmodified; fused: minimal + drop-in fused kernels",
+    )
     p.add_argument("--list", action="store_true")
     p.add_argument("--retriage", default=None, help="re-run triage over an existing sweep dir")
     a = p.parse_args(argv)
@@ -416,7 +423,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render(results, title="Matrix sweep (re-triaged)"))
         return 0
 
-    cases = load_cases(Path(a.titan_dir), a.suites.split(","), stock=a.stock)
+    cases = load_cases(Path(a.titan_dir), a.suites.split(","), mode=a.mode)
     if a.filter:
         cases = [c for c in cases if re.search(a.filter, c.name)]
     if a.list:
@@ -430,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(cases)} cases -> {out}", flush=True)
     results = sweep(cases, parse_cards(a.cards), out, repo, a.timeout, a.jobs)
     (out / "results.json").write_text(json.dumps([asdict(r) for r in results], indent=2))
-    title = f"Matrix sweep {'(stock upstream)' if a.stock else '(npu_baseline)'}"
+    title = f"Matrix sweep (npu_{a.mode})" if a.mode != "stock" else "Matrix sweep (stock upstream)"
     (out / "report.md").write_text(render(results, title=title))
     print(render(results, title=title))
     return 0

@@ -31,7 +31,7 @@ def test_parse_cards():
 
 
 def _expected_spmd_backend() -> str:
-    """npu_baseline only forces partial_dtensor on a torch whose FSDP2 cannot read
+    """npu_minimal only forces partial_dtensor on a torch whose FSDP2 cannot read
     spmd_types annotations (torch <= 2.13); nightly keeps the upstream default."""
     from ascend_titan.recipes.transforms import _torch_fsdp_reads_spmd_types
 
@@ -39,27 +39,30 @@ def _expected_spmd_backend() -> str:
 
 
 @pytest.mark.titan
-def test_npu_baseline_transform_on_upstream_recipes():
+def test_npu_minimal_transform_on_upstream_recipes():
     from torchtitan.components.loss import ChunkedLossWrapper
     from torchtitan.models.common.attention import FlexAttention, VarlenAttention
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import ATTENTION_OVERRIDE, npu_baseline
+    from ascend_titan.recipes.transforms import ATTENTION_OVERRIDE, npu_minimal
 
     cfg = llama3_debugmodel()
     assert any(True for _ in cfg.traverse(FlexAttention.Config))
-    a = npu_baseline(cfg)
+    a = npu_minimal(cfg)
     assert a.flex_to_varlen > 0
     assert not any(True for _ in cfg.traverse(FlexAttention.Config))
     assert any(True for _ in cfg.traverse(VarlenAttention.Config))
     assert ATTENTION_OVERRIDE in cfg.override.imports
     assert "ascend_titan.kernels.rope.real_cache_rope" in cfg.override.imports
-    assert "ascend_titan.kernels.rms_norm.npu_rms_norm" in cfg.override.imports
+    # A perf kernel must NOT be in the measurement baseline (P12): a red matrix
+    # cell has to mean "this upstream feature fails on NPU", never "our drop-in
+    # RMSNorm broke it".
+    assert "ascend_titan.kernels.rms_norm.npu_rms_norm" not in cfg.override.imports
     assert cfg.parallelism.spmd_backend == _expected_spmd_backend()
     # TT-4 is gone on the NIGHTLY track; the upstream default loss wrapper stays in place.
     assert isinstance(cfg.loss, ChunkedLossWrapper.Config)
     # idempotent
-    b = npu_baseline(cfg)
+    b = npu_minimal(cfg)
     assert b.flex_to_varlen == 0 and cfg.override.imports.count(ATTENTION_OVERRIDE) == 1
 
 
@@ -70,19 +73,45 @@ def test_matrix_module_resolves_upstream_recipe():
     fn = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel")
     cfg = fn()
     assert cfg.parallelism.spmd_backend == _expected_spmd_backend()
+    assert "ascend_titan.kernels.rms_norm.npu_rms_norm" not in cfg.override.imports
     stock = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel__stock")()
     assert stock.override.imports == []
+    fused = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel__fused")()
+    assert "ascend_titan.kernels.rms_norm.npu_rms_norm" in fused.override.imports
     with pytest.raises(AttributeError):
         _ = m.nonsense
 
 
 @pytest.mark.titan
-def test_npu_baseline_skips_rope_when_upstream_block_override_present():
+def test_npu_minimal_skips_rope_when_upstream_block_override_present():
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import ROPE_OVERRIDE, npu_baseline
+    from ascend_titan.recipes.transforms import ROPE_OVERRIDE, npu_minimal
 
     cfg = llama3_debugmodel()
     cfg.override.imports = ["torchtitan.overrides.fused_mla.fused_mla"]
-    a = npu_baseline(cfg)
+    a = npu_minimal(cfg)
     assert ROPE_OVERRIDE not in cfg.override.imports and not a.rope_override
+
+
+@pytest.mark.titan
+def test_npu_fused_is_opt_in_and_idempotent():
+    """The perf transform is separate from the baseline and safe to re-apply."""
+    from torchtitan.models.llama3.config_registry import llama3_debugmodel
+
+    from ascend_titan.recipes.transforms import RMSNORM_OVERRIDE, npu_fused, npu_minimal
+
+    cfg = llama3_debugmodel()
+    npu_minimal(cfg)
+    assert RMSNORM_OVERRIDE not in cfg.override.imports
+    a = npu_fused(cfg)
+    assert a.rms_norm_override and RMSNORM_OVERRIDE in cfg.override.imports
+    npu_fused(cfg)
+    assert cfg.override.imports.count(RMSNORM_OVERRIDE) == 1
+
+
+def test_encode_rejects_unknown_mode():
+    from ascend_titan.recipes.matrix import encode
+
+    with pytest.raises(ValueError, match="mode must be one of"):
+        encode(lambda: None, mode="turbo")

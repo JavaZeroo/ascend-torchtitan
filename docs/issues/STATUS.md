@@ -37,7 +37,7 @@
 | OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | HARNESS | — |
 | OURS-10 | gpt_oss × TP | 已确认 | 排查中（NIGHTLY 上复测待做） | 待做 |
 | OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 进行中 | `constraints/npu-triton.txt` → 待改 `extras/triton.txt`；torch_npu master 已先试 `tl.extra.cann` | 待做 |
-| OURS-12 | **`npu_baseline` 违反 P1/P9**：展开 ChunkedLossWrapper（TT-4）、性能 override 混入 baseline | 部分修复 | TT-4 展开已删除；`npu_rms_norm` 移出 baseline 待做（P12） | — |
+| OURS-12 | **`npu_baseline` 违反 P1/P9**：展开 ChunkedLossWrapper（TT-4）、性能 override 混入 baseline | **已关闭（2026-08-30）** | TT-4 展开已删除；`npu_baseline` 拆成 `npu_minimal`（矩阵默认）+ `npu_fused`（opt-in），`npu_rms_norm` 已移出基线 | `tests/unit/test_matrix.py`：minimal 不含 RMSNorm override、fused 含 |
 | OURS-13 | 矩阵工具在 `setup()` 之前导入 torchtitan（F4 顺序），暴露了 NPU-8 | 已确认 | NPU-8 修复后可运行；工具本身也应先 `setup()`（待做） | 第二轮 |
 
 ## NIGHTLY 修复验证（含六个补丁的 torch_npu 构建，2026-08-30）

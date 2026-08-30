@@ -46,7 +46,7 @@ def <op>(cfg: <Node>.Config) -> "Ascend<Node>.Config":
     return derive(cfg, Ascend<Node>.Config)
 ```
 真正可选的加速包（ops-nn 的 `cann_ops_nn`、Triton-Ascend——需要单独构建、不在 NIGHTLY 基线里）才用 `_probe.optional_module(*candidates)` + WARNING 降级（ADR-004），样例见 `kernels/situ_glu.py`。
-recipe 里激活：`config.override.imports = ["ascend_titan.kernels.<op>.<op>"]`；若所有上游配置都需要它，加进 `recipes/transforms.py::npu_baseline`。
+recipe 里激活：`config.override.imports = ["ascend_titan.kernels.<op>.<op>"]`。若**没有它就跑不起来**，加进 `recipes/transforms.py::npu_minimal`；若只是更快（drop-in），加进 `npu_fused`——性能项进 minimal 是 P12 违规。
 
 ## 3. 测试
 - `tests/unit/test_kernel_<op>.py`（CPU）：用 `npu_stub` fixture 提供假 `torch_npu`；断言 override 注册与 `derive` 结果。若替代实现是纯 torch（如 rope），在 CPU 上与上游模块做逐位/近似对齐。缺依赖的负面用例统一在 `test_kernel_import_safety.py`（必须抛错，P14）。
