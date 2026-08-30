@@ -1,14 +1,12 @@
 """Qwen3.5 recipes.
 
-status: 🔴 DEP-FLA -- ``torchtitan.models.qwen3_5.__init__`` imports ``gdn.py``,
-which imports ``fla`` (CUDA-only Triton kernels for the gated delta net) at
-module level. The import below therefore fails on Ascend today, loudly and on
-purpose (P14): a missing dependency is not something to paper over, and the
-Ascend replacement (fla-npu) is an L1 task on the roadmap (M4).
-
-The recipes are written and kept minimal so that the day ``fla`` has an Ascend
-implementation, this file is the only thing that has to be re-run -- not
-rewritten. Deltas mirror the qwen3 reference path.
+``fla`` (flash-linear-attention) is a plain pip dependency -- ``fla-core`` installs
+on aarch64 and imports fine, so the model package loads. Its *kernels* are
+another matter: they are Triton written for CUDA and ``bishengir-compile``
+rejects them even with Triton-Ascend installed. The gated delta net therefore
+runs through ``ascend_titan.kernels.gdn``, which selects attn_gym's own
+device-agnostic reference recurrence -- same math, different implementation,
+exactly like the KDA override for kimi_k3.
 
 Full guide: ascend_titan/models/qwen3_5/README.md
 """
@@ -18,6 +16,7 @@ from torchtitan.models.qwen3_5.config_registry import qwen35_debugmodel
 from torchtitan.trainer import Trainer
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
+GDN_OVERRIDE = "ascend_titan.kernels.gdn.npu_gated_delta_net"
 
 
 def qwen35_debugmodel_npu() -> Trainer.Config:
@@ -29,7 +28,11 @@ def qwen35_debugmodel_npu() -> Trainer.Config:
     config.model_spec = model_registry("debugmodel", attn_backend="varlen")
     config.override.imports = [ATTENTION_OVERRIDE]
 
-    # DELTA 2: no checkpoint I/O in a smoke run (DCP on NPU is its own cell).
+    # DELTA 2: gated delta net on attn_gym's reference recurrence (fla's Triton
+    # kernels do not compile for Ascend). 消失条件：昇腾有了 GDN 融合算子。
+    config.override.imports = [*config.override.imports, GDN_OVERRIDE]
+
+    # DELTA 3: no checkpoint I/O in a smoke run (DCP on NPU is its own cell).
     config.checkpoint.enable = False
 
     return config
