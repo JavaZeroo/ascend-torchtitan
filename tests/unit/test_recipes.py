@@ -113,3 +113,59 @@ def test_ce_loss_probe_is_the_only_place_that_unchunks_the_loss():
     assert "config.loss" not in inspect.getsource(recipes.qwen3_debugmodel_npu)
     assert type(qwen3_debugmodel_npu().loss) is type(qwen3_debugmodel().loss)
     assert type(qwen3_debugmodel_npu_ce_loss().loss).__qualname__ == "CrossEntropyLoss.Config"
+
+
+@pytest.mark.titan
+def test_release_recipes_are_deltas_on_the_real_upstream_configs(monkeypatch, tmp_path):
+    """R1: a release recipe must start from the upstream *real-size* config, not
+    from debugmodel and not from a hand-built Trainer.Config."""
+    import inspect
+
+    from ascend_titan.models.qwen3 import recipes as q3
+
+    checked = [(q3.qwen3_0_6b_npu, "qwen3_0_6b()"), (q3.qwen3_14b_npu_pp2, "qwen3_14b()")]
+    # qwen3_5 needs fla-core, which is an extra (see models/qwen3_5/README.md)
+    pytest.importorskip("fla", reason="pip install fla-core (qwen3_5 extra)")
+    from ascend_titan.models.qwen3_5 import recipes as q35
+
+    checked.append((q35.qwen35_0_8b_npu, "qwen35_0_8b()"))
+    for fn, upstream_call in checked:
+        src = inspect.getsource(fn)
+        assert upstream_call in src
+        assert "Trainer.Config(" not in src
+
+
+def test_assets_helper_refuses_to_guess(tmp_path, monkeypatch):
+    """A missing asset must say how to get it, not silently fall back to the toy one."""
+    from ascend_titan.models import assets
+
+    monkeypatch.setenv("ASCEND_TITAN_ASSETS", str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="fetch_assets.sh tokenizer"):
+        assets.hf_assets_path("Qwen3-0.6B")
+    with pytest.raises(FileNotFoundError, match="fetch_assets.sh c4"):
+        assets.c4_shards()
+
+    (tmp_path / "hf" / "Qwen3-0.6B").mkdir(parents=True)
+    (tmp_path / "hf" / "Qwen3-0.6B" / "tokenizer.json").write_text("{}")
+    assert assets.hf_assets_path("Qwen3-0.6B").endswith("Qwen3-0.6B")
+
+
+def test_c4_subset_is_real_text_not_the_toy_file(tmp_path, monkeypatch):
+    """The subset is cut from a real shard; it must keep whole C4 records."""
+    import gzip
+    import json
+
+    from ascend_titan.models import assets
+
+    monkeypatch.setenv("ASCEND_TITAN_ASSETS", str(tmp_path))
+    shard = tmp_path / "c4" / "en" / "c4-train.00000-of-01024.json.gz"
+    shard.parent.mkdir(parents=True)
+    with gzip.open(shard, "wt", encoding="utf-8") as f:
+        for i in range(10):
+            f.write(json.dumps({"text": f"document {i}", "url": "u"}) + "\n")
+
+    path = assets.c4_subset(docs=4)
+    rows = [json.loads(line) for line in open(path, encoding="utf-8")]
+    assert len(rows) == 4
+    assert rows[0]["text"] == "document 0"
+    assert assets.c4_subset(docs=4) == path  # cached, not rebuilt
