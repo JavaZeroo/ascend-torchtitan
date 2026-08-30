@@ -17,10 +17,19 @@ torchtitan 的 `debugmodel` 是**冒烟件**：几层、随机权重、`tests/as
 
 debugmodel 的 golden 仍然保留——它是最便宜的回归探测器——但**不能**作为"支持该模型"的证据。
 
+**"形态齐了"不等于 R1 达成**：真实尺寸的配置必须真的能训，不是能起来。qwen3.5-0.8B 就是
+反例——tokenizer、数据、上下文全对，从零训练却在第 4–10 步 loss 非有限。这种情况记 🟡，
+把发散的逐步轨迹（loss + grad_norm）写进模型 README，不要因为"跑起来了"就算 R1。
+
 ## R2 并行覆盖
 
 单卡、FSDP2×8 必须绿。TP、PP、（MoE 模型）EP 逐项记录：绿的给命令和 loss，红的给归因。
 不做"应该可以"的推断。
+
+取 PP 的 loss 要记录**最后一个 rank**：流水并行下只有最后一级算 loss，其余 rank 打
+`loss: -4.00000` 占位符，用 rank 0 的日志会把一个健康的 PP 运行看成坏的。`release_check`
+与 `bench` 都已经改成 `LOG_RANK=<ngpu-1>`。另外 PP 与权重共享互斥（上游限制），所以
+tie 了 embedding 的尺寸取不到这一格——qwen3 的 PP 证据因此取在 8B 上。
 
 ## R3 数值可信
 
