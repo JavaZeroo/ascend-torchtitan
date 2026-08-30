@@ -1,0 +1,122 @@
+From 34e1e35d2de3f1e98a02c3ec70ea9520e2984570 Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Sun, 30 Aug 2026 16:20:56 +0800
+Subject: [PATCH] fix: warn when ASCEND_RT_VISIBLE_DEVICES is not in ascending
+ order
+
+_device_count_ascend_hal() already knows the list must ascend ("`rts` need
+ascending order") and returns 0 when it does not. That makes device_count()
+report no NPUs and is_available() return False, with nothing pointing at the
+cause -- the value came from the user's own environment, but the failure
+surfaces far away. In torchtitan, for example, the frozen device_type falls
+back to "cuda" and training dies several layers later with
+
+  AttributeError: module 'torch._C' has no attribute '_cuda_setDevice'
+
+which says nothing about visible devices. It is easy to produce an unsorted
+list without noticing: any scheduler that hands out a pool of cards will emit
+e.g. "4,5,0,1" after a release.
+
+Keep the behaviour, add a warning naming the variable, the offending pair and
+the fix. Verified on Ascend 910B2 / CANN 9.1.0:
+
+  ASCEND_RT_VISIBLE_DEVICES=0,1,4,5 -> is_available=True  device_count=4
+  ASCEND_RT_VISIBLE_DEVICES=4,5,0,1 -> is_available=False device_count=0  (now warns)
+
+Test: test/npu/test_visible_devices_order.py
+
+Upstream-PR: https://gitcode.com/Ascend/pytorch/merge_requests/45536
+Upstream-Issue: https://gitcode.com/Ascend/pytorch/issues/4448
+---
+ test/npu/test_visible_devices_order.py | 48 ++++++++++++++++++++++++++
+ torch_npu/npu/__init__.py              | 12 +++++++
+ 2 files changed, 60 insertions(+)
+ create mode 100644 test/npu/test_visible_devices_order.py
+
+diff --git a/test/npu/test_visible_devices_order.py b/test/npu/test_visible_devices_order.py
+new file mode 100644
+index 000000000..79fb98e3a
+--- /dev/null
++++ b/test/npu/test_visible_devices_order.py
+@@ -0,0 +1,48 @@
++import os
++import subprocess
++import sys
++
++from torch_npu.testing.testcase import TestCase, run_tests
++
++_PROBE = (
++    "import warnings, torch, torch_npu\n"
++    "with warnings.catch_warnings(record=True) as caught:\n"
++    "    warnings.simplefilter('always')\n"
++    "    n = torch_npu.npu.device_count()\n"
++    "print(n, ';'.join(str(w.message) for w in caught))\n"
++)
++
++
++def _probe(visible):
++    env = dict(os.environ, ASCEND_RT_VISIBLE_DEVICES=visible)
++    out = subprocess.run([sys.executable, "-c", _PROBE], env=env, text=True, capture_output=True)
++    return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
++
++
++class TestVisibleDevicesOrder(TestCase):
++    """ASCEND_RT_VISIBLE_DEVICES must be ascending; say so instead of reporting no NPUs.
++
++    An unsorted list made device_count() return 0 silently, so is_available() went
++    False and the real failure surfaced far away (frameworks fall back to CUDA and
++    die in torch.cuda.set_device).
++    """
++
++    def test_unsorted_list_warns(self):
++        if torch_npu.npu.device_count() < 2:
++            self.skipTest("needs at least 2 NPUs")
++        line = _probe("1,0")
++        count, _, message = line.partition(" ")
++        self.assertEqual(count, "0")
++        self.assertTrue("ascending" in message, msg=line)
++
++    def test_sorted_list_is_quiet(self):
++        if torch_npu.npu.device_count() < 2:
++            self.skipTest("needs at least 2 NPUs")
++        line = _probe("0,1")
++        count, _, message = line.partition(" ")
++        self.assertEqual(count, "2")
++        self.assertTrue("ascending" not in message, msg=line)
++
++
++if __name__ == "__main__":
++    run_tests()
+diff --git a/torch_npu/npu/__init__.py b/torch_npu/npu/__init__.py
+index 47dac2b44..96e986c18 100644
+--- a/torch_npu/npu/__init__.py
++++ b/torch_npu/npu/__init__.py
+@@ -151,6 +151,7 @@ from multiprocessing.util import register_after_fork as _register_after_fork
+ import traceback
+ import threading
+ import os
++import warnings
+ import re
+ import importlib
+ import torch
+@@ -473,6 +474,17 @@ def _device_count_ascend_hal() -> int:
+         for idx, val in enumerate(visible_devices):
+             # `rts` need ascending order
+             if idx > 0 and val <= visible_devices[idx - 1]:
++                # Returning 0 here makes device_count() report "no NPUs" and
++                # is_available() False, with nothing pointing at the cause: the
++                # failure then surfaces far away (e.g. torchtitan freezes
++                # device_type=cuda and dies in torch.cuda.set_device). Say what is
++                # wrong, since the value came from the user's own environment.
++                warnings.warn(
++                    "ASCEND_RT_VISIBLE_DEVICES must list device ids in strictly "
++                    f"ascending order, got {os.environ.get('ASCEND_RT_VISIBLE_DEVICES')!r} "
++                    f"({val} follows {visible_devices[idx - 1]}). No NPU will be "
++                    "visible until it is sorted."
++                )
+                 return 0
+             if cast(int, val) >= raw_cnt:
+                 return idx
+-- 
+2.34.1
+
