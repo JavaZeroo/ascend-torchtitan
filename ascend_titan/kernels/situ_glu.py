@@ -38,12 +38,27 @@ logger = logging.getLogger(__name__)
 # The wheel is named after the vendor the run package was built for
 # (`cann_ops_nn_<vendor>`), so discover it rather than guessing the suffix.
 _CANDIDATES = ("cann_ops_nn", *installed_modules("cann_ops_nn_"))
-_module, _err = optional_module(*_CANDIDATES)
-_AVAILABLE = (
-    _module is not None
-    and hasattr(torch.ops, "cann_ops_nn")
-    and hasattr(torch.ops.cann_ops_nn, "situ_glu")
-)
+
+
+def _registers_situ_glu() -> bool:
+    """Did importing a candidate actually register the op?
+
+    Importing is not the same as registering: a leftover namespace directory
+    (``site-packages/cann_ops_nn`` with no ``__init__.py``) imports fine and
+    registers nothing, which would otherwise shadow the real vendor package and
+    leave the override silently off. So each candidate is checked by what it
+    registered, not by whether it imported.
+    """
+    return hasattr(torch.ops, "cann_ops_nn") and hasattr(torch.ops.cann_ops_nn, "situ_glu")
+
+
+_err: Exception | None = None
+_AVAILABLE = False
+for _candidate in _CANDIDATES:
+    _module, _err = optional_module(_candidate)
+    if _module is not None and _registers_situ_glu():
+        _AVAILABLE = True
+        break
 if not _AVAILABLE:
     logger.warning(
         "[ascend_titan] ops-nn situ_glu unavailable (%s); KimiFeedForward stays on upstream eager",

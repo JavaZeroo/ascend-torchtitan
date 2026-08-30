@@ -80,15 +80,9 @@ def steady_state(steps: list[dict]) -> dict:
 
 def ascend_nodes(module: str, config: str) -> list[str]:
     """Which of our overrides were actually in effect (P7)."""
-    from torchtitan.config.override import clear_overrides
+    from ascend_titan.tools.provenance import build_config_isolated, collect
 
-    from ascend_titan.tools.provenance import build_config, collect
-
-    clear_overrides()
-    try:
-        rows = collect(build_config(module, config))
-    finally:
-        clear_overrides()
+    rows = collect(build_config_isolated(module, config))
     return sorted({r.config_cls for r in rows if r.origin == "ascend"})
 
 
@@ -139,7 +133,12 @@ def render(rows: list[Row], tag: str) -> str:
         if not r.ok:
             lines.append(f"| `{r.config}` | {r.ngpu} | 🔴 {r.note} | | | | | |")
             continue
-        nodes = "<br>".join(n.split(".")[-2] for n in r.ascend_nodes) or "—"
+        if r.note:
+            # A row whose provenance could not be collected is not a usable
+            # benchmark row (P7); say so in the table instead of printing "—".
+            nodes = f"⚠️ {r.note}"
+        else:
+            nodes = "<br>".join(n.split(".")[-2] for n in r.ascend_nodes) or "无（纯上游实现）"
         lines.append(
             f"| `{r.config}` | {r.ngpu} | {r.loss:.5f} | {r.tps:,} | {r.tflops:.2f} | "
             f"{r.mfu:.2f}% | {r.memory_gib:.2f} GiB | {nodes} |"

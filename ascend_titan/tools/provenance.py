@@ -63,6 +63,43 @@ def build_config(module: str, config_name: str):
     return config
 
 
+def build_config_isolated(module: str, config_name: str):
+    """Build one config with a registry that is clean before and after.
+
+    Tools that build several configs in one process (the matrix report, the
+    benchmark) must not leak overrides between them -- and must not silently
+    produce a config with *no* overrides applied, which is exactly the "looks
+    green, measured the wrong thing" failure P7 exists to prevent.
+    """
+    from torchtitan.config.override import clear_overrides
+
+    clear_overrides()
+    try:
+        mod = importlib.import_module(module)
+        config = getattr(mod, config_name)()
+        _reimport_override_modules(config)
+        return build_config(module, config_name)
+    finally:
+        clear_overrides()
+
+
+def _reimport_override_modules(config) -> None:
+    """Re-run the @override decorators for this config's targets.
+
+    ``clear_overrides()`` empties torchtitan's registry, but a module only runs
+    its decorators on first import, so a second config in the same process finds
+    an empty registry and no way to refill it. Reload the modules it names.
+    """
+    import importlib
+    import sys
+
+    for entry in config.override.imports:
+        target = entry if isinstance(entry, str) else entry[0]
+        module = target.rpartition(".")[0]
+        if module in sys.modules:
+            importlib.reload(sys.modules[module])
+
+
 def render(summary: dict[str, dict[str, int]]) -> str:
     width = max(len(k) for k in summary) if summary else 10
     lines = ["ascend-titan provenance", "=" * (width + 30)]

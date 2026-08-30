@@ -1,0 +1,219 @@
+[
+  {
+    "module": "ascend_titan.models.qwen3",
+    "config": "qwen3_debugmodel_npu",
+    "ngpu": 1,
+    "ok": true,
+    "loss": 5.10291,
+    "tps": 45246,
+    "tflops": 26.9,
+    "mfu": 8.62,
+    "memory_gib": 2.33,
+    "steps": [
+      {
+        "step": 1,
+        "loss": 7.53909,
+        "grad_norm": 9.7174,
+        "memory_gib": 2.32,
+        "tps": 2805,
+        "tflops": 1.67,
+        "mfu": 0.53
+      },
+      {
+        "step": 2,
+        "loss": 6.88099,
+        "grad_norm": 6.4915,
+        "memory_gib": 2.33,
+        "tps": 42088,
+        "tflops": 25.03,
+        "mfu": 8.02
+      },
+      {
+        "step": 3,
+        "loss": 6.35128,
+        "grad_norm": 3.6961,
+        "memory_gib": 2.33,
+        "tps": 45285,
+        "tflops": 26.93,
+        "mfu": 8.63
+      },
+      {
+        "step": 4,
+        "loss": 6.07086,
+        "grad_norm": 3.451,
+        "memory_gib": 2.33,
+        "tps": 41561,
+        "tflops": 24.71,
+        "mfu": 7.92
+      },
+      {
+        "step": 5,
+        "loss": 5.78684,
+        "grad_norm": 3.548,
+        "memory_gib": 2.33,
+        "tps": 44280,
+        "tflops": 26.33,
+        "mfu": 8.44
+      },
+      {
+        "step": 6,
+        "loss": 5.5937,
+        "grad_norm": 3.4979,
+        "memory_gib": 2.33,
+        "tps": 45693,
+        "tflops": 27.17,
+        "mfu": 8.71
+      },
+      {
+        "step": 7,
+        "loss": 5.40423,
+        "grad_norm": 3.4686,
+        "memory_gib": 2.33,
+        "tps": 45246,
+        "tflops": 26.9,
+        "mfu": 8.62
+      },
+      {
+        "step": 8,
+        "loss": 5.26904,
+        "grad_norm": 3.3985,
+        "memory_gib": 2.33,
+        "tps": 43212,
+        "tflops": 25.69,
+        "mfu": 8.23
+      },
+      {
+        "step": 9,
+        "loss": 5.37232,
+        "grad_norm": 2.8619,
+        "memory_gib": 2.33,
+        "tps": 43176,
+        "tflops": 25.67,
+        "mfu": 8.23
+      },
+      {
+        "step": 10,
+        "loss": 5.10291,
+        "grad_norm": 3.3062,
+        "memory_gib": 2.33,
+        "tps": 46291,
+        "tflops": 27.52,
+        "mfu": 8.82
+      }
+    ],
+    "ascend_nodes": [
+      "ascend_titan.kernels.attention.AscendFusionAttention.Config"
+    ],
+    "note": ""
+  },
+  {
+    "module": "ascend_titan.models.qwen3",
+    "config": "qwen3_debugmodel_npu_fused",
+    "ngpu": 1,
+    "ok": true,
+    "loss": 5.09586,
+    "tps": 63695,
+    "tflops": 37.87,
+    "mfu": 12.14,
+    "memory_gib": 1.88,
+    "steps": [
+      {
+        "step": 1,
+        "loss": 7.56327,
+        "grad_norm": 9.75,
+        "memory_gib": 1.87,
+        "tps": 1634,
+        "tflops": 0.97,
+        "mfu": 0.31
+      },
+      {
+        "step": 2,
+        "loss": 6.83361,
+        "grad_norm": 5.5354,
+        "memory_gib": 1.88,
+        "tps": 57937,
+        "tflops": 34.45,
+        "mfu": 11.04
+      },
+      {
+        "step": 3,
+        "loss": 6.3511,
+        "grad_norm": 3.6968,
+        "memory_gib": 1.88,
+        "tps": 64466,
+        "tflops": 38.33,
+        "mfu": 12.29
+      },
+      {
+        "step": 4,
+        "loss": 6.06849,
+        "grad_norm": 3.452,
+        "memory_gib": 1.88,
+        "tps": 56591,
+        "tflops": 33.65,
+        "mfu": 10.78
+      },
+      {
+        "step": 5,
+        "loss": 5.78724,
+        "grad_norm": 3.5497,
+        "memory_gib": 1.88,
+        "tps": 61970,
+        "tflops": 36.85,
+        "mfu": 11.81
+      },
+      {
+        "step": 6,
+        "loss": 5.58922,
+        "grad_norm": 3.4977,
+        "memory_gib": 1.88,
+        "tps": 64482,
+        "tflops": 38.34,
+        "mfu": 12.29
+      },
+      {
+        "step": 7,
+        "loss": 5.39631,
+        "grad_norm": 3.4635,
+        "memory_gib": 1.88,
+        "tps": 63695,
+        "tflops": 37.87,
+        "mfu": 12.14
+      },
+      {
+        "step": 8,
+        "loss": 5.26209,
+        "grad_norm": 3.3902,
+        "memory_gib": 1.88,
+        "tps": 59500,
+        "tflops": 35.38,
+        "mfu": 11.34
+      },
+      {
+        "step": 9,
+        "loss": 5.36452,
+        "grad_norm": 2.8586,
+        "memory_gib": 1.88,
+        "tps": 59752,
+        "tflops": 35.53,
+        "mfu": 11.39
+      },
+      {
+        "step": 10,
+        "loss": 5.09586,
+        "grad_norm": 3.2994,
+        "memory_gib": 1.88,
+        "tps": 65808,
+        "tflops": 39.13,
+        "mfu": 12.54
+      }
+    ],
+    "ascend_nodes": [
+      "ascend_titan.kernels.attention.AscendFusionAttention.Config",
+      "ascend_titan.kernels.rms_norm.AscendRMSNorm.Config",
+      "ascend_titan.kernels.rope.AscendCosSinRoPE.Config",
+      "ascend_titan.kernels.swiglu.AscendFusedSwiGLU.Config"
+    ],
+    "note": ""
+  }
+]

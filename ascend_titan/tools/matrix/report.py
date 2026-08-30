@@ -19,20 +19,15 @@ def provenance(configs: list[str]) -> dict[str, tuple[str, int]]:
     ``clear_overrides()``; configs that fail to build are skipped (they are the
     red cells, and the report already says why).
     """
-    from torchtitan.config.override import clear_overrides
-
-    from ascend_titan.tools.provenance import build_config, collect
+    from ascend_titan.tools.provenance import build_config_isolated, collect
 
     seen: dict[str, tuple[str, int]] = {}
     for name in sorted(set(configs)):
-        clear_overrides()
         try:
-            rows = collect(build_config("ascend_titan.recipes.matrix", name))
+            rows = collect(build_config_isolated("ascend_titan.recipes.matrix", name))
         except Exception as e:  # noqa: BLE001 - a config that cannot build is a red cell
             logger.info("[provenance] %s: %s", name, type(e).__name__)
             continue
-        finally:
-            clear_overrides()
         for cls in {(r.config_cls, r.origin) for r in rows}:
             origin, count = seen.get(cls[0], (cls[1], 0))
             seen[cls[0]] = (origin, count + 1)
