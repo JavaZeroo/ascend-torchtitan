@@ -1,64 +1,154 @@
 # Qwen3.5 on Ascend
 
-**状态 🔴 — 阻塞在 `fla`（DEP-FLA）。** recipe 已写好，装上昇腾版 fla 即可跑。
+**状态 🟡 — 语言侧真实尺寸能跑，视觉侧被 910B2 的 flex 限制挡住，性能是主要缺口。**
+判据见 `docs/model-release-criteria.md`。
 
 | | |
 |---|---|
-| 上游模型包 | `torchtitan.models.qwen3_5` |
+| 上游模型包 | `torchtitan.models.qwen3_5`（`../torchtitan/torchtitan/models/qwen3_5/`） |
 | 我们的 recipe | `ascend_titan/models/qwen3_5/recipes.py` |
-| 阻塞 | `ModuleNotFoundError: No module named 'fla'` |
-| 归因 | DEP（第三方 CUDA-only 依赖），不是 NPU / CANN 问题 |
+| 关键 override | `ascend_titan/kernels/gdn.py`（gated delta net + causal conv1d） |
+| 对齐测试 | `tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2）——都对 attn_gym reference 钉前向、反向、chunk 尺寸无关性 |
+| 最近验证 | torch 2.15.0.dev20260812 + torch_npu 2.15.0（master 源码构建 + `patches/`），CANN 9.1.0，2026-08-31 |
 
-## 1. 现在会发生什么
+## 1. `fla` 那条阻塞已经没有了
 
-```bash
-$ python -c "import torchtitan.models.qwen3_5"
-ModuleNotFoundError: No module named 'fla'
-```
+早先这份文档写着"`import torchtitan.models.qwen3_5` 直接 `ModuleNotFoundError: No module named 'fla'`"。
+实测不成立：`fla-core` 有 aarch64 wheel，装上就能 import，模型包正常加载。
 
-链路：`qwen3_5/__init__.py` → `from .gdn import GatedDeltaNet, ...` →
-`gdn.py:15` `from fla.modules.conv.triton.ops import CausalConv1dFunction`、
-`gdn.py:16` `from fla.ops.gated_delta_rule import ...`。
+真正不能用的是 fla 的**内核**——它们是给 CUDA 写的 Triton，`bishengir-compile` 不收。
+所以 `kernels/gdn.py` 用 `@override` 把两个节点换掉：
 
-`fla`（flash-linear-attention）是 gated delta net 的 Triton 内核实现，只有 CUDA 版本。
-它在**模块级**被导入，所以整个 qwen3_5 包在昇腾上 import 就失败——不只是 GDN 那一层。
+| 节点 | 上游实现 | 我们的实现 |
+|---|---|---|
+| `GatedDeltaKernel` | `fla.ops.gated_delta_rule`（Triton/CUDA） | `ascend_chunk_gdn`：纯 torch 的 chunk 并行 delta rule |
+| `InnerGatedDeltaNet` 的短卷积 | `fla` 的 `causal_conv1d_varlen`（packed 分支进 `torch.cuda`） | `ascend_causal_conv1d`（与 kimi_k3 的 KDA 共用） |
 
-导入失败是**故意不吞**的（P14 / ADR-007）：基础依赖缺失必须在导入处报错，
-不能静默降级成一次"看起来跑了"的运行。
+两个节点在配置树上是父子关系，torchtitan 不允许两条 override 各占一个，所以是**一条**
+override（`npu_gated_delta_net`）在父节点上 derive 出子节点的配置。
 
-## 2. 怎么解开
+### `ascend_chunk_gdn` 与 attn_gym 的关系
 
-按优先级：
+`attn_gym.linear.gdn.chunk_gdn(impl="reference")` 是**判据**，不是运行时实现。它是写给人读的：
+chunk 内那步要对单位下三角的转移矩阵求逆，它用 `for row in range(1, chunk_size)` 做前代回代，
+每次迭代都 `clone()` 整块 `[B, H, chunks, C, C]`。debugmodel 尺寸下看不出来；0.8B（24 层、
+4096 上下文、外面还套着 SelectiveAC 的 `__torch_dispatch__`）下**一步十分钟跑不完**。
 
-1. **fla-npu（L1 任务，M4 路线图）**：用 `torch_npu` / AscendC 实现
-   `chunk_gated_delta_rule`、`fused_recurrent_gated_delta_rule`、`causal_conv1d`，
-   以 `fla` 的包名/接口提供，或在 `ascend_titan/kernels/` 里做 `@override` 并请上游把
-   GDN 的内核调用收敛到一个 `Configurable` 节点（P6，`docs/upstream-tracking.md`）。
-2. **Triton-Ascend（M5）**：若 fla 的 Triton kernel 能直接在 Triton-Ascend 上编译，
-   路径最短——需要先装 `constraints/npu-triton.txt` 的 TRITON track 验证。
+`ascend_chunk_gdn` 是同一个分解，只把那个循环换成闭式：严格下三角矩阵幂零，
+`(I - A)^-1 = I + A + A² + …` 是有限和，倍增法 `log2(C)` 步算完，全是 matmul。
+`tests/unit/test_kernel_gdn.py`（CPU）与 `tests/npu/test_kernel_gdn.py`（910B2）
+逐项对 attn_gym 的 reference 钉住：前向、梯度、bf16。
 
-上游把 `fla` 提到模块级 import 是 torchtitan 的设计选择；按 P10，我们**不给
-github.com/pytorch 提 issue/PR**，只在 `docs/issues/torchtitan.md` 记录。
+**chunk 尺寸不是可调的旋钮。** 步时正比于 `tokens / chunk_size`，实测 step-1 tps
+64 → 231、128 → 314、256 → 385；但 128 与 256 都在第 4 步 loss 变 inf，64 正常。
+原因不在求逆的写法，而在 chunk 内的转移矩阵本身：`(I - A)^-1` 里 A 的元素是
+`beta * (k_i · k_j) * decay`（量级 1），逆的最大元素随 C 增长——实测 5.7e3 (C=64)、
+5.7e6 (C=128)、5.7e15 (C=256)，后面所有乘法都被它吃掉。前代回代同样如此，所以
+fla 与 attn_gym 都用 64。性能要从别处来，见第 5 节。
 
-## 3. recipe（就绪，未验证）
-
-| 函数 | 卡数 | 说明 |
-|---|:--:|---|
-| `qwen35_debugmodel_npu` | 1 | 上游 `qwen35_debugmodel` + varlen 注意力 + 关 checkpoint |
-| `qwen35_debugmodel_npu_fsdp2` | 2 | 同上 + 2 路 FSDP2 |
-
-解开阻塞后的第一步：
+## 2. 跑起来
 
 ```bash
+# 语言侧的冒烟（10 步，玩具 tokenizer + 仓库自带的 c4_test）
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
-MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_debugmodel_npu ./scripts/run_train.sh
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_debugmodel_npu_text ./scripts/run_train.sh
+
+# 真实尺寸（真实 tokenizer + 真实 C4）
+./scripts/fetch_assets.sh tokenizer Qwen/Qwen3.5-0.8B
+./scripts/fetch_assets.sh c4 1
+export ASCEND_TITAN_ASSETS=/opt/assets
+ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh \
+    --training.steps 20 --lr_scheduler.total_steps 1000
 ```
 
-跑绿后：补 `validated:` 头行 → 录 golden（`scripts/check_golden.sh`）→ 更新
-`ascend_titan/models/registry.py` 的状态 → 更新 `docs/capability-matrix.md`（P13：先验证再断言）。
+`--lr_scheduler.total_steps` 不是可选的：它缺省回落到 `training.steps`，而 `warmup_steps`
+会被 clamp 到它。0.8B 的配置是 lr 5e-3 + 20 步 warmup + 1000 步，用 `--training.steps 5`
+跑就等于第一步直接满学习率。
 
-## 4. 上游还有什么
+### 从零训练会在第 5 步发散（学习率，不是内核）
 
-`qwen35_debugmodel_moe`、`qwen35_0_8b` / `2b` / `4b` / `9b` / `27b`、
-`qwen35_35b_a3b` / `122b_a10b` / `397b_a17b`，以及多模态 collator 路径。
-全部 ⚪，且都在同一个 `fla` 阻塞之后。
+即使把 LR 曲线钉对，`qwen35_0_8b_npu` 从随机初始化跑仍然会炸，且与卡数无关：
+
+| step | 8 卡 FSDP2 loss / grad_norm | 单卡 loss / grad_norm |
+|--:|--:|--:|
+| 1 | 12.92388 / 0.8510 | 12.90188 / 1.0562 |
+| 2 | 12.21161 / 1.1073 | 12.43087 / 1.2797 |
+| 3 | 10.83435 / 2.9801 | 11.33137 / 2.3391 |
+| 4 | 11.50074 / 19.9772 | 非有限，中止 |
+| 5 | 非有限，中止 | — |
+
+梯度范数逐步翻倍、loss 在发散前一步反弹——优化器炸掉的形状。梯度裁剪是开着的
+（`training.max_norm` 默认 1.0），而打出来的是裁剪**前**的范数，所以非有限来自反向本身。
+
+**不是 GDN 的数值问题**，前反向都查过：`ascend_chunk_gdn` 在最坏参数（beta→1、decay→0）下，
+seq 16384 的前向与 seq 4096 的梯度都与 attn_gym reference 一致（前向差 1.6e-7、梯度差 4.6e-5），
+两边都有限。这两条都固化在 `tests/unit/test_kernel_gdn.py` 里。
+
+嫌疑在我们自己改的那条增量：上游 0.8B 的 lr 5e-3 是配着**多模态 cc12m** 调的，我们换成了
+C4 纯文本。`probes.py` 里的 `qwen35_0_8b_lr_5e4` / `qwen35_0_8b_lr_1e3` 就是用来夹出它在
+哪里断的。结论落定前，这个 recipe 的定位是"路径通了"，不是"能拿去训练"。
+
+## 3. recipe
+
+| 函数 | 卡 | 说明 |
+|---|:--:|---|
+| `qwen35_debugmodel_npu` | 1 | 上游 `qwen35_debugmodel`（多模态）+ varlen 注意力 + GDN override |
+| `qwen35_debugmodel_npu_fsdp2` | 2 | 同上 + 2 路 FSDP2 |
+| `qwen35_debugmodel_npu_text` | 1 | 同尺寸但**只跑语言侧**——GDN 的廉价回归探测器。10 步 loss 3.54783（`--debug.seed 42 --debug.deterministic`，2026-08-31） |
+| `qwen35_0_8b_npu` | 1 | Qwen3.5-0.8B，真实 tokenizer + 真实 C4 + 4096 上下文 |
+| `qwen35_0_8b_npu_fsdp2` | 8 | 上面 × FSDP2 8 路 |
+
+## 4. 视觉侧：910B2 上跑不了，归因硬件
+
+`qwen35_debugmodel_npu` 用 cc12m-test，会走视觉塔，然后死在：
+
+```
+InductorError: LoweringException: SubgraphLoweringException:
+Buffers cannot be created while lowering a pointwise subgraph.
+  File ".../torchtitan/models/common/vision_encoder.py", line 57, in mask_mod
+```
+
+`vision_encoder.py` 的 `create_block_diagonal_mask` 里 `mask_mod` 是
+`segment_ids[q_idx] == segment_ids[kv_idx]`——**读张量**。flex 的 `mask_mod` 是 pointwise
+子图，读张量要走 inductor 的 indirect-memory 路径，而 `torch_npu/_inductor/config.py` 里
+`inductor_indirect_memory_mode` 只在 `is_ascend950` 时赋值；910B2 上恒为 `None`。
+与 CP、模型级 flex document mask 是同一个根因，详见 `docs/capability-matrix.md`。
+
+所以真实尺寸的证据取在**语言侧**（`qwen35_0_8b_npu` 换成纯文本 C4）。这不是把问题藏起来：
+多模态那格是红的，写在这里，也写在能力矩阵里。
+
+## 5. 已知缺口（离 🟢 还差什么）
+
+| 判据 | 状态 | 缺什么 |
+|---|:--:|---|
+| R1 真实形态 | 🟡 | 形态齐了（0.8B + 真实 tokenizer + 真实 C4 + 4096 上下文），但从零训练第 5 步发散——见上面第 2 节，先要定位到学习率还是别的 |
+| R2 并行覆盖 | 🟡 | 单卡与 FSDP2×8 都能起来并推进（8 卡逐步日志见第 2 节），但都在第 5 步撞上同一个发散；TP / PP / EP 未测 |
+| R3 数值可信 | 🟡 | 算子级对拍 🟢：`tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2，fp32/bf16 前向 + 梯度）都对 attn_gym reference 通过；golden 曲线未冻结；长步数下降曲线未取 |
+| R4 checkpoint | ⚪ | 未跑 |
+| R5 性能 | 🔴 | **主要缺口**，见下 |
+| R6 长稳 | ⚪ | **被 R5 卡住**：0.8B 一步约 2 分钟，500 步要十几个小时。等 GDN 快起来再取；用 debugmodel 跑 500 步不算数（判据要求真实尺寸） |
+| R7 文档 | 🟢 | 本文 |
+| R8 无隐藏降级 | 🟢 | `ascend-titan-provenance --module ascend_titan.models.qwen3_5 --config qwen35_0_8b_npu`：`AscendFusionAttention` ×6、`AscendGatedDeltaKernel` ×18、`AscendInnerGatedDeltaNet` ×18，共 42 个 ascend 节点 |
+
+### R5：GDN 没有融合算子
+
+`ascend_chunk_gdn` 是纯 torch 的 chunk 递推：chunk 之间的循环是串行 Python，循环里每个算子
+还要过一遍 activation-checkpoint 的 dispatch mode。步时正比于 `tokens / chunk_size`，
+而 chunk 尺寸被数值条件卡死在 64（上面第 1 节）——所以这条路走到头了。
+
+三条可能的出路，按可行性排：
+
+1. **昇腾侧的 gated-delta-rule 融合算子**——真正的答案，属 L1 任务。
+2. **torchair 图模式**：chunk 循环里全是标准 aten 算子（没有 custom_op），理论上可以整段进图，
+   把 per-op dispatch 开销消掉。注意力那条 override 是 `custom_op`，缺 GE converter（OURS-13），
+   所以要先确认能不能只把 GDN 子图交给 torchair。
+3. **Triton-Ascend 编 fla 的内核**——试过，`bishengir-compile` 不收。
+
+在那之前，这个模型能训、能对，但不快。
+
+## 6. 上游还有什么
+
+`qwen35_debugmodel_moe`、`qwen35_2b` / `4b` / `9b` / `27b`、
+`qwen35_35b_a3b` / `122b_a10b` / `397b_a17b`。全部 ⚪：语言侧的路径已经通了，
+剩下的是显存与并行配置的事，按需逐个加 recipe。

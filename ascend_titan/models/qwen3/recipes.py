@@ -138,39 +138,33 @@ def qwen3_0_6b_npu_tp2() -> Trainer.Config:
     return config
 
 
-def qwen3_0_6b_npu_pp2() -> Trainer.Config:
-    """0.6B × (PP 2 × FSDP2 4)，8 卡。"""
-    config = qwen3_0_6b_npu()
-    config.parallelism.pipeline_parallel_degree = 2
-    config.parallelism.data_parallel_shard_degree = 4
-    # 上游的配置校验禁止 CUDA graphs 与 PP 并存（"CUDA graphs do not support pipeline
-    # parallelism yet"）。这个开关在昇腾上本来就不起作用——它门控的是 torch.cuda.CUDAGraph
-    # ——但校验是配置级的，与设备无关，所以 PP recipe 必须显式关掉。
-    config.training.disable_cuda_graphs = True
-    return config
+def qwen3_8b_npu_pp2() -> Trainer.Config:
+    """Qwen3-8B × (PP 2 × FSDP2 4)，8 卡 —— 流水并行的证据。
 
+    为什么不是 0.6B：0.6B / 1.7B / 4B（连 debugmodel 也是）都 tie 了 embedding 与
+    lm_head，而上游明确 ``Weight tying is not supported with Pipeline Parallel``。
+    8B 是第一个不 tie 的尺寸。这是上游的限制，与昇腾无关。
 
-def qwen3_14b_npu_pp2() -> Trainer.Config:
-    """Qwen3-14B × (PP 2 × FSDP2 4)，8 卡 —— 流水并行的证据。
-
-    为什么不是 0.6B：0.6B / 1.7B / 4B 都 tie 了 embedding 与 lm_head，而上游明确
-    ``Weight tying is not supported with Pipeline Parallel``。14B 起不再 tie，所以
-    PP 的证据只能在这个尺寸上取。这是上游的限制，与昇腾无关。
+    为什么不是 14B：14B 在 8×910B2 上装不下——`FullAC` + 1×4096 微批仍然 OOM
+    （54.81 GiB 已分配时再要 1.60 GiB 失败）。参数、梯度与 AdamW 状态本身就占掉
+    绝大部分，不是激活能省出来的。
     """
     from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
 
+    # 上游没有裸的 8B Trainer 配置（只有 nvfp4 变体），所以从 14B 的配置起手换模型。
     config = qwen3_14b()
-    config.model_spec = model_registry("14B", attn_backend="varlen")
+    config.model_spec = model_registry("8B", attn_backend="varlen")
     config.override.imports = [ATTENTION_OVERRIDE]
-    config.hf_assets_path = hf_assets_path("Qwen3-14B")
+    config.hf_assets_path = hf_assets_path("Qwen3-8B")
     config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
     config.parallelism.pipeline_parallel_degree = 2
     config.parallelism.data_parallel_shard_degree = 4
     # 微批数必须 >= 流水级数，否则流水线排不出来（上游默认 1）。
     config.parallelism.num_pp_microbatches = 2
-    config.training.disable_cuda_graphs = True  # 同上：上游禁止 CUDA graphs + PP
-    # 14B 在 8×910B2 上按上游默认（SelectiveAC + 4×4096 tokens/微批）会 OOM
-    # （50.25 GiB 已分配时再要 546 MiB 失败）。全量重计算 + 半个微批换显存。
+    # 上游的配置校验禁止 CUDA graphs 与 PP 并存（"CUDA graphs do not support pipeline
+    # parallelism yet"）。这个开关在昇腾上本来就不起作用——它门控的是 torch.cuda.CUDAGraph
+    # ——但校验是配置级的，与设备无关，所以 PP recipe 必须显式关掉。
+    config.training.disable_cuda_graphs = True
     config.activation_checkpoint = FullAC.Config()
     config.training.num_tokens_per_microbatch_per_dp_rank = 2 * 4096
     return config

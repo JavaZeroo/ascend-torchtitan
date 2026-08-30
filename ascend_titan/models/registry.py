@@ -16,11 +16,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# 🟢 runs on NPU and is covered by a golden or a matrix cell
-# 🟡 runs, but only in a reduced flavor / not gated
+# 🟢 release 级: every criterion in docs/model-release-criteria.md has a recorded run
+# 🟡 runs, but with gaps -- ``criteria`` says which
 # 🔴 blocked -- ``blocker`` says by what, with the attribution tag
 # ⚪ not evaluated yet (P2: "not tested" and "tested and broken" never share a cell)
 STATUS = ("🟢", "🟡", "🔴", "⚪")
+
+CRITERIA = ("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8")
+"""docs/model-release-criteria.md: 真实形态 / 并行 / 数值 / checkpoint /
+性能 / 长稳 / 文档 / 无降级.
+
+Before 2026-08-31 a 🟢 here meant "the debugmodel runs". It now means all eight
+have a recorded command and output, which is a much higher bar and the reason
+several entries moved to 🟡: nothing regressed, the bar did.
+"""
 
 
 @dataclass(frozen=True)
@@ -54,9 +63,25 @@ class ModelEntry:
     notes: str = ""
     owner_docs: list[str] = field(default_factory=list)
 
+    criteria: dict[str, str] = field(default_factory=dict)
+    """Per-criterion state, keyed by ``CRITERIA``. Empty = never graded (⚪)."""
+
+    evidence: str | None = None
+    """Where the runs are recorded, e.g. ``docs/release/qwen3_<tuple>.md``."""
+
     @property
     def has_package(self) -> bool:
         return self.recipes is not None
+
+    @property
+    def graded_status(self) -> str:
+        """🟢 only when every criterion is 🟢 -- the rule the criteria doc sets."""
+        if not self.criteria:
+            return self.status
+        marks = [self.criteria.get(c, "⚪") for c in CRITERIA]
+        if all(m == "🟢" for m in marks):
+            return "🟢"
+        return "🔴" if any(m == "🔴" for m in marks) and self.blocker else "🟡"
 
 
 MODELS: dict[str, ModelEntry] = {
@@ -64,14 +89,23 @@ MODELS: dict[str, ModelEntry] = {
         name="qwen3",
         upstream="torchtitan.models.qwen3",
         title="Qwen3",
-        status="🟢",
-        summary="参考模型：单卡 / FSDP2×2 golden 逐位冻结，NIGHTLY 门禁跑的就是它。",
+        status="🟡",
+        summary=(
+            "参考模型：0.6B 真实尺寸 + 真实 tokenizer/C4，"
+            "单卡 / FSDP2×8 / TP2 / PP2 全绿，golden 逐位冻结，"
+            "500 步长稳与 checkpoint 续训逐位一致，性能基线带 provenance。"
+            "只差 R4 的第三项：HF 导出/导入还没跑。"
+        ),
         recipes="ascend_titan.models.qwen3.recipes",
         flavors=(
             "qwen3_debugmodel_npu",
             "qwen3_debugmodel_npu_fsdp2",
             "qwen3_debugmodel_npu_fused",
             "qwen3_debugmodel_npu_fused_fsdp2",
+            "qwen3_0_6b_npu",
+            "qwen3_0_6b_npu_fsdp2",
+            "qwen3_0_6b_npu_tp2",
+            "qwen3_8b_npu_pp2",
         ),
         golden=(
             "qwen3_debugmodel_npu",
@@ -79,33 +113,62 @@ MODELS: dict[str, ModelEntry] = {
             "qwen3_debugmodel_npu_fused",
             "qwen3_debugmodel_npu_fused_fsdp2",
         ),
-        notes="0.6B / 1.7B / 14B / 32B / 30B-A3B 等真实尺寸尚未跑过（⚪），见 README 的路线。",
+        criteria={
+            "R1": "🟢",  # 0.6B + 真实 tokenizer + 真实 C4 + 4096 上下文
+            "R2": "🟢",  # 1 卡 / FSDP2×8 / FSDP2×4+TP2 / PP2×FSDP2-4（8B）全绿
+            "R3": "🟢",  # 四条 golden 逐位；500 步 12.12 → 6.28；tests/npu 算子对拍
+            "R4": "🟡",  # DCP 存取与续训逐位一致；HF 导出/导入待跑
+            "R5": "🟢",  # 10,307 tps / 65.91 TFLOPs / 19.08 GiB，带 provenance
+            "R6": "🟢",  # 500 步 rc=0，显存自第 51 步起恒定，无 NaN
+            "R7": "🟢",  # models/qwen3/README.md
+            "R8": "🟢",  # provenance：AscendFusionAttention
+        },
+        evidence="docs/release/qwen3_torch2.15.0.dev20260812_npu2.15.0.md",
+        notes="1.7B / 32B / 30B-A3B 等其它真实尺寸仍 ⚪。",
     ),
     "qwen3_5": ModelEntry(
         name="qwen3_5",
         upstream="torchtitan.models.qwen3_5",
         title="Qwen3.5",
-        status="🔴",
+        status="🟡",
         summary=(
-            "上游 `qwen3_5/__init__.py` → `gdn.py` 在模块级 import `fla`"
-            "（CUDA-only Triton），整个模型包在昇腾上 import 就失败。"
+            "语言侧真实尺寸（0.8B + 真实 tokenizer/C4 + 4096 上下文）能跑，"
+            "gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override。"
+            "视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制），"
+            "性能是主要缺口：GDN 没有融合算子。"
         ),
         recipes="ascend_titan.models.qwen3_5.recipes",
-        flavors=("qwen35_debugmodel_npu", "qwen35_debugmodel_npu_fsdp2"),
-        blocker=(
-            "DEP-FLA：`ModuleNotFoundError: No module named 'fla'`。"
-            "昇腾侧对应物 fla-npu 属 L1 任务（M4）。"
+        flavors=(
+            "qwen35_debugmodel_npu",
+            "qwen35_debugmodel_npu_fsdp2",
+            "qwen35_debugmodel_npu_text",
+            "qwen35_0_8b_npu",
+            "qwen35_0_8b_npu_fsdp2",
         ),
-        notes="recipe 已经写好并保持最小增量；装上 fla 的昇腾实现后即可直接跑。",
+        criteria={
+            "R1": "🟡",  # 0.8B 语言侧形态齐了，但从零训练第 5 步发散（学习率待定位）
+            "R2": "🟡",  # 单卡与 FSDP2×8 都能推进，撞同一个发散；TP/PP/EP 未测
+            "R3": "🟡",  # 对 attn_gym reference 的前反向对拍 🟢；golden 未冻结
+            "R4": "⚪",
+            "R5": "🔴",  # 纯 torch chunk 递推，无融合算子
+            "R6": "⚪",  # 被 R5 卡住：一步约 2 分钟，500 步要十几个小时
+            "R7": "🟢",  # models/qwen3_5/README.md
+            "R8": "🟢",  # provenance：42 个 ascend 节点
+        },
+        notes=(
+            "早先记的 DEP-FLA 阻塞不成立：`fla-core` 有 aarch64 wheel，import 正常，"
+            "挡住的只是它的 CUDA Triton 内核。"
+        ),
     ),
     "llama3": ModelEntry(
         name="llama3",
         upstream="torchtitan.models.llama3",
         title="Llama 3",
-        status="🟢",
+        status="🟡",
         summary=(
             "零 override 的 stock 参考路径："
             "复数 RoPE + ChunkedLoss + spmd_types 全部走上游默认实现。"
+            "只有 debugmodel：R1–R8 一条都没取，按新判据是 🟡 而不是 🟢。"
         ),
         recipes="ascend_titan.models.llama3.recipes",
         flavors=("llama3_debugmodel_stock_npu", "llama3_debugmodel_stock_npu_fsdp2"),
@@ -118,10 +181,19 @@ MODELS: dict[str, ModelEntry] = {
         name="kimi_k3",
         upstream="torchtitan.models.kimi_k3",
         title="Kimi K3",
-        status="🟢",
-        summary=("多模态 + KDA + MoE，2026-08-30 在 910B2 上跑通 10 步（单卡 loss 4.10312）。"),
+        status="🔴",
+        summary=(
+            "多模态 + KDA + MoE。2026-08-30 曾跑通 10 步（单卡 loss 4.10312），"
+            "2026-08-31 复测不再复现。"
+        ),
         recipes="ascend_titan.models.kimi_k3.recipes",
         flavors=("kimi_k3_debugmodel_npu", "kimi_k3_debugmodel_npu_fused"),
+        blocker=(
+            "视觉塔的 block-diagonal document mask：保留 flex 撞 "
+            "`SubgraphLoweringException`（910B2 无 indirect-memory lowering），"
+            "转 varlen 撞 `attention_masks must be VarlenMetadata, got BlockMask`。"
+            "两条都实测过；需要二分定位从绿变红的那次改动。"
+        ),
         notes=(
             "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
             "KDA 走 `kernels/kda.py` 的 override，flex 路径靠 `flex_block_mask_eager` "
@@ -193,5 +265,21 @@ def table() -> str:
     return "\n".join(rows)
 
 
+def criteria_table() -> str:
+    """Per-model R1-R8, for the models we have actually graded."""
+    rows = [
+        "| 模型 | " + " | ".join(CRITERIA) + " | 证据 |",
+        "|---|" + ":--:|" * len(CRITERIA) + "---|",
+    ]
+    for e in MODELS.values():
+        if not e.criteria:
+            continue
+        marks = " | ".join(e.criteria.get(c, "⚪") for c in CRITERIA)
+        rows.append(f"| **{e.title}** | {marks} | {e.evidence or '—'} |")
+    return "\n".join(rows)
+
+
 if __name__ == "__main__":
     print(table())
+    print()
+    print(criteria_table())

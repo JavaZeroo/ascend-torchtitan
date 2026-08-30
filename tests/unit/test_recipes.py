@@ -123,7 +123,7 @@ def test_release_recipes_are_deltas_on_the_real_upstream_configs(monkeypatch, tm
 
     from ascend_titan.models.qwen3 import recipes as q3
 
-    checked = [(q3.qwen3_0_6b_npu, "qwen3_0_6b()"), (q3.qwen3_14b_npu_pp2, "qwen3_14b()")]
+    checked = [(q3.qwen3_0_6b_npu, "qwen3_0_6b()"), (q3.qwen3_8b_npu_pp2, "qwen3_14b()")]
     # qwen3_5 needs fla-core, which is an extra (see models/qwen3_5/README.md)
     pytest.importorskip("fla", reason="pip install fla-core (qwen3_5 extra)")
     from ascend_titan.models.qwen3_5 import recipes as q35

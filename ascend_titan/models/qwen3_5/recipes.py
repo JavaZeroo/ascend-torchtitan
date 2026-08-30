@@ -1,12 +1,20 @@
 """Qwen3.5 recipes.
 
+validated: torchtitan=13da2d77c torch=2.15.0.dev20260812 torch_npu=2.15.0 CANN=9.1.0 date=2026-08-31
+(rewritten by CI when a run is green)
+
 ``fla`` (flash-linear-attention) is a plain pip dependency -- ``fla-core`` installs
 on aarch64 and imports fine, so the model package loads. Its *kernels* are
 another matter: they are Triton written for CUDA and ``bishengir-compile``
 rejects them even with Triton-Ascend installed. The gated delta net therefore
-runs through ``ascend_titan.kernels.gdn``, which selects attn_gym's own
-device-agnostic reference recurrence -- same math, different implementation,
+runs through ``ascend_titan.kernels.gdn``, whose chunk-parallel delta rule is
+attn_gym's decomposition in plain torch -- same math, different implementation,
 exactly like the KDA override for kimi_k3.
+
+The multimodal flavours do not run on 910B2: the vision tower's block-diagonal
+FlexAttention mask indexes a tensor inside a pointwise subgraph, which needs
+inductor's indirect-memory path (Ascend950 only). ``qwen35_debugmodel_npu_text``
+and the 0.8B recipes are the language-side path, and they do run.
 
 Full guide: ascend_titan/models/qwen3_5/README.md
 """
@@ -42,6 +50,33 @@ def qwen35_debugmodel_npu_fsdp2() -> Trainer.Config:
     """2-way FSDP2."""
     config = qwen35_debugmodel_npu()
     config.parallelism.data_parallel_shard_degree = 2
+    return config
+
+
+def qwen35_debugmodel_npu_text() -> Trainer.Config:
+    """The same debugmodel on **text only** -- the cheap regression test for GDN.
+
+    ``qwen35_debugmodel`` is multimodal: it trains on ``cc12m-test`` and runs the
+    vision tower, whose block-diagonal FlexAttention mask indexes a segment-id
+    tensor inside a pointwise subgraph. That lowering needs inductor's
+    indirect-memory path, which torch_npu only enables on Ascend950, so the
+    multimodal debugmodel cannot run on 910B2 (same root cause as CP and
+    model-level flex; see docs/capability-matrix.md).
+
+    The language side has no such problem, and it is the side the GDN override
+    lives on. Swapping in the toy tokenizer's C4 text keeps a 10-step
+    smoke config that exercises exactly what we replaced.
+    """
+    from torchtitan.components.data.collators import TextCollator
+    from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
+    from torchtitan.hf_datasets.text_datasets import DATASETS
+
+    config = qwen35_debugmodel_npu()
+
+    # DELTA 4: text-only data, so the vision tower stays out of the graph.
+    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=DATASETS["c4_test"])
+    config.dataloader.collator = TextCollator.Config()
+    config.dataloader.shuffle = False
     return config
 
 

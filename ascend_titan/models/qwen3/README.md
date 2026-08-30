@@ -1,6 +1,8 @@
 # Qwen3 on Ascend
 
-**状态 🟢** · 参考模型：NIGHTLY 门禁跑的就是它，golden loss 曲线逐位冻结。
+**状态 🟡** · 参考模型：NIGHTLY 门禁跑的就是它，golden loss 曲线逐位冻结。
+真实尺寸（0.6B）的 R1 / R3 / R4 / R5 / R6 都有记录，唯一缺口是流水并行——判据见
+`docs/model-release-criteria.md`，逐条状态见下面第 6 节。
 
 | | |
 |---|---|
@@ -72,7 +74,8 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 
 ```bash
 ./scripts/fetch_assets.sh tokenizer Qwen/Qwen3-0.6B
-./scripts/fetch_assets.sh c4 1                 # 真实 C4 分片 + 50k 篇子集
+./scripts/fetch_assets.sh tokenizer Qwen/Qwen3-8B           # PP 的证据用 8B，原因见下
+./scripts/fetch_assets.sh c4 1                              # 真实 C4 分片 + 50k 篇子集
 export ASCEND_TITAN_ASSETS=/opt/assets
 ```
 
@@ -81,7 +84,7 @@ export ASCEND_TITAN_ASSETS=/opt/assets
 | `qwen3_0_6b_npu` | 1 | Qwen3-0.6B，真实 tokenizer + 真实 C4 + 4096 上下文 |
 | `qwen3_0_6b_npu_fsdp2` | 8 | FSDP2 8 路 |
 | `qwen3_0_6b_npu_tp2` | 8 | FSDP2 4 × TP 2 |
-| `qwen3_14b_npu_pp2` | 8 | Qwen3-14B × (PP 2 × FSDP2 4)，全量重计算 |
+| `qwen3_8b_npu_pp2` | 8 | Qwen3-8B × (PP 2 × FSDP2 4)，全量重计算 |
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
@@ -94,14 +97,46 @@ MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu ./scripts/run_train.sh --
 python -m ascend_titan.tools.release_check --model qwen3 --cards 0-7 --out docs/release
 ```
 
-### 为什么 PP 的证据用 14B 而不是 0.6B
+### 一个会让人白查一天的坑：LR 曲线绑在 `--training.steps` 上
 
-0.6B / 1.7B / 4B 都 tie 了 embedding 与 lm_head，而上游明确
-`Weight tying is not supported with Pipeline Parallel`——这是上游限制，与昇腾无关。
-14B 起不再 tie。PP 本身在昇腾上是通的：能力矩阵里 llama3 的 `pp_1f1b`、`pp_dp_1f1b`、
+`lr_scheduler.total_steps` 缺省回落到 `training.steps`，`warmup_steps` 又会被 clamp 到它。
+所以 `--training.steps 5` 和 `--training.steps 10` 的**前五步学习率不一样**——用短跑做
+checkpoint 续训对比、或者拿 20 步的探针当性能基线时，都要显式钉住
+`--lr_scheduler.total_steps`。`release_check` 与 `bench` 都已经这么做了。
+
+### 为什么 PP 的证据用 8B 而不是 0.6B、也不是 14B
+
+0.6B / 1.7B / 4B（连 debugmodel）都 tie 了 embedding 与 lm_head，而上游明确
+`Weight tying is not supported with Pipeline Parallel`——这是上游限制，与昇腾无关
+（实测：`qwen3_0_6b_npu` + `pipeline_parallel_degree=2` 直接抛 `NotImplementedError`）。
+8B 是第一个不 tie 的尺寸。
+
+14B 试过，装不下：`FullAC` + 1×4096 微批仍然 OOM（54.81 GiB 已分配时再要 1.60 GiB
+失败）。参数、梯度与 AdamW 状态本身就占掉绝大部分，不是激活能省出来的。
+
+PP 本身在昇腾上是通的：能力矩阵里 llama3 的 `pp_1f1b`、`pp_dp_1f1b`、
 `pp_dp_tp`、`pp_looped_1f1b`、`pp_tp_gpipe`、`llama3_fsdp+tp+pp` 全绿。
 
-## 6. 待办
+## 6. release 判据逐条（`docs/model-release-criteria.md`）
 
+| 判据 | 状态 | 证据 |
+|---|:--:|---|
+| R1 真实形态 | 🟢 | `qwen3_0_6b_npu`：Qwen3-0.6B + 真实 HF tokenizer + 真实 C4 + 4096 上下文，20 步 loss 12.14616 → 7.73866 |
+| R2 并行覆盖 | 🟢 | 单卡 🟢；FSDP2×8 🟢（12.13871 → 7.72968）；FSDP2×4+TP2 🟢（12.14696 → 7.70340）；PP2×FSDP2-4 🟢 —— `qwen3_8b_npu_pp2` 20 步 rc=0，47.72 GiB，tps 1152 / 60.66 TFLOPs（8B 是第一个不共享 embedding 的尺寸，见下） |
+| R3 数值可信 | 🟢 | 四条 debugmodel golden 逐位冻结；500 步 loss 12.11569 → 6.28435 单调下降；`tests/npu/` 对 attention / rope / rms_norm / swiglu 逐个对上游 eager 对拍 |
+| R4 checkpoint | 🟡 | DCP 存取 + 续训 🟢：第 5 步存档 → 续训到第 10 步 loss `9.42568`，与一口气跑到底**逐位相同**。HF 导出/导入（`--checkpoint.last_save_in_hf` → `--checkpoint.initial_load_in_hf`）待跑，`release_check` 已经带上这一项 |
+| R5 性能基线 | 🟢 | 10,307 tps / 65.91 TFLOPs / 19.08 GiB，provenance = `AscendFusionAttention`（`docs/bench/`）。MFU 21.12% 的分母是 torchtitan 回落的 A100 峰值，不是 910B2 的 |
+| R6 长稳 | 🟢 | 500 步 rc=0，无 NaN，显存自第 51 步起恒定 19.08 GiB |
+| R7 文档 | 🟢 | 本文每条结论都有可照抄的命令 |
+| R8 无隐藏降级 | 🟢 | `ascend-titan-provenance` 里注意力节点是 `ascend`，其余走上游默认 |
+
+HF 互操作是 R4 的第三项，也是"能不能交付出去"的分界。`release_check` 现在会跑它：
+导出成 HF safetensors，再用 `--checkpoint.initial_load_in_hf` 读回来跑一步，
+要求读回后的 loss 贴着导出时的值而不是弹回 `ln(vocab)`。
+
+## 7. 待办
+
+- **PP**：14B 在 8×910B2 上的显存配平（`FullAC` + 1×4096 微批之后再试；参数与优化器状态
+  本身约 21 GiB/卡）。
 - **DELTA 2** 随 RELEASE track 退役一并删除（NIGHTLY 上上游默认的 `spmd_types` 已可用）。
-- 0.6B 起的真实尺寸扫描（上表第 5 节）。
+- 1.7B / 32B / 30B-A3B 等其它真实尺寸（⚪）。
