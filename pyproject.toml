@@ -34,7 +34,12 @@ include = ["ascend_titan*"]
 
 [tool.setuptools.package-data]
 # each model package ships its usage guide, and the template for new ones
-ascend_titan = ["models/README.md", "models/*/README.md", "models/_template/*"]
+ascend_titan = [
+    "models/README.md",
+    "models/*/README.md",
+    "models/_template/*",
+    "tools/matrix/triage.toml",  # attribution rules are data; the sweep reads them at runtime
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]

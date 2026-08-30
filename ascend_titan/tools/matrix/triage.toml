@@ -1,0 +1,171 @@
+# 归因规则表：日志 -> 归因码 + 说明。**第一条匹配的胜出**，所以具体的规则写在前面。
+#
+# 这是数据，不是代码：加一条规则不需要动 Python，也就不会被 ruff 重排（旧的
+# CLAUDE.md 硬规则"用行定位插入 TRIAGE"因此作废）。
+#
+# code   归因码。含义见 docs/capability-matrix.md 的归因说明，状态见 docs/issues/STATUS.md（P11）。
+#        以 NPU / NPU-OP 开头 = 昇腾侧，必须走 P9 全流程修上游，绝不在本仓绕过。
+# pattern 在合并后的日志上做 re.search 的正则。
+# note   报告里显示的一句话。NPU-OP 的 note 会被算子名与错误码替换。
+#
+# 新的失败特征会被归为 UNKNOWN：读日志 -> 定代码 -> 在这里加一条 -> `--retriage`。
+
+[[rule]]
+code = 'HARNESS'
+pattern = 'EI0020|have already been bound|hcclCommInitRootInfoConfig'
+note = 'HCCL port conflict: another job on the same NPU (rerun)'
+
+[[rule]]
+code = 'NPU-2'
+pattern = 'No backend type associated with device type npu'
+note = 'fake PG lacks npu'
+
+[[rule]]
+code = 'NPU-1'
+pattern = 'aten::_flash_attention_forward'
+note = 'no NPU kernel for _flash_attention_forward'
+
+[[rule]]
+code = 'TORCH-1'
+pattern = 'FlexAttention is only supported on'
+note = 'flex device whitelist'
+
+[[rule]]
+code = 'TT-2'
+pattern = "has no attribute 'set_timeout'"
+note = 'nightly-only set_timeout'
+
+[[rule]]
+code = 'TT-1'
+pattern = "No module named 'triton'"
+note = 'unconditional import triton'
+
+[[rule]]
+code = 'TT-8'
+pattern = 'Dimension specified as 0 but tensor has no dimensions'
+note = 'PP step(arg_mbs=) nightly-only contract'
+
+[[rule]]
+code = 'DEP'
+pattern = "No module named '(helion|fla|deep_ep|torchao|cutlass|deepep|hybridep)"
+note = 'CUDA-only dependency missing'
+
+[[rule]]
+code = 'DEP'
+pattern = 'torchao is not installed'
+note = 'torchao missing (float8/mx/nvfp4 need it; CUDA-only formats anyway)'
+
+[[rule]]
+code = 'NPU-OP'
+pattern = 'NPU function error: call (aclnn\w+) failed, error code is (\d+)'
+note = 'torch_npu op-plugin kernel failure (see note)'
+
+[[rule]]
+code = 'TT-9'
+pattern = "'torch\\._C\\.Tag' has no attribute"
+note = 'upstream override uses a nightly-only torch.Tag (fused_mla)'
+
+[[rule]]
+code = 'TT-5'
+pattern = "only supports spmd_backend='spmd_types'"
+note = 'model requires spmd_types, which fails on NPU (TT-5)'
+
+[[rule]]
+code = 'DEP'
+pattern = '`helion` is not installed|helion_rope'
+note = 'helion (CUDA-only kernel DSL) missing'
+
+[[rule]]
+code = 'DEP'
+pattern = "No module named 'torchvision'"
+note = 'torchvision missing (installable)'
+
+[[rule]]
+code = 'DEP-INDUCTOR'
+pattern = "0 active drivers|No module named 'triton\\.backends|triton\\.language\\.extra' has no attribute 'ascend'|torchair"
+note = 'inductor needs Triton-Ascend / torchair on NPU (M5)'
+
+[[rule]]
+code = 'OURS-8'
+pattern = 'Skip inlining function <function AscendFusionAttention|fake tensor call.*npu_fusion_attention|npu_fusion_attention\(\*\(FakeTensor'
+note = 'dynamo hit the Ascend attention kernel (graph break under fullgraph / unbacked SymInts)'
+
+[[rule]]
+code = 'COMPILE'
+pattern = 'when making fake tensor call|torch\._dynamo\.exc\.'
+note = 'torch.compile path failed (see note)'
+
+[[rule]]
+code = 'TORCH-5'
+pattern = 'Torch not compiled with CUDA enabled'
+note = 'torch<=2.12 pipelining fork_rng assumes cuda (fixed in 2.13)'
+
+[[rule]]
+code = 'TT-CUDA'
+pattern = 'DistMuon requires one CUDA device per process'
+note = 'DistMuon hard-codes CUDA'
+
+[[rule]]
+code = 'TT-KERNEL'
+pattern = "Could not run 'torchtitan::\\w+'"
+note = 'upstream in-tree Triton override kernel (CUDA-only by design)'
+
+[[rule]]
+code = 'OURS-9'
+pattern = "ValueError: Override '[\\w.]+' claims"
+note = 'per-node override conflict between an upstream override and an Ascend override (npu_baseline)'
+
+[[rule]]
+code = 'TT-4'
+pattern = 'data is not allocated yet'
+note = 'ChunkedLossWrapper / manual unshard backward'
+
+[[rule]]
+code = 'TT-5'
+pattern = 'all parameters must be\s+DTensors'
+note = 'spmd_types + fully_shard(dp_mesh_dims)'
+
+[[rule]]
+code = 'TT-5'
+pattern = "requires parallelism\\.spmd_backend='spmd_types'"
+note = 'feature requires spmd_types, which fails on NPU (TT-5)'
+
+[[rule]]
+code = 'TT-GATE'
+pattern = 'has_cuda_capability|only supported on Hopper|compute capability|CUDA capability'
+note = 'explicit CUDA capability gate'
+
+[[rule]]
+code = 'DEP'
+pattern = 'symmetric_memory|symm_mem|_SymmetricMemory'
+note = 'symmetric memory (CUDA-only)'
+
+[[rule]]
+code = 'TT-CUDA'
+pattern = 'torch\.cuda\.|\bcuda\b.*(not available|is_available)|Torch not compiled with CUDA'
+note = 'hard-coded torch.cuda'
+
+[[rule]]
+code = 'OURS'
+pattern = 'NotImplementedError: AscendFusionAttention'
+note = 'limitation of the Ascend attention override'
+
+[[rule]]
+code = 'CANN'
+pattern = '\b(EZ|EI|EE|EJ)\d{4}\b|ERR(?!99999)\d{5}'
+note = 'CANN error code'
+
+[[rule]]
+code = 'NPU'
+pattern = 'File "[^"]*torch_npu/'
+note = 'traceback frame inside torch_npu'
+
+[[rule]]
+code = 'HANG'
+pattern = '__TIMEOUT__'
+note = 'exceeded per-test timeout'
+
+[[rule]]
+code = 'CLI'
+pattern = 'For full helptext, run|unrecognized arguments|error: argument'
+note = 'CLI / tyro parse error (harness)'

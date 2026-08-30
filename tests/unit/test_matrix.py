@@ -115,3 +115,40 @@ def test_encode_rejects_unknown_mode():
 
     with pytest.raises(ValueError, match="mode must be one of"):
         encode(lambda: None, mode="turbo")
+
+
+def test_repo_root_points_at_the_checkout():
+    """Guards a whole class of silent bugs: a wrong root makes the sweep import
+    the wrong ``tests.integration_tests`` and shell out to a script that is not there."""
+    from ascend_titan.tools.matrix import repo_root
+
+    root = repo_root()
+    assert (root / "scripts" / "run_train.sh").is_file()
+    assert (root / "ascend_titan").is_dir()
+
+
+def test_triage_rules_are_data_and_valid():
+    """Every rule compiles, and every attribution code is one we document."""
+    import re
+
+    from ascend_titan.tools.matrix import rules
+
+    known_prefixes = (
+        "NPU",
+        "NPU-OP",
+        "TORCH",
+        "TT",
+        "DEP",
+        "CANN",
+        "OURS",
+        "HARNESS",
+        "HANG",
+        "CLI",
+        "COMPILE",
+        "UNKNOWN",
+    )
+    assert len(rules()) > 20
+    for code, pattern, note in rules():
+        re.compile(pattern)
+        assert note, f"{code}: a rule without a note is useless in the report"
+        assert code.split("-")[0] in known_prefixes or code in known_prefixes, code

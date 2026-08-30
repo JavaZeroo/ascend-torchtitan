@@ -6,7 +6,7 @@ description: 把一次 NPU 运行的结果记入 docs/capability-matrix.md 并�
 
 ## 跑一次扫描
 `python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4 --out outputs/matrix/<日期>`（见 `docs/matrix/README.md`）。
-它对每个上游测试配置施加 `npu_minimal`（`--mode stock|fused` 切换），并用 `TRIAGE` 正则表自动归因。`UNKNOWN` 表示新的失败特征：读日志、定代码、在 `TRIAGE` 加一行正则、在 `docs/issues/<owner>.md` 加条目，然后 `--retriage`（`results.json` 保留日志路径）。扫描期间同一张卡上不能有其它 HCCL 作业（EI0020 → `HARNESS`）。
+它对每个上游测试配置施加 `npu_minimal`（`--mode stock|fused` 切换），并用 `ascend_titan/tools/matrix/triage.toml` 的规则表自动归因（数据，不是代码；第一条匹配的胜出）。`UNKNOWN` 表示新的失败特征：读日志、定代码、在 `triage.toml` 加一条 `[[rule]]`、在 `docs/issues/<owner>.md` 加条目，然后 `--retriage`（`results.json` 保留日志路径）。扫描期间同一张卡上不能有其它 HCCL 作业（EI0020 → `HARNESS`）。
 
 ## 翻转一个格子
 1. 确定行（特性/轴）和验证元组（`constraints/`）。

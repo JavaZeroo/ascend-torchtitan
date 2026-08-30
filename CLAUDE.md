@@ -19,7 +19,7 @@
 | `ascend_titan/parallel/`、`graph/` | L2 | 并行策略、torchair（M4/M5，目前空） |
 | `ascend_titan/models/<model>/` | L3 | **内容**：每个模型一个包 = `recipes.py`（支持的入口）+ `probes.py`（只做测量）+ `README.md`（必需，使用指南）；`registry.py` 是模型状态表（纯数据）；`_template/` 是新模型骨架 |
 | `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`transforms.npu_minimal`（只含"不加就跑不起来"的增量，挂 issue + 特性探测消失条件）与 `transforms.npu_fused`（性能 override，opt-in，P12）、`matrix.py` 动态 recipe（`__stock` / `__fused` 后缀） |
-| `ascend_titan/tools/` | L4 | `doctor`、`matrix`（扫描 + 归因）、`provenance` |
+| `ascend_titan/tools/` | L4 | `doctor`、`matrix/`（`triage`＋`triage.toml` 数据表、`cases`、`runner`、`report`、`cli`）、`provenance` |
 | `constraints/` | — | `nightly.txt` + `torchtitan.sha` + `torch_npu.sha` = 版本三元组（**唯一事实来源**，P11） |
 | `scripts/build_torch_npu.sh` | — | 源码构建 torch_npu（本地盘 `/opt/build/torch_npu`，wheel → `/opt/wheels/` + 元数据 json）；`WITH_PATCHES=1` 叠加在途补丁 |
 | `patches/torch_npu/`、`patches/op-plugin/` | — | **在途的 torch_npu / op-plugin 修复**（P9）：每个 = `fix/<ID>` 分支的 format-patch，提 PR 后头部加链接，合入即删 |
@@ -62,7 +62,7 @@ ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugm
 10. **不加投机性的兜底。** 与上游同一标准：只校验显式契约。
 11. **pip 安装永远带 `-c constraints/<track>.txt`**——否则 torch 被升级、torch_npu ABI 损坏。
 12. **验证先于断言**（P13）：任何 🟢 / "已修复" 附命令与输出，且在 NIGHTLY 上跑过。
-13. **改 `matrix.py` 的 `TRIAGE` 表或任何被 ruff 重排过的多行元组时，用行定位插入，不要用整行字符串 replace**。
+13. **归因规则是数据**：加/改归因写 `ascend_titan/tools/matrix/triage.toml`（第一条匹配的胜出），不动 Python；改完用 `--retriage` 重跑归因。
 
 ## 失败处理（经常用）
 

@@ -10,3 +10,7 @@
 | ascend-torchtitan | [ours.md](ours.md) | 本仓已知的缺口 |
 
 归因代码（CLAUDE.md）：**TT** torchtitan · **NPU** torch_npu · **CANN** · **DEP** 第三方 CUDA-only 依赖 · **TORCH** pytorch 核心。
+
+归因规则表（日志正则 → 归因码）在 `ascend_titan/tools/matrix/triage.toml`：数据，不是代码，
+第一条匹配的胜出。新增归因后用 `python -m ascend_titan.tools.matrix --retriage <sweep 目录>`
+对已有扫描重新归因，不必重跑。
