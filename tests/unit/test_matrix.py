@@ -44,15 +44,26 @@ def test_npu_minimal_transform_on_upstream_recipes():
     from torchtitan.models.common.attention import FlexAttention, VarlenAttention
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import ATTENTION_OVERRIDE, npu_minimal
+    from ascend_titan.recipes.transforms import (
+        ATTENTION_OVERRIDE,
+        _flex_attention_runs_on_npu,
+        npu_minimal,
+    )
 
     cfg = llama3_debugmodel()
     assert any(True for _ in cfg.traverse(FlexAttention.Config))
     a = npu_minimal(cfg)
-    assert a.flex_to_varlen > 0
-    assert not any(True for _ in cfg.traverse(FlexAttention.Config))
-    assert any(True for _ in cfg.traverse(VarlenAttention.Config))
-    assert ATTENTION_OVERRIDE in cfg.override.imports
+    if _flex_attention_runs_on_npu():
+        # torch_npu master lifted torch's flex device whitelist, so the upstream
+        # default stays: converting it would drop flex-only features for nothing.
+        assert a.flex_to_varlen == 0
+        assert any(True for _ in cfg.traverse(FlexAttention.Config))
+        assert ATTENTION_OVERRIDE not in cfg.override.imports
+    else:
+        assert a.flex_to_varlen > 0
+        assert not any(True for _ in cfg.traverse(FlexAttention.Config))
+        assert any(True for _ in cfg.traverse(VarlenAttention.Config))
+        assert ATTENTION_OVERRIDE in cfg.override.imports
     assert "ascend_titan.kernels.rope.real_cache_rope" in cfg.override.imports
     # A perf kernel must NOT be in the measurement baseline (P12): a red matrix
     # cell has to mean "this upstream feature fails on NPU", never "our drop-in
@@ -62,8 +73,9 @@ def test_npu_minimal_transform_on_upstream_recipes():
     # TT-4 is gone on the NIGHTLY track; the upstream default loss wrapper stays in place.
     assert isinstance(cfg.loss, ChunkedLossWrapper.Config)
     # idempotent
+    before = list(cfg.override.imports)
     b = npu_minimal(cfg)
-    assert b.flex_to_varlen == 0 and cfg.override.imports.count(ATTENTION_OVERRIDE) == 1
+    assert b.flex_to_varlen == 0 and cfg.override.imports == before
 
 
 @pytest.mark.titan
@@ -152,3 +164,23 @@ def test_triage_rules_are_data_and_valid():
         re.compile(pattern)
         assert note, f"{code}: a rule without a note is useless in the report"
         assert code.split("-")[0] in known_prefixes or code in known_prefixes, code
+
+
+def test_provenance_section_orders_ascend_first():
+    """The audit table has to put our own overrides where a reader looks first."""
+    from ascend_titan.tools.matrix.report import render_provenance
+
+    assert render_provenance({}) == []
+    md = "\n".join(
+        render_provenance(
+            {
+                "torchtitan.components.loss.CrossEntropyLoss.Config": ("upstream", 7),
+                "ascend_titan.kernels.rms_norm.AscendRMSNorm.Config": ("ascend", 2),
+                "torchtitan.overrides.fused_swiglu.FusedSwiGLU.Config": ("upstream-override", 1),
+            }
+        )
+    )
+    rows = [line for line in md.splitlines() if line.startswith("| `")]
+    assert "ascend_titan" in rows[0] and "| ascend |" in rows[0]
+    assert "upstream-override" in rows[1]
+    assert "CrossEntropyLoss" in rows[2]

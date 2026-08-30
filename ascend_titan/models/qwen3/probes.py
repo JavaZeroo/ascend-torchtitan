@@ -80,3 +80,15 @@ def qwen3_debugmodel_npu_partial_dtensor() -> Trainer.Config:
     config = qwen3_debugmodel_npu()
     config.parallelism.spmd_backend = "partial_dtensor"
     return config
+
+
+def qwen3_debugmodel_npu_graph() -> Trainer.Config:
+    """Cell graph/torchair: compile the loss with Ascend's GE graph backend.
+
+    Only ``loss`` is compiled: the model contains our varlen attention custom op,
+    which torchair cannot lower yet (OURS-13). Numerics move slightly (compiled
+    reductions reassociate), so this has no golden of its own.
+    """
+    from ascend_titan.graph import npu_graph
+
+    return npu_graph(qwen3_debugmodel_npu())

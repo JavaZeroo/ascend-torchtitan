@@ -42,6 +42,17 @@ NEXT 多出的 6 个 🟢 全是 PP 用例：torch 2.12 的 pipelining `fork_rng
 
 **结论：NPU/CANN 归因的红格为 0。** torch_npu 的三个缺陷（NPU-1 varlen 内核、NPU-2 fake 进程组、NPU-3 复数索引）都已通过上游本就存在的等价实现（varlen 节点 + `npu_fusion_attention`、实数缓存 RoPE）在 L1 层绕开，剩余红格全部归 torch 版本、上游 CUDA-only 组件或本仓自身待办。
 
+## 图模式（M5，2026-08-30）
+
+torchair = 昇腾的 GE 图后端，随 torch_npu 发布，但要 `TORCHAIR=1 ./scripts/build_torch_npu.sh` 才带上；
+GE 运行时还需要 venv 里有 `decorator`、`scipy`。用法是上游自带的开关（`compile.backend=npu`），不是 shim。
+
+| 分量 | NIGHTLY | 备注 |
+|---|:--:|---|
+| `compile.components=["loss"]` | 🟢 | qwen3 10 步，`loss 5.11634`（eager 5.10291，编译后归约重排的 bf16 级差异）；recipe 探针 `qwen3_debugmodel_npu_graph` |
+| `compile.components=["model"]` | 🔴 | OURS-13：我们的 varlen 注意力 custom_op 没有 GE converter，torchair 找不到 `FusionAttentionVarlen` |
+| inductor 后端（`compile.backend=inductor`） | 🔴 | DEP-INDUCTOR：需要 Triton-Ascend |
+
 ## 运行路径（M1）
 
 | 路径 | NEXT | STABLE | 备注 |

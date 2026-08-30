@@ -2,9 +2,61 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from ascend_titan.tools.matrix.runner import Result
+
+logger = logging.getLogger(__name__)
+
+
+def provenance(configs: list[str]) -> dict[str, tuple[str, int]]:
+    """``{config class: (origin, how many configs use it)}`` over ``configs``.
+
+    P7 asks every benchmark to carry an audit table saying which implementation
+    actually backed each node; a sweep is a benchmark. Building a config applies
+    its overrides into torchtitan's global registry, so each one is bracketed by
+    ``clear_overrides()``; configs that fail to build are skipped (they are the
+    red cells, and the report already says why).
+    """
+    from torchtitan.config.override import clear_overrides
+
+    from ascend_titan.tools.provenance import build_config, collect
+
+    seen: dict[str, tuple[str, int]] = {}
+    for name in sorted(set(configs)):
+        clear_overrides()
+        try:
+            rows = collect(build_config("ascend_titan.recipes.matrix", name))
+        except Exception as e:  # noqa: BLE001 - a config that cannot build is a red cell
+            logger.info("[provenance] %s: %s", name, type(e).__name__)
+            continue
+        finally:
+            clear_overrides()
+        for cls in {(r.config_cls, r.origin) for r in rows}:
+            origin, count = seen.get(cls[0], (cls[1], 0))
+            seen[cls[0]] = (origin, count + 1)
+    return seen
+
+
+def render_provenance(table: dict[str, tuple[str, int]]) -> list[str]:
+    """The audit table, Ascend-backed nodes first."""
+    if not table:
+        return []
+    order = {"ascend": 0, "upstream-override": 1, "upstream": 2}
+    lines = [
+        "## provenance",
+        "",
+        "Which implementation actually backs each overridable node (P7). "
+        "`ascend` = our override was in effect.",
+        "",
+        "| config class | origin | cases |",
+        "|---|---|---|",
+    ]
+    for cls, (origin, count) in sorted(table.items(), key=lambda kv: (order[kv[1][0]], kv[0])):
+        lines.append(f"| `{cls}` | {origin} | {count} |")
+    lines.append("")
+    return lines
 
 
 def tuple_tag() -> str:
@@ -19,7 +71,9 @@ def tuple_tag() -> str:
     return f"torch{v('torch')}_npu{v('torch_npu')}"
 
 
-def render(results: list[Result], *, title: str) -> str:
+def render(
+    results: list[Result], *, title: str, provenance_table: dict[str, tuple[str, int]] | None = None
+) -> str:
     icon = {"green": "🟢", "red": "🔴", "skip": "⚪"}
     lines = [
         f"# {title}",
@@ -52,4 +106,5 @@ def render(results: list[Result], *, title: str) -> str:
                 f"| {r.name} | {r.ngpu} | {icon[r.state]} | {r.code} | {note} | {r.seconds:.0f} |"
             )
         lines.append("")
+    lines += render_provenance(provenance_table or {})
     return "\n".join(lines)

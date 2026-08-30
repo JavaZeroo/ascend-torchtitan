@@ -20,7 +20,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ascend_titan.tools.matrix.cases import load_cases
-from ascend_titan.tools.matrix.report import render, tuple_tag
+from ascend_titan.tools.matrix.report import provenance, render, tuple_tag
 from ascend_titan.tools.matrix.runner import Result, sweep
 from ascend_titan.tools.matrix.triage import triage
 
@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
         help="minimal: only what NPU cannot run without (default, P12); "
         "stock: upstream unmodified; fused: minimal + drop-in fused kernels",
     )
+    p.add_argument(
+        "--provenance",
+        action="store_true",
+        help="append the P7 audit table (which implementation backed each node)",
+    )
     p.add_argument("--list", action="store_true")
     p.add_argument("--retriage", default=None, help="re-run triage over an existing sweep dir")
     a = p.parse_args(argv)
@@ -86,8 +91,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             r.code, r.note = triage(log)
         (out / "results.json").write_text(json.dumps([asdict(r) for r in results], indent=2))
-        (out / "report.md").write_text(render(results, title="Matrix sweep (re-triaged)"))
-        print(render(results, title="Matrix sweep (re-triaged)"))
+        report = render(results, title="Matrix sweep (re-triaged)")
+        (out / "report.md").write_text(report)
+        print(report)
         return 0
 
     cases = load_cases(Path(a.titan_dir), a.suites.split(","), mode=a.mode)
@@ -105,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     results = sweep(cases, parse_cards(a.cards), out, repo, a.timeout, a.jobs)
     (out / "results.json").write_text(json.dumps([asdict(r) for r in results], indent=2))
     title = f"Matrix sweep (npu_{a.mode})" if a.mode != "stock" else "Matrix sweep (stock upstream)"
-    (out / "report.md").write_text(render(results, title=title))
-    print(render(results, title=title))
+    table = provenance([c for case in cases for c in case.configs]) if a.provenance else None
+    report = render(results, title=title, provenance_table=table)
+    (out / "report.md").write_text(report)
+    print(report)
     return 0

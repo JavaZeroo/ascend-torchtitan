@@ -14,7 +14,7 @@ Split by responsibility so each piece can be read and tested on its own:
 
 from ascend_titan.tools.matrix.cases import Case, load_cases
 from ascend_titan.tools.matrix.cli import main, parse_cards, repo_root
-from ascend_titan.tools.matrix.report import render, tuple_tag
+from ascend_titan.tools.matrix.report import provenance, render, tuple_tag
 from ascend_titan.tools.matrix.runner import CardPool, Result, run_case, sweep
 from ascend_titan.tools.matrix.triage import rules, triage
 
@@ -25,6 +25,7 @@ __all__ = [
     "load_cases",
     "main",
     "parse_cards",
+    "provenance",
     "render",
     "repo_root",
     "rules",

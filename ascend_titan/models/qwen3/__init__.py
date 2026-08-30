@@ -7,6 +7,7 @@ probes; import the submodule directly when you want only one of them.
 from ascend_titan.models.qwen3.probes import (
     qwen3_debugmodel_npu_ce_loss,
     qwen3_debugmodel_npu_fused_norm,
+    qwen3_debugmodel_npu_graph,
     qwen3_debugmodel_npu_partial_dtensor,
     qwen3_debugmodel_stock_flex,
     qwen3_debugmodel_stock_varlen,
@@ -25,6 +26,7 @@ __all__ = [
     "qwen3_debugmodel_npu_fused",
     "qwen3_debugmodel_npu_fused_fsdp2",
     "qwen3_debugmodel_npu_fused_norm",
+    "qwen3_debugmodel_npu_graph",
     "qwen3_debugmodel_npu_partial_dtensor",
     "qwen3_debugmodel_stock_flex",
     "qwen3_debugmodel_stock_varlen",
