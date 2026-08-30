@@ -17,7 +17,7 @@ def test_provenance_marks_ascend_nodes(monkeypatch):
     for m in ("ascend_titan.kernels.attention", "ascend_titan.kernels.rms_norm"):
         monkeypatch.delitem(sys.modules, m, raising=False)
     clear_overrides()
-    cfg = provenance.build_config("ascend_titan.recipes.qwen3", "qwen3_debugmodel_npu_fused_norm")
+    cfg = provenance.build_config("ascend_titan.models.qwen3", "qwen3_debugmodel_npu_fused_norm")
     rows = provenance.collect(cfg)
     summary = provenance.summarize(rows)
     ascend = [c for c, v in summary.items() if v["origin"] == "ascend"]

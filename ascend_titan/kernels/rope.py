@@ -12,12 +12,11 @@ multiply, so checkpoints and numerics are unchanged) but stores the cache as
 ``view_as_real(freqs_cis)`` -> ``(L, dim/2, 2)`` and applies the rotation with
 real ops. It is not a workaround inside torch_npu: it is an alternative upstream
 node implementation selected by the override mechanism, exactly like the
-attention override. Import is safe without torchtitan features missing.
+attention override.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 import torch
@@ -29,15 +28,12 @@ from torchtitan.models.common.rope import (
     _maybe_wrap_positions,
 )
 
-logger = logging.getLogger(__name__)
+from ascend_titan.kernels._probe import require_op
 
-try:
-    import torch_npu
-
-    _HAS_ROTARY_KERNEL = hasattr(torch_npu, "npu_rotary_mul")
-except ImportError:
-    torch_npu = None
-    _HAS_ROTARY_KERNEL = False
+# torch_npu is a base dependency (P14): a missing module or op raises at import.
+# The rotation itself still runs in plain torch for non-NPU tensors (device
+# dispatch, not a fallback for a missing dependency).
+_npu_rotary_mul = require_op("npu_rotary_mul")
 
 
 def _rotary_kernel(
@@ -49,7 +45,7 @@ def _rotary_kernel(
     computes in the input dtype (bf16 in, bf16 out) -- within bf16 rounding of
     the upstream fp32 math (see tests/npu/test_kernel_rope.py).
     """
-    return torch_npu.npu_rotary_mul(
+    return _npu_rotary_mul(
         x.unsqueeze(0),
         cos.to(x.dtype).unsqueeze(0),
         sin.to(x.dtype).unsqueeze(0),
@@ -58,7 +54,7 @@ def _rotary_kernel(
 
 
 def _use_kernel(x: torch.Tensor) -> bool:
-    return _HAS_ROTARY_KERNEL and x.device.type == "npu"
+    return x.device.type == "npu"
 
 
 class AscendComplexRoPE(ComplexRoPE):

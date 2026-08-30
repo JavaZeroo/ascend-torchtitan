@@ -1,8 +1,16 @@
-"""L3: Ascend recipes = upstream config + deltas.
+"""L3 machinery shared across models.
 
-Every recipe calls the upstream ``config_registry`` function and mutates the
-returned ``Trainer.Config``; it never rebuilds the config from scratch, so new
-upstream fields are inherited automatically.
+Per-model recipes do **not** live here -- they live in
+``ascend_titan/models/<model>/`` (one package per model, each with its own
+README). This package holds only what is model-independent:
 
-Run with:  python -m ascend_titan.train --module ascend_titan.recipes.<model> --config <fn>
+    transforms.py   npu_baseline: the deltas every upstream config needs on NPU
+    matrix.py       dynamic module that runs any upstream config + npu_baseline
+
+Content in ``models/``, machinery in ``recipes/``.
+
+Run a recipe:  python -m ascend_titan.train --module ascend_titan.models.<model> --config <fn>
+Run any upstream config:
+               python -m ascend_titan.train --module ascend_titan.recipes.matrix \
+                   --config <upstream.module>__<fn>
 """

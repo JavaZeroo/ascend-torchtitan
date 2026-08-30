@@ -46,7 +46,7 @@
 |---|---|
 | `tests/repro/probe_npu_gaps.py` | NPU-1 / NPU-2（列表）/ NPU-3 / NPU-6 `[OK ]`；`_flash_attention_forward` PrivateUse1 = True；flex eager OK；TT-4 OK |
 | stock varlen（qwen3，零 override）10 步 | 🟢 loss 5.10302 / grad_norm 3.3060 |
-| stock llama3（`ascend_titan.recipes.stock`，零 override：stock ComplexRoPE + ChunkedLoss + spmd_types）10 步 | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
+| stock llama3（`ascend_titan.models.llama3`，零 override：stock ComplexRoPE + ChunkedLoss + spmd_types）10 步 | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
 | `import torch` 不再拖入 fsdp/checkpoint；`import spmd_types` 先行 | 🟢（NPU-8） |
 | 矩阵工具可运行；`pp_1f1b` | 🟢（无 shim） |
 | `cp` / `fsdp+cp` / `deepseek_v3_fused_mla_swiglu` | 🔴 DEP-INDUCTOR（Triton-Ascend） |

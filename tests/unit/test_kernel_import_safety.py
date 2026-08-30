@@ -1,34 +1,49 @@
-"""Every L1 module must import cleanly without torch_npu and register nothing (ADR-004)."""
+"""torch_npu is a base dependency (P14), not an optional accelerator.
+
+Every L1 module must fail *at import* when torch_npu -- or an op it needs -- is
+missing. The old behaviour (import quietly, log a WARNING, skip the override)
+turned a broken environment into an unnoticed eager run; that is exactly the
+class of bug this test now forbids. ADR-004's "degrade loudly" survives only for
+genuinely optional add-ons (ops-nn), covered at the bottom.
+"""
 
 import importlib
 import sys
 
 import pytest
 
-MODULES = [
-    "ascend_titan.kernels.attention",
-    "ascend_titan.kernels.rms_norm",
-    "ascend_titan.kernels.swiglu",
-    "ascend_titan.kernels.situ_glu",
-]
-
-
-@pytest.mark.parametrize("name", MODULES)
-def test_import_without_torch_npu(monkeypatch, name):
-    monkeypatch.setitem(sys.modules, "torch_npu", None)
-    monkeypatch.setitem(sys.modules, "cann_ops_nn", None)
-    monkeypatch.delitem(sys.modules, name, raising=False)
-    mod = importlib.import_module(name)
-    assert mod._AVAILABLE is False
+# module -> the torch_npu op whose absence must break the import
+MODULES = {
+    "ascend_titan.kernels.attention": "npu_fusion_attention",
+    "ascend_titan.kernels.rms_norm": "npu_rms_norm",
+    "ascend_titan.kernels.swiglu": "npu_swiglu",
+    "ascend_titan.kernels.rope": "npu_rotary_mul",
+    "ascend_titan.kernels.situ_glu": None,  # needs torch_npu, but no op of its own
+}
 
 
 @pytest.mark.titan
-def test_rope_module_falls_back_without_kernel(monkeypatch):
-    """rope.py is always importable (pure torch); the kernel path is opt-in on npu."""
-    monkeypatch.setitem(sys.modules, "torch_npu", None)
-    monkeypatch.delitem(sys.modules, "ascend_titan.kernels.rope", raising=False)
-    mod = importlib.import_module("ascend_titan.kernels.rope")
-    assert mod._HAS_ROTARY_KERNEL is False
-    import torch
+@pytest.mark.parametrize("name", list(MODULES))
+def test_import_without_torch_npu_raises(no_torch_npu, name):
+    with pytest.raises(ImportError):
+        importlib.import_module(name)
 
-    assert mod._use_kernel(torch.zeros(1)) is False
+
+@pytest.mark.titan
+@pytest.mark.parametrize("name,op", [(k, v) for k, v in MODULES.items() if v])
+def test_import_with_incomplete_torch_npu_raises(npu_stub_missing_op, name, op):
+    """A torch_npu without the op is an Ascend-side gap (P9), never a fallback."""
+    npu_stub_missing_op(op)
+    from ascend_titan.kernels._probe import MissingNpuOpError
+
+    with pytest.raises(MissingNpuOpError, match=op):
+        importlib.import_module(name)
+
+
+@pytest.mark.titan
+def test_optional_addon_still_degrades_loudly(monkeypatch, npu_stub):
+    """ops-nn needs its own run package + JIT build: optional, so ADR-004 applies."""
+    monkeypatch.setitem(sys.modules, "cann_ops_nn", None)
+    mod = importlib.import_module("ascend_titan.kernels.situ_glu")
+    assert mod._AVAILABLE is False
+    assert not hasattr(mod, "ops_nn_situ_glu")

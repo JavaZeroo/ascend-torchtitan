@@ -48,6 +48,8 @@ print(
     "has_kernel _flash_attention_forward PrivateUse1:",
     torch._C._dispatch_has_kernel_for_dispatch_key("aten::_flash_attention_forward", "PrivateUse1"),
 )
+# Diagnostic probe: reporting *what is missing* is this file's job, so the
+# try/except here is the ADR-007 exemption, not a fallback (P14).
 try:
     import torch_npu
 

@@ -3,6 +3,13 @@
 所有值得记录的变更都在这里。格式：[Keep a Changelog](https://keepachangelog.com/)；0.1.0 之后遵循 SemVer。
 
 ## [Unreleased]
+### 变更（2026-08-30 · 硬依赖、模型目录、README）
+- **P14 / ADR-007：基础依赖硬导入。** 删掉全部 `try: import torch_npu` + `_AVAILABLE` 降级开关；新增 `kernels/_probe.py`（`require_op()` 缺算子即抛 `MissingNpuOpError`，`optional_module()` 只给真正可选的加速包）。`setup()` 去掉 `require_npu` 参数（本来就不该可选）。`tests/unit/test_kernel_import_safety.py` 从"缺 torch_npu 也能安全 import"翻转为"必须抛错"；CPU 单测改用 `npu_stub` / `no_torch_npu` / `npu_stub_missing_op` fixture 提供依赖。
+- **按模型重组 L3**：新增 `ascend_titan/models/<model>/`（`recipes.py` + 可选 `probes.py` + **必需的 `README.md`**）。`recipes/qwen3.py` → `models/qwen3/`（4 个矩阵探针拆到 `probes.py`），`recipes/stock.py` → `models/llama3/`；新增 `models/qwen3_5/`、`models/kimi_k3/`（recipe 就绪，状态 🔴 + 归因）、`models/registry.py`（模型状态表，纯数据）、`models/_template/`（新模型骨架）。`ascend_titan/recipes/` 只保留跨模型机制（`transforms.py`、`matrix.py`）。`tests/unit/test_models_registry.py` 强制"每个模型包有 README 且已登记"。
+  - 入口路径变化：`--module ascend_titan.recipes.qwen3` → `--module ascend_titan.models.qwen3`（`--config` 函数名不变，golden 不受影响）。
+- 补录 NIGHTLY 的 `qwen3_debugmodel_npu_fused` / `_fused_fsdp2` golden：与 torch 2.13 的对应曲线逐位一致；四条 golden 在 NIGHTLY 上齐备。
+- **README 重写**：banner / 架构图 / golden loss 曲线（`docs/assets/*.svg`，曲线由冻结的 golden 数据生成）、徽章、模型支持表、特性支持表、上游修复表（六个 gitcode issue/PR）。
+
 ### 变更（2026-08-30，nightly-first，ADR-006）
 - **基线改为 NIGHTLY**：torch 2.15.0.dev20260812（torch_npu master 钉的日期）+ torch_npu master 源码构建（`scripts/build_torch_npu.sh`，`constraints/torch_npu.sha`）+ torchtitan `13da2d77c`。`constraints/nightly.txt` 成为默认；`install.sh` 识别 `.dev` pin 走 nightly index 与本地 torch_npu wheel。NIGHTLY 上 `ASCEND_TITAN_SKIP_SHIMS=1` 的 golden（单卡 / FSDP2×2）与 2.13 golden 逐位一致。
 - 架构评审 `docs/design/2026-08-30-architecture-review.md`；原则 P8–P13（`docs/PRINCIPLES.md`）；`CLAUDE.md` 重写为 nightly-first 工作流。

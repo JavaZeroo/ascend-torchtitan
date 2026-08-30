@@ -12,13 +12,13 @@ pytestmark = pytest.mark.titan
 
 
 def test_qwen3_npu_recipes_build():
-    from ascend_titan.recipes.qwen3 import (
-        ATTENTION_OVERRIDE,
+    from ascend_titan.models.qwen3 import (
         qwen3_debugmodel_npu,
         qwen3_debugmodel_npu_fsdp2,
         qwen3_debugmodel_stock_flex,
         qwen3_debugmodel_stock_varlen,
     )
+    from ascend_titan.models.qwen3.recipes import ATTENTION_OVERRIDE
 
     cfg = qwen3_debugmodel_npu()
     assert cfg.training.steps == 10
@@ -44,8 +44,32 @@ def test_upstream_lm_attention_backends_are_what_we_think():
 
 def test_recipe_is_delta_not_copy():
     """Guard the 'deltas only' rule: recipe must call the upstream registry fn."""
-    from ascend_titan.recipes import qwen3
+    from ascend_titan.models.qwen3 import recipes
 
-    src = inspect.getsource(qwen3.qwen3_debugmodel_npu)
+    src = inspect.getsource(recipes.qwen3_debugmodel_npu)
     assert "qwen3_debugmodel()" in src
     assert "Trainer.Config(" not in src
+
+
+def test_probes_are_not_recipes():
+    """probes.py is measurement-only: it must not leak into the supported entry points."""
+    from ascend_titan.models.qwen3 import probes, recipes
+
+    assert not set(vars(probes)) & {
+        "qwen3_debugmodel_npu_fsdp2",
+        "qwen3_debugmodel_npu_fused",
+    }
+    assert "stock" not in " ".join(n for n in vars(recipes) if n.startswith("qwen3_"))
+
+
+def test_llama3_stock_recipe_has_no_overrides():
+    """The zero-override reference path: any override here defeats its purpose."""
+    from ascend_titan.models.llama3 import (
+        llama3_debugmodel_stock_npu,
+        llama3_debugmodel_stock_npu_fsdp2,
+    )
+
+    cfg = llama3_debugmodel_stock_npu()
+    assert cfg.override.imports == []
+    assert cfg.checkpoint.enable is False
+    assert llama3_debugmodel_stock_npu_fsdp2().parallelism.data_parallel_shard_degree == 2

@@ -13,35 +13,30 @@ forward (the kernel requires a gamma tensor).
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+import torch
+from torchtitan.config import derive, override
+from torchtitan.models.common.nn_modules import RMSNorm
 
-try:
-    import torch_npu
+from ascend_titan.kernels._probe import require_op, torch_npu
 
-    _AVAILABLE = hasattr(torch_npu, "npu_rms_norm")
-except ImportError as e:
-    _AVAILABLE = False
-    logger.warning("[ascend_titan] torch_npu unavailable (%s); RMSNorm stays on torch.rms_norm", e)
+# torch_npu is a base dependency (P14): a missing module or op raises at import.
+require_op("npu_rms_norm")
 
-if _AVAILABLE:
-    import torch
-    from torchtitan.config import derive, override
-    from torchtitan.models.common.nn_modules import RMSNorm
 
-    class AscendRMSNorm(RMSNorm):
-        @dataclass(kw_only=True, slots=True)
-        class Config(RMSNorm.Config):
-            pass
+class AscendRMSNorm(RMSNorm):
+    @dataclass(kw_only=True, slots=True)
+    class Config(RMSNorm.Config):
+        pass
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            if self.weight is None:
-                return super().forward(x)
-            eps = self.eps if self.eps is not None else torch.finfo(x.dtype).eps
-            return torch_npu.npu_rms_norm(x, self.weight, eps)[0]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.weight is None:
+            return super().forward(x)
+        eps = self.eps if self.eps is not None else torch.finfo(x.dtype).eps
+        return torch_npu.npu_rms_norm(x, self.weight, eps)[0]
 
-    @override(target=RMSNorm.Config, description="RMSNorm via torch_npu.npu_rms_norm")
-    def npu_rms_norm(cfg: RMSNorm.Config) -> AscendRMSNorm.Config:
-        return derive(cfg, AscendRMSNorm.Config)
+
+@override(target=RMSNorm.Config, description="RMSNorm via torch_npu.npu_rms_norm")
+def npu_rms_norm(cfg: RMSNorm.Config) -> AscendRMSNorm.Config:
+    return derive(cfg, AscendRMSNorm.Config)

@@ -70,7 +70,7 @@
 | 路径 | 现状 | 问题 | 建议 |
 |---|---|---|---|
 | `ascend_titan/compat/` | 注册表 172 行 + 2 条 shim（163 行） | 两条 shim 在 nightly 上都 no-op；`pp_step_presplit.py` 复刻 torch 内部逻辑，属"替换型"却标 `wrap` | 注册表保留（便宜且是治理机制）；两条 shim 文件待 RELEASE 退役后删除；**已加**门禁测试 `tests/unit/test_nightly_gate.py`：NIGHTLY 上 shim 必须是 no-op |
-| `ascend_titan/kernels/` | 5 个 override 模块 | 5 份相同的 `try: import torch_npu … _AVAILABLE` 样板；`attention.py:255-257` 无条件转 bf16（fp32 输入静默降精度）；`rope.py` 未做可用性探测（与 `.claude/rules/kernels.md` 第 1 条不一致） | 抽 `kernels/_probe.py::require(module, attr) -> module \| None`（只 WARNING 一次）；bf16 转换改为"仅当输入是 fp16/bf16 以外时 raise 或显式 WARNING"；`rope.py` 用同一探测器 |
+| `ascend_titan/kernels/` | 5 个 override 模块 | 5 份相同的 `try: import torch_npu … _AVAILABLE` 样板；`attention.py:255-257` 无条件转 bf16（fp32 输入静默降精度）；`rope.py` 未做可用性探测（与 `.claude/rules/kernels.md` 第 1 条不一致） | **已落实（ADR-007/P14）**：抽 `kernels/_probe.py::require_op(name)`，缺模块 / 缺算子一律抛错，不再有 `_AVAILABLE` 降级开关；bf16 转换改为"仅当输入是 fp16/bf16 以外时 raise 或显式 WARNING"；`rope.py` 用同一探测器 |
 | `ascend_titan/parallel/`、`graph/` | 空包 + README | 空包会进 wheel；按 YAGNI 本不该建 | 可接受（README 说明了用途）；但 M4/M5 前不要再加空目录 |
 | `ascend_titan/recipes/transforms.py` | `npu_baseline` 6 步 | 见 §4.4：混入了 P1 违规项与性能项 | 拆成 `npu_minimal`（只含"不加就跑不起来"）与 `npu_fused`（性能）；每条增量挂 issue ID 与**消失条件** |
 | `ascend_titan/tools/matrix.py` | 440 行，`TRIAGE` 正则表 107 行 + 运行器 + 报告 + CLI | 数据（归因规则）写在代码里，ruff 重排导致 `CLAUDE.md` 硬规则 10 那种"用行定位插入"的怪规矩；一个文件五种职责 | `TRIAGE` 迁到 `docs/issues/issues.toml`（见下），`tools/matrix/` 拆成 `triage.py`、`runner.py`、`report.py`、`cli.py` |
@@ -88,7 +88,7 @@
 
 ### 4.1 引导（`_bootstrap.py`、`train.py`）
 - 设计正确：唯一副作用点、幂等、`SetupReport` 可审计、`ASCEND_TITAN_SKIP_SHIMS` 便于验证上游修复。
-- 问题：`train.py` 调 `setup()` 时 `require_npu=False`（默认），torch_npu 导入失败只 WARNING，训练会在别处以更难懂的错误死掉。训练入口应当 `require_npu=True`——ADR-004 的"响亮降级"针对**算子依赖**，不针对**设备后端**。
+- 问题：`train.py` 调 `setup()` 时 `require_npu=False`（默认），torch_npu 导入失败只 WARNING，训练会在别处以更难懂的错误死掉。**已落实（ADR-007/P14）**：`setup()` 直接硬导入 torch_npu 并去掉 `require_npu` 参数——ADR-004 的"响亮降级"只针对**可选加速包**，不针对**基础依赖**。
 
 ### 4.2 shim 注册表（`compat/registry.py`）
 - 设计正确：`wrap / replace / polyfill` 三型、import 时强制 `reason` 与 `upstream`、polyfill 自动 no-op。
@@ -101,7 +101,7 @@
 - `rope.py`：两个 override（实数缓存 ComplexRoPE、CosSinRoPE 走 `npu_rotary_mul`）。前者存在的唯一理由是 NPU-3（复数索引）；**NPU-3 在 torch_npu 侧修好后这个 override 应降级为"可选性能项"而不是 baseline 必需项**。
 - `swiglu.py`：复用上游 `FusedSwiGLU` 的 w13 布局与 checkpoint hook，只换激活——这是 P6 的模范用法。
 - `situ_glu.py`：ops-nn 单算子构建 + 可微 custom_op；受 TT-11 阻塞无法接模型。
-- 共性问题：可用性探测样板重复 5 次；`_AVAILABLE` 为 False 时模块体大段缩进在 `if` 里，难读。建议 `_probe.py` + 早退（`if not _AVAILABLE: __all__ = []` 之后直接 `else` 分支改为顶层定义受 `_AVAILABLE` 守卫的注册）。
+- 共性问题：可用性探测样板重复 5 次；`_AVAILABLE` 为 False 时模块体大段缩进在 `if` 里，难读。**已落实（ADR-007/P14）**：改为 `_probe.require_op()` 硬探测 + 模块体顶层定义，`if _AVAILABLE:` 整块消失。
 
 ### 4.4 recipes / transforms（L3）—— **P1 违规点**
 `npu_baseline` 当前 6 步：flex→varlen、attention override、RoPE override、**RMSNorm override**、spmd_backend→partial_dtensor、**ChunkedLossWrapper 展开**。
@@ -142,7 +142,7 @@
 
 ## 6. NPU 实测：torch nightly + torch_npu master
 
-> 环境：`ascend-titan-dev`，`/opt/venv-nightly`，torch `2.15.0.dev20260812+cpu`（git `3eb0e5d0`），torch_npu master `15514cc70`（op-plugin `2b02a5aa0`），`ci/build.sh --python=3.12 --torch=2.15.0 --disable_torchair`：**8 分 28 秒，零报错**（gcc 11.4，256 核）。CANN 9.1.0，910B2。全部运行 `ASCEND_TITAN_SKIP_SHIMS=1`。原始日志：`outputs/nightly/`（脚本已固化到 `tests/repro/`、`scripts/build_torch_npu.sh`、`ascend_titan/recipes/stock.py`）。
+> 环境：`ascend-titan-dev`，`/opt/venv-nightly`，torch `2.15.0.dev20260812+cpu`（git `3eb0e5d0`），torch_npu master `15514cc70`（op-plugin `2b02a5aa0`），`ci/build.sh --python=3.12 --torch=2.15.0 --disable_torchair`：**8 分 28 秒，零报错**（gcc 11.4，256 核）。CANN 9.1.0，910B2。全部运行 `ASCEND_TITAN_SKIP_SHIMS=1`。原始日志：`outputs/nightly/`（脚本已固化到 `tests/repro/`、`scripts/build_torch_npu.sh`、`ascend_titan/models/llama3/recipes.py`）。
 
 ### 6.1 原版 torch_npu master（未打任何补丁）
 
@@ -165,7 +165,7 @@
 |---|---|
 | `tests/repro/probe_npu_gaps.py` | NPU-1 / 2 / 3 / 6 全部 `[OK ]`；`_flash_attention_forward` PrivateUse1 = True |
 | **stock varlen**（qwen3，零 override） | 🟢 10 步 loss 5.10302 / grad_norm 3.3060（与融合 override golden 5.10304 / 3.3061 仅 bf16 级差异） |
-| **stock llama3**（`ascend_titan.recipes.stock`：stock VarlenAttention + stock ComplexRoPE 复数索引 + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
+| **stock llama3**（`ascend_titan.models.llama3`：stock VarlenAttention + stock ComplexRoPE 复数索引 + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
 | `import torch` 足迹 | fsdp / checkpoint 不再被自动加载拖入；`import spmd_types` 先行 OK；`ShardedGradScaler` 仍被替换 |
 | 矩阵工具（先导入 torchtitan） | 可运行：`pp_1f1b` 🟢（无 shim）；`cp` / `fsdp+cp` / `fused_mla` 🔴 **DEP-INDUCTOR**（需要 Triton-Ascend，与 NPU 无关） |
 | stock flex 模型级 | lowering 通过（NPU-7 生效），停在 `0 active drivers`——Triton-Ascend 依赖（DEP-INDUCTOR） |
@@ -209,6 +209,8 @@
 | ~~P1~~ 已完成 | NPU-1/2/3/6/7/8 在 master 上重验并修复 → gitcode issue + PR（Ascend/pytorch !45526–!45529、Ascend/op-plugin !5800–!5801；CLA ✅，CI 运行中） | `STATUS.md` |
 | P1 | `docs/issues/issues.toml` + 生成器；`TRIAGE` 迁出 `matrix.py` | `STATUS.md` 由生成 |
 | ~~P1~~ 已完成 | `PRINCIPLES.md` P8–P13、`ADR-006`、`CLAUDE.md` 工作流、skill `torch-npu-fix` | 文档 |
-| P2 | `npu_baseline` → `npu_minimal` + `npu_fused`；`kernels/_probe.py`；`train.py require_npu=True` | 代码 + 测试 |
+| P2（部分完成） | ~~`kernels/_probe.py`~~、~~`train.py` 硬依赖~~ 已落地（P14 / ADR-007：改成硬导入 + `require_op`，而不是原方案的"只 WARNING 一次"）；**待做**：`npu_baseline` → `npu_minimal` + `npu_fused` | 代码 + 测试 |
+| ~~P1~~ 已完成（2026-08-30 追加） | L3 按模型重组：`ascend_titan/models/<model>/`（recipes + probes + 必需 README）、`models/registry.py`、`models/_template/`；`recipes/` 只留跨模型机制。`tests/unit/test_models_registry.py` 强制登记与文档 | 代码 + 测试 |
+| ~~P2~~ 已完成（2026-08-30 追加） | README 重写：banner / 架构图 / golden 曲线（`docs/assets/`）、模型与特性支持表、上游修复表 | 文档 |
 | P2 | `constraints/workspace.lock` + `scripts/workspace.sh`；`outputs/*.py` → `tests/repro/` | 环境可复现 |
 | P3 | `tools/matrix/` 拆分；provenance 接入报告；`npu-nightly.yml` 落到真实 runner 或 cron | 工具 |

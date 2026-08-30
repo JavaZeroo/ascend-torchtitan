@@ -1,6 +1,6 @@
 """Provenance: which implementation actually backs every overridable node.
 
-    ascend-titan-provenance --module ascend_titan.recipes.qwen3 --config qwen3_debugmodel_npu
+    ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugmodel_npu
 
 Builds the config exactly as ``torchtitan.train`` would (module/config lookup +
 ``apply_overrides``), then walks the ``Trainer.Config`` tree and lists each

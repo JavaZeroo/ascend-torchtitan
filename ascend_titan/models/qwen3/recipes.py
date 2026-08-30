@@ -1,16 +1,23 @@
-"""Qwen3 recipes. M1 target: ``qwen3_debugmodel_npu`` runs 10 steps on NPU.
+"""Qwen3 recipes -- the Ascend reference path.
 
+validated: torchtitan=13da2d77c torch=2.15.0.dev20260812 torch_npu=2.15.0 CANN=9.1.0 date=2026-08-30
 validated: torchtitan=13da2d77c torch=2.13.0 torch_npu=2.13.0rc1 CANN=9.1.0 date=2026-08-29
 validated: torchtitan=13da2d77c torch=2.12.0 torch_npu=2.12.0 CANN=9.1.0 date=2026-08-29
 (rewritten by CI when a run is green; golden curves in tests/assets/losses/npu/)
 
-Why the attention delta exists (measured 2026-08-29, torch 2.12.0 / torch_npu 2.12.0):
-upstream language models offer only ``flex`` and ``varlen`` inner attention
-(``sdpa`` was removed, ``config_utils.py:97``). ``flex`` is rejected by torch on
-npu devices; ``varlen`` needs ``aten::_flash_attention_forward`` which torch_npu
-does not provide. Hence the stock model cannot run on NPU at all, and the
-``ascend_titan.kernels.attention`` override is part of the M1 baseline. The
-``_stock_*`` recipes below exist only to keep those two matrix cells measurable.
+Naming: ``qwen3_<flavor>_npu[_<variant>]``. ``<flavor>`` is the upstream config
+registry name (``debugmodel``, later ``0_6b`` ...), ``<variant>`` is a parallel
+or kernel delta (``fsdp2``, ``fused``). Measurement-only configs -- stock
+upstream, single-feature probes -- are NOT recipes and live in ``probes.py``.
+
+Why the attention delta exists: upstream language models offer only ``flex`` and
+``varlen`` inner attention (``sdpa`` was removed, ``config_utils.py:97``).
+``flex`` needs inductor (Triton-Ascend, DEP-INDUCTOR) at the model level, and
+stock ``varlen`` needs ``aten::_flash_attention_forward``, which torch_npu only
+grows with the NPU-1 fix. The ``kernels.attention`` override is therefore the
+supported path, and ``probes.py`` keeps both stock cells measurable.
+
+Full guide: ascend_titan/models/qwen3/README.md
 """
 
 from torchtitan.components.loss import CrossEntropyLoss
@@ -36,8 +43,10 @@ def qwen3_debugmodel_npu() -> Trainer.Config:
     config.override.imports = [ATTENTION_OVERRIDE]
 
     # DELTA 2: spmd_types -> partial_dtensor. Under spmd_types, fully_shard(dp_mesh_dims=)
-    # requires DTensor params; on torch 2.12 + NPU the params arrive plain and FSDP
+    # requires DTensor params; on release torch + NPU the params arrive plain and FSDP
     # raises. partial_dtensor is the upstream-supported alternative (P0, not a shim).
+    # On NIGHTLY the upstream default works too (see probes.py / llama3 stock);
+    # kept here so the frozen golden stays comparable across tracks.
     # (matrix: parallel/spmd_types)
     config.parallelism.spmd_backend = "partial_dtensor"
 
@@ -45,9 +54,10 @@ def qwen3_debugmodel_npu() -> Trainer.Config:
     config.checkpoint.enable = False
 
     # DELTA 4: plain CrossEntropyLoss instead of ChunkedLossWrapper. The chunked
-    # loss (since upstream #4143, 2026-08-13) drives FSDP's lm_head unshard by hand
-    # and its backward hits "data is not allocated yet" on torch 2.12 + NPU.
-    # (matrix: loss/chunked)
+    # loss (upstream #4143, 2026-08-13) drives FSDP's lm_head unshard by hand and
+    # its backward hits "data is not allocated yet" on release torch + NPU (TT-4).
+    # TT-4 is 🟢 on NIGHTLY, so this delta is scheduled for removal -- it needs a
+    # re-recorded golden, see README.md "待办". (matrix: loss/chunked)
     assert config.model_spec is not None
     config.loss = CrossEntropyLoss.Config(global_vocab_size=decoder_vocab_size(config.model_spec))
 
@@ -59,36 +69,6 @@ def qwen3_debugmodel_npu_fsdp2() -> Trainer.Config:
     config = qwen3_debugmodel_npu()
     # DELTA 5: 2-way FSDP.
     config.parallelism.data_parallel_shard_degree = 2
-    return config
-
-
-def qwen3_debugmodel_stock_flex() -> Trainer.Config:
-    """Matrix cell attention/flex: upstream default, no override. Expected 🔴."""
-    config = qwen3_debugmodel_npu()
-    config.model_spec = model_registry("debugmodel", attn_backend="flex")
-    config.override.imports = []
-    return config
-
-
-def qwen3_debugmodel_stock_varlen() -> Trainer.Config:
-    """Matrix cell attention/varlen: upstream varlen kernel, no override. Expected 🔴."""
-    config = qwen3_debugmodel_npu()
-    config.override.imports = []
-    return config
-
-
-def qwen3_debugmodel_npu_chunked_loss() -> Trainer.Config:
-    """Matrix cell loss/chunked: upstream ChunkedLossWrapper (the upstream default)."""
-    config = qwen3_debugmodel_npu()
-    config.loss = qwen3_debugmodel().loss
-    return config
-
-
-def qwen3_debugmodel_npu_fused_norm() -> Trainer.Config:
-    """Matrix cell norm/npu_rms_norm: M1 recipe + the fused RMSNorm override.
-    Kept out of ``qwen3_debugmodel_npu`` so the frozen golden curve stays valid."""
-    config = qwen3_debugmodel_npu()
-    config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
     return config
 
 

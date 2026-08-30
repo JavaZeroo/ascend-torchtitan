@@ -1,51 +1,29 @@
-"""CPU tests for the Ascend attention override: import safety and everything
-except the kernel call itself (which lives in tests/npu)."""
+"""CPU tests for the Ascend attention override: everything except the kernel
+call itself (which lives in tests/npu). Import-time dependency behaviour is
+covered by test_kernel_import_safety.py (P14)."""
 
 import importlib
-import logging
 import sys
-import types
 
 import pytest
 
 
-def _reload(monkeypatch, fake_npu: bool):
-    """Import ascend_titan.kernels.attention fresh, with or without a fake torch_npu."""
-    monkeypatch.delitem(sys.modules, "ascend_titan.kernels.attention", raising=False)
-    monkeypatch.delitem(sys.modules, "ascend_titan.kernels.rms_norm", raising=False)
-    if fake_npu:
-        fake = types.ModuleType("torch_npu")
-
-        def _boom(*a, **k):
-            raise AssertionError("kernel called")
-
-        fake.npu_fusion_attention = _boom
-        fake.npu_rms_norm = _boom
-        monkeypatch.setitem(sys.modules, "torch_npu", fake)
-    else:
-        monkeypatch.setitem(sys.modules, "torch_npu", None)  # makes `import torch_npu` fail
+def _reload(monkeypatch):
+    """Import ascend_titan.kernels.attention fresh, on top of the npu_stub fixture."""
+    for name in ("ascend_titan.kernels.attention", "ascend_titan.kernels.rms_norm"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     mod = importlib.import_module("ascend_titan.kernels.attention")
-    if fake_npu:
-        importlib.import_module("ascend_titan.kernels.rms_norm")
+    importlib.import_module("ascend_titan.kernels.rms_norm")
     return mod
 
 
-def test_import_without_torch_npu_is_safe_and_loud(monkeypatch, caplog):
-    with caplog.at_level(logging.WARNING):
-        mod = _reload(monkeypatch, fake_npu=False)
-    assert mod._AVAILABLE is False
-    assert not hasattr(mod, "npu_fusion_attention")
-    assert any("torch_npu unavailable" in r.message for r in caplog.records)
-
-
 @pytest.mark.titan
-def test_override_registers_and_derives(monkeypatch):
+def test_override_registers_and_derives(monkeypatch, npu_stub):
     from torchtitan.config.override import clear_overrides
     from torchtitan.models.common.attention import VarlenAttention
 
     clear_overrides()
-    mod = _reload(monkeypatch, fake_npu=True)
-    assert mod._AVAILABLE
+    mod = _reload(monkeypatch)
     cfg = VarlenAttention.Config(window_size=(-1, 0))
     new = mod.npu_fusion_attention(cfg)
     assert isinstance(new, mod.AscendFusionAttention.Config)
@@ -57,25 +35,25 @@ def test_override_registers_and_derives(monkeypatch):
 
 
 @pytest.mark.titan
-def test_unsupported_window_rejected_at_build(monkeypatch):
+def test_unsupported_window_rejected_at_build(monkeypatch, npu_stub):
     from torchtitan.config.override import clear_overrides
 
     clear_overrides()
-    mod = _reload(monkeypatch, fake_npu=True)
+    mod = _reload(monkeypatch)
     with pytest.raises(NotImplementedError, match="window_size"):
         mod.AscendFusionAttention.Config(window_size=(-1, -1)).build()
     clear_overrides()
 
 
 @pytest.mark.titan
-def test_recipe_activates_override_on_config_tree(monkeypatch):
+def test_recipe_activates_override_on_config_tree(monkeypatch, npu_stub):
     """apply_overrides must find our module and swap every VarlenAttention node."""
     from torchtitan.config.override import apply_overrides, clear_overrides
 
-    from ascend_titan.recipes.qwen3 import qwen3_debugmodel_npu
+    from ascend_titan.models.qwen3 import qwen3_debugmodel_npu
 
     clear_overrides()
-    _reload(monkeypatch, fake_npu=True)
+    _reload(monkeypatch)
     cfg = qwen3_debugmodel_npu()
     assert "ascend_titan.kernels.attention.npu_fusion_attention" in cfg.override.imports
     apply_overrides(cfg.override, cfg)

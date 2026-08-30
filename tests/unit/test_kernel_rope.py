@@ -8,7 +8,7 @@ pytestmark = pytest.mark.titan
 
 @pytest.mark.parametrize("scaling", ["none", "llama", "yarn"])
 @pytest.mark.parametrize("with_positions", [False, True])
-def test_matches_upstream_complex_rope(scaling, with_positions):
+def test_matches_upstream_complex_rope(scaling, with_positions, npu_stub):
     from torchtitan.config.override import clear_overrides
     from torchtitan.models.common.rope import ComplexRoPE
 
@@ -33,7 +33,7 @@ def test_matches_upstream_complex_rope(scaling, with_positions):
     clear_overrides()
 
 
-def test_override_is_exact_and_registered():
+def test_override_is_exact_and_registered(npu_stub):
     from torchtitan.config.override import clear_overrides
     from torchtitan.models.common.rope import ComplexRoPE, CosSinRoPE
 

@@ -1,0 +1,8 @@
+"""<Model> on Ascend. Guide: models/<model>/README.md."""
+
+from ascend_titan.models.<model>.recipes import (
+    <model>_debugmodel_npu,
+    <model>_debugmodel_npu_fsdp2,
+)
+
+__all__ = ["<model>_debugmodel_npu", "<model>_debugmodel_npu_fsdp2"]

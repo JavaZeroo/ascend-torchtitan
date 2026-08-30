@@ -59,27 +59,28 @@ def _privateuse1_name() -> str | None:
 
 
 def _import_torch_npu(report: SetupReport) -> None:
-    """Import torch_npu unless torch already autoloaded it."""
-    if _privateuse1_name() == "npu" and "torch_npu" in sys.modules:
+    """Import torch_npu, or raise. ``torch_npu`` is a base dependency (P14).
+
+    There is no "run without an Ascend backend" mode: this package exists to run
+    torchtitan on NPU, so a missing torch_npu is a broken environment and the
+    ImportError must surface here rather than turn into a silent CPU run.
+    """
+    # sys.modules can hold a None entry (a blocked import), which is not an import.
+    if _privateuse1_name() == "npu" and sys.modules.get("torch_npu") is not None:
         report.torch_npu_imported = True
         report.torch_npu_autoloaded = True
         return
-    try:
-        importlib.import_module("torch_npu")
-        report.torch_npu_imported = True
-    except ImportError:
-        report.warnings.append(
-            "torch_npu is not installed; running without an Ascend backend "
-            "(fine for CPU unit tests, wrong for training)."
-        )
+    importlib.import_module("torch_npu")
+    report.torch_npu_imported = True
 
 
-def setup(*, apply_shims: bool = True, require_npu: bool = False) -> SetupReport:
+def setup(*, apply_shims: bool = True) -> SetupReport:
     """Bootstrap the Ascend environment. Idempotent.
+
+    Raises ``ImportError`` if ``torch_npu`` is not installed (P14).
 
     Args:
         apply_shims: apply every shim registered in ``ascend_titan.compat``.
-        require_npu: raise if ``torch_npu`` cannot be imported.
     """
     global _STATE
     if _STATE is not None:
@@ -101,8 +102,6 @@ def setup(*, apply_shims: bool = True, require_npu: bool = False) -> SetupReport
 
     report.torch_version = torch.__version__
     _import_torch_npu(report)
-    if require_npu and not report.torch_npu_imported:
-        raise RuntimeError("torch_npu is required but could not be imported")
 
     from torch._utils import _get_available_device_type
 

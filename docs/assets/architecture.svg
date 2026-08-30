@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="470" viewBox="0 0 880 470" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="880" height="470" rx="12" fill="#0d1117"/>
+  <text x="32" y="34" fill="#e6edf3" font-size="15" font-weight="600">分层：每一层只做一件事，且都能被单独删掉</text>
+  <text x="848" y="34" fill="#6e7681" font-size="11.5" text-anchor="end">箭头 = 依赖方向；虚线框 = 我们从不修改</text>
+
+  <!-- upstream row -->
+  <g>
+    <rect x="32" y="52" width="380" height="66" rx="9" fill="#161b22" stroke="#30363d" stroke-dasharray="5 4"/>
+    <text x="48" y="76" fill="#79c0ff" font-size="13.5" font-weight="600">torchtitan（按 SHA 固定）</text>
+    <text x="48" y="97" fill="#8b949e" font-size="11.5">Trainer · ModelSpec · Configurable / @override · 上游模型</text>
+    <text x="48" y="112" fill="#6e7681" font-size="11">从不 fork，从不在磁盘上打补丁</text>
+
+    <rect x="428" y="52" width="420" height="66" rx="9" fill="#161b22" stroke="#30363d" stroke-dasharray="5 4"/>
+    <text x="444" y="76" fill="#ff7b72" font-size="13.5" font-weight="600">torch nightly + torch_npu master（源码构建）</text>
+    <text x="444" y="97" fill="#8b949e" font-size="11.5">PrivateUse1 后端 · 融合算子 · HCCL · CANN 9.1.0</text>
+    <text x="444" y="112" fill="#6e7681" font-size="11">发现缺陷 → 修 torch_npu → 提 gitcode issue+PR（绝不 workaround）</text>
+  </g>
+
+  <!-- our package -->
+  <rect x="32" y="140" width="816" height="256" rx="10" fill="#0f1620" stroke="#ee4c2c" stroke-width="1.6"/>
+  <text x="48" y="164" fill="#ee4c2c" font-size="13.5" font-weight="700">ascend_titan（本仓 · 纯扩展）</text>
+
+  <g font-size="12">
+    <rect x="48" y="178" width="240" height="72" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="64" y="200" fill="#e6edf3" font-weight="600">L0 compat</text>
+    <text x="64" y="219" fill="#8b949e">受治理的 monkeypatch，每条挂上游 issue</text>
+    <text x="64" y="238" fill="#3fb950">NIGHTLY 上生效数 = 0</text>
+
+    <rect x="304" y="178" width="264" height="72" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="320" y="200" fill="#e6edf3" font-weight="600">L1 kernels</text>
+    <text x="320" y="219" fill="#8b949e">@override 工厂：attention / rope /</text>
+    <text x="320" y="238" fill="#8b949e">rms_norm / swiglu / situ_glu</text>
+
+    <rect x="584" y="178" width="248" height="72" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="600" y="200" fill="#e6edf3" font-weight="600">L2 parallel / graph</text>
+    <text x="600" y="219" fill="#8b949e">parallelize_fn 替换、torchair</text>
+    <text x="600" y="238" fill="#6e7681">M4 / M5，目前留空</text>
+
+    <rect x="48" y="266" width="520" height="112" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="64" y="288" fill="#e6edf3" font-weight="600">L3 models / recipes</text>
+    <text x="64" y="308" fill="#8b949e">models/&lt;model&gt;/ = recipes.py + probes.py + README.md（每模型一个包）</text>
+    <text x="64" y="327" fill="#8b949e">recipes/ = 跨模型机制：npu_baseline、矩阵解析器</text>
+    <text x="64" y="346" fill="#6e7681">recipe = 上游 registry 函数 + 增量；绝不从零构造 Trainer.Config</text>
+    <text x="64" y="365" fill="#6e7681">每条增量写明：改了什么上游默认值 · 对应矩阵哪一格 · 什么时候能删</text>
+
+    <rect x="584" y="266" width="248" height="112" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="600" y="288" fill="#e6edf3" font-weight="600">L4 tools</text>
+    <text x="600" y="308" fill="#8b949e">doctor（版本元组体检）</text>
+    <text x="600" y="327" fill="#8b949e">matrix（上游用例搬到 NPU 扫描</text>
+    <text x="600" y="346" fill="#8b949e">＋自动归因）</text>
+    <text x="600" y="365" fill="#8b949e">provenance（实际生效的后端）</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#484f58" stroke-width="1.6" fill="none" marker-end="url(#a)">
+    <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0l6 3-6 3z" fill="#484f58"/></marker></defs>
+    <path d="M222 140V124"/>
+    <path d="M638 140V124"/>
+  </g>
+
+  <rect x="32" y="410" width="816" height="42" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="48" y="428" fill="#8b949e" font-size="11.5">入口：<tspan fill="#e6edf3">python -m ascend_titan.train --module ascend_titan.models.&lt;model&gt; --config &lt;fn&gt;</tspan></text>
+  <text x="48" y="444" fill="#6e7681" font-size="11.5">= torchtitan.train，只是先跑了 ascend_titan.setup()（导入 torch_npu → 冻结 device_type → 应用 shim）</text>
+</svg>

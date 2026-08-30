@@ -6,7 +6,7 @@ import sys
 CODE = """
 import sys
 import ascend_titan
-import ascend_titan.compat, ascend_titan.kernels, ascend_titan.recipes  # noqa
+import ascend_titan.compat, ascend_titan.kernels, ascend_titan.models, ascend_titan.recipes  # noqa
 bad = [m for m in sys.modules if m.split('.')[0] in ('torch', 'torch_npu', 'torchtitan')]
 print(",".join(sorted(bad)))
 """

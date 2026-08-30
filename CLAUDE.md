@@ -2,7 +2,7 @@
 
 [torchtitan](https://github.com/pytorch/torchtitan) 的昇腾 NPU 树外扩展。我们**扩展，不 fork**：torchtitan 是按 commit SHA 固定的已安装依赖。（`AGENTS.md` 是本文件的符号链接。）
 
-先读：`docs/PRINCIPLES.md`（P0–P13，评审按编号引用）、`docs/adr/ADR-006-nightly-first.md`（基线定义）、`docs/glossary.md`、`docs/roadmap.md`、`docs/baseline.md`（已验证的版本元组）、`docs/design/2026-08-30-architecture-review.md`（当前架构评审与行动清单）。
+先读：`docs/PRINCIPLES.md`（P0–P14，评审按编号引用）、`docs/adr/ADR-006-nightly-first.md`（基线定义）、`docs/glossary.md`、`docs/roadmap.md`、`docs/baseline.md`（已验证的版本元组）、`docs/design/2026-08-30-architecture-review.md`（当前架构评审与行动清单）。
 
 ## 基线（P8）
 
@@ -15,9 +15,10 @@
 |---|---|---|
 | `ascend_titan/_bootstrap.py`、`train.py` | 入口 | `setup()` = 唯一的副作用点；必须先于任何 `import torchtitan` |
 | `ascend_titan/compat/` | L0 | shim 注册表 + `shims/`（受治理的 monkeypatch）。NIGHTLY 上两条现存 shim 都自动 no-op；目标数量 0 |
-| `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention = custom_op、rope、rms_norm、swiglu、situ_glu） |
+| `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention = custom_op、rope、rms_norm、swiglu、situ_glu）；`_probe.py` = 依赖探测（`require_op` 硬 / `optional_module` 可选，P14） |
 | `ascend_titan/parallel/`、`graph/` | L2 | 并行策略、torchair（M4/M5，目前空） |
-| `ascend_titan/recipes/` | L3 | `Trainer.Config` = 上游 registry 函数 + 增量；`transforms.npu_baseline`（每条增量挂 issue + 特性探测消失条件，P12）；`matrix.py` 动态 recipe |
+| `ascend_titan/models/<model>/` | L3 | **内容**：每个模型一个包 = `recipes.py`（支持的入口）+ `probes.py`（只做测量）+ `README.md`（必需，使用指南）；`registry.py` 是模型状态表（纯数据）；`_template/` 是新模型骨架 |
+| `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`transforms.npu_baseline`（每条增量挂 issue + 特性探测消失条件，P12）、`matrix.py` 动态 recipe |
 | `ascend_titan/tools/` | L4 | `doctor`、`matrix`（扫描 + 归因）、`provenance` |
 | `constraints/` | — | `nightly.txt` + `torchtitan.sha` + `torch_npu.sha` = 版本三元组（**唯一事实来源**，P11） |
 | `scripts/build_torch_npu.sh` | — | 源码构建 torch_npu（本地盘 `/opt/build/torch_npu`，wheel → `/opt/wheels/` + 元数据 json）；`WITH_PATCHES=1` 叠加在途补丁 |
@@ -41,9 +42,9 @@ ascend-titan-doctor                       # 环境探测（CPU 上也能跑）
 pytest tests/unit -x                      # CPU 单测
 ruff check . && ruff format --check .
 ASCEND_TITAN_SKIP_SHIMS=1 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu   # NIGHTLY 上 shim 必须全关也能过
-MODULE=ascend_titan.recipes.qwen3 CONFIG=qwen3_debugmodel_npu NPU=8 ./scripts/run_train.sh
+MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_debugmodel_npu NPU=8 ./scripts/run_train.sh
 python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4   # 上游用例搬到 NPU 扫描（docs/matrix/）
-ascend-titan-provenance --module ascend_titan.recipes.qwen3 --config qwen3_debugmodel_npu
+ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugmodel_npu
 # tyro：`activation-checkpoint:none` 之类的子命令必须放在所有 --flag 之后
 ```
 
@@ -57,10 +58,11 @@ ascend-titan-provenance --module ascend_titan.recipes.qwen3 --config qwen3_debug
 6. **baseline 最小化**（P12）：`npu_baseline` 只允许"不加就跑不起来"的增量，每条挂 issue ID，用特性探测（不是版本号）决定何时消失。
 7. **版本三元组一起升级，走带矩阵结果的 PR**（P5）。绝不随手改 `constraints/*.sha`。
 8. **单一事实来源**（P11）：版本只在 `constraints/`，问题状态只在 `STATUS.md`，其它文档只引用 ID。
-9. **不加投机性的兜底。** 与上游同一标准：只校验显式契约。
-10. **pip 安装永远带 `-c constraints/<track>.txt`**——否则 torch 被升级、torch_npu ABI 损坏。
-11. **验证先于断言**（P13）：任何 🟢 / "已修复" 附命令与输出，且在 NIGHTLY 上跑过。
-12. **改 `matrix.py` 的 `TRIAGE` 表或任何被 ruff 重排过的多行元组时，用行定位插入，不要用整行字符串 replace**。
+9. **基础依赖硬导入**（P14 / ADR-007）：`torch` / `torch_npu` / `torchtitan` 绝不写 `try: import`，不设 `_AVAILABLE` 降级开关——缺了就抛错。算子探测走 `kernels/_probe.require_op()`（缺算子 = 昇腾侧缺口，走硬规则 2）。只有真正可选的加速包（`cann_ops_nn`、Triton-Ascend）能用 `_probe.optional_module()` + WARNING 降级；诊断工具（doctor、`tests/repro/probe_*`）例外。
+10. **不加投机性的兜底。** 与上游同一标准：只校验显式契约。
+11. **pip 安装永远带 `-c constraints/<track>.txt`**——否则 torch 被升级、torch_npu ABI 损坏。
+12. **验证先于断言**（P13）：任何 🟢 / "已修复" 附命令与输出，且在 NIGHTLY 上跑过。
+13. **改 `matrix.py` 的 `TRIAGE` 表或任何被 ruff 重排过的多行元组时，用行定位插入，不要用整行字符串 replace**。
 
 ## 失败处理（经常用）
 

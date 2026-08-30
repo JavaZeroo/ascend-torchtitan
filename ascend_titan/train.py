@@ -10,7 +10,7 @@ def main() -> None:
 
     # A training entry without a device backend is a broken environment, not a degraded
     # one (ADR-004 covers kernel dependencies, not the backend): fail here, loudly.
-    ascend_titan.setup(require_npu=True)
+    ascend_titan.setup()
 
     # Imported only now, after setup(): torchtitan freezes device_type on import.
     from torchtitan.train import main as titan_main

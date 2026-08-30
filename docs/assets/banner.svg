@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="200" viewBox="0 0 1000 200" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="55%" stop-color="#12181f"/>
+      <stop offset="100%" stop-color="#1a1210"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ee4c2c"/>
+      <stop offset="100%" stop-color="#ff8a3d"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c8102e"/>
+      <stop offset="100%" stop-color="#ee4c2c"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1000" height="200" rx="14" fill="url(#bg)"/>
+  <rect width="1000" height="3" rx="1.5" fill="url(#accent)"/>
+
+  <!-- torch flame -->
+  <g transform="translate(64,58)">
+    <path d="M26 0c9 12 4 19-1 24-4 4-9 8-9 15 0 8 7 14 15 14s16-7 16-16c0-6-3-11-6-15 8 4 13 12 13 22 0 15-13 26-28 26S-2 59-2 44C-2 27 12 20 20 12c4-4 7-8 6-12z" fill="url(#chip)"/>
+  </g>
+
+  <!-- NPU die -->
+  <g transform="translate(880,60)" stroke="#ee4c2c" stroke-width="2.5" fill="none" opacity="0.9">
+    <rect x="6" y="6" width="58" height="58" rx="8"/>
+    <rect x="21" y="21" width="28" height="28" rx="4" fill="#ee4c2c" opacity="0.25"/>
+    <g stroke-linecap="round">
+      <path d="M22 6V-4M35 6V-4M48 6V-4M22 64v10M35 64v10M48 64v10"/>
+      <path d="M6 22H-4M6 35H-4M6 48H-4M64 22h10M64 35h10M64 48h10"/>
+    </g>
+  </g>
+
+  <text x="140" y="86" fill="#e6edf3" font-size="46" font-weight="700" letter-spacing="-0.5">ascend-<tspan fill="#ee4c2c">torchtitan</tspan></text>
+  <text x="142" y="118" fill="#8b949e" font-size="17">torchtitan 的昇腾 NPU 树外扩展 · out-of-tree Ascend NPU extension</text>
+
+  <g font-size="12.5">
+    <rect x="142" y="140" width="188" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="158" y="157" fill="#7ee787">nightly-first</text><text x="238" y="157" fill="#6e7681">· 零 shim 生效</text>
+    <rect x="342" y="140" width="196" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="358" y="157" fill="#79c0ff">extend</text><text x="404" y="157" fill="#6e7681">· 从不 fork torchtitan</text>
+    <rect x="550" y="140" width="228" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="566" y="157" fill="#ffa657">fix upstream</text><text x="652" y="157" fill="#6e7681">· 绝不做 workaround</text>
+  </g>
+</svg>

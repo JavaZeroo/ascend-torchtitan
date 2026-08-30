@@ -18,6 +18,7 @@
 |---|---|
 | `qwen3_debugmodel_npu` 单卡 10 步（seed 42，deterministic） | 🟢 **与 2.13 golden 逐位一致**（step 10 loss 5.10304，grad_norm 3.3061）；golden `tests/assets/losses/npu/qwen3_debugmodel_npu__torch2.15.0.dev20260812_npu2.15.0.txt` |
 | `qwen3_debugmodel_npu_fsdp2` ×2 | 🟢 逐位一致（step 10 loss 5.07792，grad_norm 3.3201） |
+| `qwen3_debugmodel_npu_fused` / `_fused_fsdp2`（RMSNorm + SwiGLU + rotary 三个融合算子） | 🟢 2026-08-30 补录 NIGHTLY golden，**同样与 2.13 golden 逐位一致**；四条 golden 曲线至此在 NIGHTLY 上全部齐备 |
 | `qwen3_debugmodel_npu_chunked_loss`（上游默认 ChunkedLossWrapper，TT-4） | 🟢 单卡 step 10 loss 5.10291；FSDP2×2 loss 5.07796（bf16 级差异）——TT-4 在 NIGHTLY 不复现，`npu_baseline` 不再展开 loss |
 | `flex_attention` eager（torch_npu master 自带 `patch_flexattention`） | 🟢 op 级前反向（`tests/repro/probe_npu_gaps.py`） |
 | 原版 torch_npu master 上的 stock 路径 | 🔴 NPU-1（stock varlen）、NPU-2（fake_backend）、NPU-3（复数索引）、NPU-6（uint64）、NPU-7（stock flex → inductor lowering）、NPU-8（先 `import spmd_types`）——**六项全部在 torch_npu / op-plugin 侧修复**（`patches/`），修复后的结果见下节 |
@@ -27,7 +28,7 @@
 |---|---|
 | `probe_npu_gaps.py`：NPU-1 / 2 / 3 / 6 | 全部 `[OK ]`；`_flash_attention_forward` PrivateUse1 内核已注册 |
 | **stock varlen**（qwen3 `qwen3_debugmodel_stock_varlen`，零 override） | 🟢 step 10 loss 5.10302 / grad_norm 3.3060 |
-| **stock llama3**（`ascend_titan.recipes.stock.llama3_debugmodel_stock_npu`：stock VarlenAttention + 复数缓存 ComplexRoPE + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
+| **stock llama3**（`ascend_titan.models.llama3.llama3_debugmodel_stock_npu`：stock VarlenAttention + 复数缓存 ComplexRoPE + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
 | `pp_1f1b`（矩阵，无 shim） | 🟢 |
 | `cp`、`fsdp+cp`、`deepseek_v3_fused_mla_swiglu`、stock flex 模型级 | 🔴 DEP-INDUCTOR：Triton-Ascend 未装（NPU-7 修复后 lowering 已通过） |
 | `--comm.mode=fake_backend`（NPU-2，最终 wheel） | 🟢 单卡模拟 8 卡干跑 `step: 1  loss: 7.66238` |

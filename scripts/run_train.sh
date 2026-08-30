@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Ascend counterpart of torchtitan/run_train.sh.
-#   NPU=8 MODULE=ascend_titan.recipes.qwen3 CONFIG=qwen3_debugmodel_npu ./scripts/run_train.sh [extra tyro args]
+#   NPU=8 MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_debugmodel_npu ./scripts/run_train.sh [extra tyro args]
 #   COMM_MODE=fake_backend NPU=8 ...   -> single device, fake process groups (no HCCL)
 set -euo pipefail
 NPU=${NPU:-8}
 export LOG_RANK=${LOG_RANK:-0}
-MODULE=${MODULE:-"ascend_titan.recipes.qwen3"}
+MODULE=${MODULE:-"ascend_titan.models.qwen3"}
 CONFIG=${CONFIG:-"qwen3_debugmodel_npu"}
 COMM_MODE=${COMM_MODE:-""}
 # debugmodel recipes reference upstream test assets by relative path

@@ -18,47 +18,52 @@ not registered and upstream eager runs (ADR-004).
 
 from __future__ import annotations
 
-import importlib
 import logging
 from dataclasses import dataclass
+
+import torch
+
+from ascend_titan.kernels._probe import optional_module
 
 logger = logging.getLogger(__name__)
 
 # ops-nn's torch extension is installed as ``cann_ops_nn`` (full build) or
 # ``cann_ops_nn_<vendor>`` (single-op build with TORCH_EXTENSION_OPS/VENDOR); both
 # register the same ``cann_ops_nn`` torch library namespace on import.
+#
+# Unlike torch_npu (a base dependency, P14), ops-nn is a genuinely optional
+# add-on: it needs its own run package plus a JIT build, and is not part of the
+# NIGHTLY baseline. It is therefore the one sanctioned "warn and degrade" path
+# (ADR-004), and it goes through the shared optional-dependency probe.
 _CANDIDATES = ("cann_ops_nn", "cann_ops_nn_ascend_titan", "cann_ops_nn_custom")
-_AVAILABLE = False
-_err: Exception | None = None
-for _mod in _CANDIDATES:
-    try:
-        importlib.import_module(_mod)
-        import torch
-
-        _AVAILABLE = hasattr(torch.ops, "cann_ops_nn") and hasattr(
-            torch.ops.cann_ops_nn, "situ_glu"
-        )
-        if _AVAILABLE:
-            break
-    except Exception as e:  # noqa: BLE001 - JIT builders raise many kinds of errors
-        _err = e
+_module, _err = optional_module(*_CANDIDATES)
+_AVAILABLE = (
+    _module is not None
+    and hasattr(torch.ops, "cann_ops_nn")
+    and hasattr(torch.ops.cann_ops_nn, "situ_glu")
+)
 if not _AVAILABLE:
     logger.warning(
         "[ascend_titan] ops-nn situ_glu unavailable (%s); KimiFeedForward stays on upstream eager",
         _err,
     )
 
+# kimi_k3 imports attn_gym's cute backend at module level, which needs the
+# CUDA-only `cutlass` package (TT-11, a third-party optional dependency -- not
+# torchtitan itself, which imports fine). Same ADR-004 class as ops-nn: the
+# kernel wrapper below still works; only the @override registration needs the
+# model node.
 _MODEL_AVAILABLE = False
 if _AVAILABLE:
-    try:
-        # kimi_k3 imports attn_gym's cute backend at module level, which needs the
-        # CUDA-only `cutlass` package (TT-11). The kernel wrapper below still works;
-        # only the @override registration needs the model node.
-        from torchtitan.models.kimi_k3.moe import KimiFeedForward
-
+    _moe, _moe_err = optional_module("torchtitan.models.kimi_k3.moe")
+    if _moe is None:
+        logger.warning(
+            "[ascend_titan] kimi_k3 not importable (%s, TT-11); situ_glu override skipped",
+            _moe_err,
+        )
+    else:
+        KimiFeedForward = _moe.KimiFeedForward
         _MODEL_AVAILABLE = True
-    except ImportError as e:
-        logger.warning("[ascend_titan] kimi_k3 not importable (%s); situ_glu override skipped", e)
 
 if _AVAILABLE:
     # ops-nn's python extension registers forward and backward as two separate ops
