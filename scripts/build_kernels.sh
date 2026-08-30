@@ -6,6 +6,12 @@
 # 环境变量：SOC（默认 ascend910b；A3 用 ascend910_93）、JOBS（默认 nproc）、SRC（默认 ../）
 # 注意：ops-nn 的代码生成用 flock 文件锁，在 NFS（local_lock=none）上会轮询超时（"[ES-GEN] Polling timeout"）。
 # 源码在 NFS 上时先拷到本地盘：SRC=/opt/build（rsync --exclude build --exclude build_out）。还需要 pip install build ninja。
+# torch 扩展是**首次调用算子时**才 JIT 编译的（约 40 秒）。如果那次调用被 Ctrl-C / kill 掉，
+# torch 会在 $TORCH_EXTENSIONS_DIR 留下 lock 文件，之后每次调用都会永久等锁——看起来像"编译很慢"。
+# 症状：进程占着 CPU 但永远不结束。处理：
+#   rm -f /root/.cache/torch_extensions/*/<op>/lock /root/.cache/torch_extensions/*.compile.lock
+# 或者换一个干净的 TORCH_EXTENSIONS_DIR 重跑。
+# ops-nn 的构建器还硬编码了 -std=c++17，torch>=2.9 的头文件要 C++20 —— 见 patches/ops-nn/。
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SRC=${SRC:-"$HERE/.."}
