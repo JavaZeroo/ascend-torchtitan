@@ -2,21 +2,21 @@
 
 [torchtitan](https://github.com/pytorch/torchtitan) 的昇腾 NPU 树外扩展。我们**扩展，不 fork**：torchtitan 是按 commit SHA 固定的已安装依赖。（`AGENTS.md` 是本文件的符号链接。）
 
-先读：`docs/PRINCIPLES.md`（P0–P14，评审按编号引用）、`docs/adr/ADR-006-nightly-first.md`（基线定义）、`docs/glossary.md`、`docs/roadmap.md`、`docs/baseline.md`（已验证的版本元组）、`docs/design/2026-08-30-architecture-review.md`（当前架构评审与行动清单）。
+先读：`docs/PRINCIPLES.md`（P0–P14，评审按编号引用）、`docs/adr/ADR-006-nightly-first.md`（基线定义）、`docs/glossary.md`、`docs/roadmap.md`、`docs/baseline.md`（已验证的版本元组）。
 
 ## 基线（P8）
 
 **NIGHTLY** = 三个 main 对齐：torch nightly（日期 = torch_npu master `requirements_<line>.txt` 的 pin）+ torch_npu master **源码构建**（`constraints/torch_npu.sha`）+ torchtitan main（`constraints/torchtitan.sha`）。这是唯一门禁 track；`constraints/nightly.txt` 是默认约束。
-只在正式版 torch 上出现、nightly 上不存在的问题**不是问题**：不写 shim / 补丁 / issue。`constraints/npu.txt`（RELEASE：torch_npu 最新发布版）只做信息性报告；`npu-stable.txt` 已废弃。
+只在正式版 torch 上出现、nightly 上不存在的问题**不是问题**：不写 shim / 补丁 / issue，也不为它保留兼容代码。
 
 ## 布局
 
 | 路径 | 层 | 内容 |
 |---|---|---|
 | `ascend_titan/_bootstrap.py`、`train.py` | 入口 | `setup()` = 唯一的副作用点；必须先于任何 `import torchtitan` |
-| `ascend_titan/compat/` | L0 | shim 注册表 + `shims/`（受治理的 monkeypatch）。NIGHTLY 上两条现存 shim 都自动 no-op；目标数量 0 |
+| `ascend_titan/compat/` | L0 | shim 注册表 + `shims/`（受治理的 monkeypatch）。现存 2 个文件 3 条 shim，都实测承重；目标数量 0 |
 | `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention = custom_op、rope、rms_norm、swiglu、situ_glu）；`_probe.py` = 依赖探测（`require_op` 硬 / `optional_module` 可选，P14） |
-| `ascend_titan/parallel/`、`graph/` | L2 | 并行策略、torchair（M4/M5，目前空） |
+| `ascend_titan/graph/` | L2 | torchair 图模式 |
 | `ascend_titan/models/<model>/` | L3 | **内容**：每个模型一个包 = `recipes.py`（支持的入口）+ `probes.py`（只做测量）+ `README.md`（必需，使用指南）；`registry.py` 是模型状态表（纯数据）；`_template/` 是新模型骨架 |
 | `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`transforms.npu_minimal`（只含"不加就跑不起来"的增量，挂 issue + 特性探测消失条件）与 `transforms.npu_fused`（性能 override，opt-in，P12）、`matrix.py` 动态 recipe（`__stock` / `__fused` 后缀） |
 | `ascend_titan/tools/` | L4 | `doctor`、`matrix/`（`triage`＋`triage.toml` 数据表、`cases`、`runner`、`report`、`cli`）、`provenance` |
@@ -76,10 +76,10 @@ ascend-titan-provenance --module ascend_titan.models.qwen3 --config qwen3_debugm
 ```
 
 ## 数值验证
-与上游同一标准：非计算类改动在 `--debug.seed=42 --debug.deterministic` 下 loss 必须**完全一致**（NIGHTLY 与 2.13 golden 逐位一致，已验证）；计算类改动（算子）需要对上游 eager 路径的对齐测试加 `torch.library.opcheck`。绝不使用 `--debug.deterministic_warn_only`。
+与上游同一标准：非计算类改动在 `--debug.seed=42 --debug.deterministic` 下 loss 必须**完全一致**（NIGHTLY 已验证）；计算类改动（算子）需要对上游 eager 路径的对齐测试加 `torch.library.opcheck`。绝不使用 `--debug.deterministic_warn_only`。
 
 ## 开发容器
-NPU 主机上的 `ascend-titan-dev`（`ssh root@localhost` → `docker exec`；镜像 cann:9.1.0-910b-ubuntu22.04-py3.12-devel）：`/opt/venv-nightly` = **NIGHTLY**（torch 2.15.0.dev20260812 + torch_npu master 源码构建）；`/opt/venv213` = RELEASE（2.13.0 / 2.13.0rc1）；系统 python = 2.12（废弃）。`/data` 是共享 NFS，仓库在容器内路径相同；**构建一律在本地盘 `/opt/build/`**（NFS 上 flock/构建不可靠）。8 张卡通常与其它作业共享——用 `ASCEND_RT_VISIBLE_DEVICES` 选卡；同一张卡上不能并发两个 HCCL 作业（EI0020）。
+NPU 主机上的 `ascend-titan-dev`（`ssh root@localhost` → `docker exec`；镜像 cann:9.1.0-910b-ubuntu22.04-py3.12-devel）：`/opt/venv-nightly` = **NIGHTLY**（torch 2.15.0.dev20260812 + torch_npu master 源码构建）。`/data` 是共享 NFS，仓库在容器内路径相同；**构建一律在本地盘 `/opt/build/`**（NFS 上 flock/构建不可靠）。8 张卡通常与其它作业共享——用 `ASCEND_RT_VISIBLE_DEVICES` 选卡；同一张卡上不能并发两个 HCCL 作业（EI0020）。
 
 ## Skill
 `.claude/skills/`：`compat-probe`、`shim-authoring`、`override-authoring`、`capability-matrix`、`upstream-sync`。`.claude/rules/` 里的规则按路径生效。提 torch_npu issue / PR 用全局 skill `gitcode-pr-rfc-pipeline`（需要 `GITCODE_TOKEN`，账号 `jimmyisme1`，fork `jimmyisme1/pytorch`）。

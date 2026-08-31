@@ -1,6 +1,6 @@
 """Performance baseline: run recipes, record throughput *with* provenance.
 
-    python -m ascend_titan.tools.bench --cards 0 --out docs/perf
+    python -m ascend_titan.tools.bench --cards 0 --out docs/bench
 
 P7 says a benchmark without a provenance table is not accepted: a number that
 came from an accidental eager fallback looks the same as a number from the fused

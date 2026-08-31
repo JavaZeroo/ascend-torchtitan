@@ -30,14 +30,6 @@ def test_parse_cards():
     assert parse_cards("0-3,6") == [0, 1, 2, 3, 6]
 
 
-def _expected_spmd_backend() -> str:
-    """npu_minimal only forces partial_dtensor on a torch whose FSDP2 cannot read
-    spmd_types annotations (torch <= 2.13); nightly keeps the upstream default."""
-    from ascend_titan.recipes.transforms import _torch_fsdp_reads_spmd_types
-
-    return "spmd_types" if _torch_fsdp_reads_spmd_types() else "partial_dtensor"
-
-
 @pytest.mark.titan
 def test_npu_minimal_transform_on_upstream_recipes():
     from torchtitan.components.loss import ChunkedLossWrapper
@@ -69,7 +61,7 @@ def test_npu_minimal_transform_on_upstream_recipes():
     # cell has to mean "this upstream feature fails on NPU", never "our drop-in
     # RMSNorm broke it".
     assert "ascend_titan.kernels.rms_norm.npu_rms_norm" not in cfg.override.imports
-    assert cfg.parallelism.spmd_backend == _expected_spmd_backend()
+    assert cfg.parallelism.spmd_backend == "spmd_types"
     # TT-4 is gone on the NIGHTLY track; the upstream default loss wrapper stays in place.
     assert isinstance(cfg.loss, ChunkedLossWrapper.Config)
     # idempotent
@@ -84,7 +76,7 @@ def test_matrix_module_resolves_upstream_recipe():
 
     fn = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel")
     cfg = fn()
-    assert cfg.parallelism.spmd_backend == _expected_spmd_backend()
+    assert cfg.parallelism.spmd_backend == "spmd_types"
     assert "ascend_titan.kernels.rms_norm.npu_rms_norm" not in cfg.override.imports
     stock = getattr(m, "torchtitan.models.llama3.config_registry__llama3_debugmodel__stock")()
     assert stock.override.imports == []

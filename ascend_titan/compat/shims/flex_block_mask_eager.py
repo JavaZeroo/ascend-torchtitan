@@ -1,52 +1,24 @@
-"""Build FlexAttention BlockMasks eagerly when inductor has no backend here.
+"""torchtitan 无条件编译 mask 构建，昇腾上没有 inductor 后端时会直接崩。
 
-torchtitan compiles the flex path at import time, in three places, with no
-config switch and no ``Configurable`` node to override (P0, P6)::
+torchtitan 在两处 import 时就把 ``create_block_mask`` 编译掉，都不看
+``config.compile.enable``::
 
     common/attention.py:      _compiled_create_block_mask = compile(create_block_mask)
-    common/attention.py:      FlexAttention._compiled_flex_attn = compile(flex_attention)
     common/vision_encoder.py: compiled_create_block_mask  = compile(create_block_mask)
 
-None of them looks at ``config.compile.enable``: the mask builders are reached by
-every model whose inner attention is ``FlexAttention`` and by every vision tower,
-and ``FlexAttention.forward`` always calls the compiled attention. On Ascend,
-inductor needs Triton-Ascend
-(DEP-INDUCTOR); without it the compile raises ``RuntimeError: 0 active
-drivers`` before a single step runs -- even though ``create_block_mask`` itself
-works perfectly in eager, and torch_npu master makes eager ``flex_attention``
-itself work on NPU (fwd + bwd measured, tests/repro/probe_npu_gaps.py).
+它们被每个 inner attention 是 ``FlexAttention`` 的模型和每个视觉塔用到。昇腾上
+inductor 需要 Triton-Ascend（DEP-INDUCTOR），没装时编译在第一步之前就抛
+``RuntimeError: 0 active drivers``——而 ``create_block_mask`` 本身 eager 跑得好好的。
+实测：关掉这两条 shim，kimi_k3 立刻死在这个错误上。
 
-The two mask builders have a genuine uncompiled twin: ``create_block_mask``
-called directly builds the same BlockMask without entering inductor. Those two
-shims work.
+所以这两条 shim 换上上游自己的未编译函数——同一个函数、同样的结果，只是不进 inductor。
+装上 Triton-Ascend 后它们自动让位。
 
-The third one is subtler. ``torch.nn.attention.flex_attention`` has **no**
-uncompiled path::
+``FlexAttention._compiled_flex_attn`` **不需要**同等处理：torchtitan 默认的
+``torch.compile(flex_attention)`` 在昇腾上是通的（实测 kimi_k3 rc=0）。唯一的例外是
+确定性模式，那条由 ``flex_eager_when_deterministic`` 处理。
 
-    with setup_compilation_env() as backend:
-        flex_fn = torch.compile(_flex_attention_hop_wrapper, backend=backend,
-                                fullgraph=True)
-
-Whenever it is not already under dynamo it compiles itself, so substituting it
-for upstream's pre-compiled callable only moves the ``torch.compile`` inside
-torch. That turns out to matter anyway: compiling just the HOP wrapper works on
-910B2 -- document masks included, forward / LSE / backward all measured -- while
-compiling the whole ``flex_attention`` function does not. See
-``tests/repro/probe_flex_deterministic.py``.
-
-So this shim does buy something, but it is not what the first version claimed
-("910B2 cannot lower a tensor-reading mask_mod" was wrong -- see
-docs/capability-matrix.md). The one place the whole function still gets compiled
-is ``set_determinism``, which re-assigns the attribute after we set it; that is
-handled separately by ``flex_eager_when_deterministic``.
-
-Once Triton-Ascend is installed the shims step aside on their own.
-
-Feature-gated, not version-gated (P12): as soon as triton reports an active
-backend on this machine, both shims return the original compiled callables and
-upstream's behaviour is back, with no code change here.
-
-Attribution: TT (unconditional ``torch.compile``, no opt-out) + DEP-INDUCTOR.
+归因：TT（无条件 ``torch.compile``，没有开关）+ DEP-INDUCTOR。
 """
 
 import logging
@@ -56,16 +28,13 @@ from ascend_titan.compat import shim
 logger = logging.getLogger(__name__)
 
 _REASON = (
-    "torchtitan compiles create_block_mask unconditionally; on NPU inductor has "
-    "no backend without Triton-Ascend (DEP-INDUCTOR), and the eager builder "
-    "produces the same BlockMask"
+    "torchtitan 无条件编译 create_block_mask；昇腾上没有 Triton-Ascend 就没有 "
+    "inductor 后端（DEP-INDUCTOR），而 eager 的构建器给出同样的 BlockMask"
 )
 _UPSTREAM = "draft:docs/issues/torchtitan.md#compiled-block-mask"
 _WHY_NOT_WRAP = (
-    "the target *is* the compiled callable; wrapping it would still enter "
-    "inductor. For the two mask builders the replacement is upstream's own "
-    "uncompiled function; for flex_attention itself there is no such function "
-    "(see the module docstring)."
+    "包装没有意义：目标本身就是那个编译后的 callable，包一层照样进 inductor。"
+    "替换物是上游自己的未编译函数。"
 )
 
 
@@ -106,25 +75,6 @@ def _eager_or_original(original, where: str):
 )
 def flex_block_mask_eager_lm(original):
     return _eager_or_original(original, "language model")
-
-
-@shim(
-    target="torchtitan.models.common.attention:FlexAttention._compiled_flex_attn",
-    reason="FlexAttention.forward always calls a torch.compile'd flex_attention, "
-    "regardless of config.compile.enable. NOTE: this shim moves the compile "
-    "boundary but cannot avoid inductor -- torch's flex_attention compiles "
-    "itself (fullgraph=True) when not already under dynamo. Kept because the "
-    "smaller graph fails later and more legibly; see the module docstring",
-    upstream=_UPSTREAM,
-    kind="replace",
-    why_not_wrap=_WHY_NOT_WRAP,
-)
-def flex_attn_eager(original):
-    if _inductor_has_a_backend():
-        return original
-    from torch.nn.attention.flex_attention import flex_attention
-
-    return flex_attention
 
 
 @shim(

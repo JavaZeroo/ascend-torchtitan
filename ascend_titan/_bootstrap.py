@@ -1,6 +1,6 @@
 """Bootstrap: the single place where ascend-torchtitan has side effects.
 
-Ordering constraint (see docs/design, finding F4): ``torchtitan/tools/utils.py``
+Ordering constraint: ``torchtitan/tools/utils.py``
 freezes ``device_type`` at *module import time* via
 ``torch._utils._get_available_device_type()``, which only reports ``"npu"`` if
 ``torch_npu`` has already registered itself as the privateuse1 backend. Hence

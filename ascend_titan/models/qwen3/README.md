@@ -49,14 +49,7 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 | # | 增量 | 为什么 | 什么时候能删 |
 |---|---|---|---|
 | 1 | `attn_backend="varlen"` + `kernels.attention` override | 上游只剩 `flex` / `varlen`；模型级 flex 走 inductor（DEP-INDUCTOR），stock varlen 需要 `aten::_flash_attention_forward`（NPU-1） | 装上 Triton-Ascend 后 flex 可评估；NPU-1 合入后 stock varlen 也能跑（见 `probes.py`），但融合算子仍是性能路径 |
-| 2 | `spmd_backend="partial_dtensor"` | 正式版 torch 上 `spmd_types` + FSDP2 拿到的是普通张量（TT-5）。NIGHTLY 上上游默认已可用（llama3 stock 就在用），这里保留只为让 golden 跨 track 可比 | 弃用 RELEASE track 时 |
 | 3 | `checkpoint.enable = False` | 冒烟不做 DCP I/O，DCP 是独立的矩阵格 | 有专门的 checkpoint recipe 后 |
-
-> **loss 用上游默认的 `ChunkedLossWrapper`**（2026-08-30 起）。此前有一条 DELTA 4 把它换成
-> 普通 `CrossEntropyLoss`，原因是正式版 torch + NPU 上 chunked loss 的 backward 撞
-> "data is not allocated yet"（TT-4）——那是 torch 版本差，NIGHTLY 上不存在。按 P8/P12
-> 这条增量已删除：参考路径回到上游默认，chunked loss 是被支持并有 golden 门禁的。
-> 需要对比非 chunked 路径时用探针 `qwen3_debugmodel_npu_ce_loss`。
 
 ## 4. 探针（`probes.py`，别用来训练）
 
@@ -138,5 +131,4 @@ HF safetensors，再用 `--checkpoint.initial_load_in_hf` 读回来跑一步，�
 
 - **14B**：在 8×910B2 上的显存配平（`FullAC` + 1×4096 微批仍 OOM）。PP 的证据已经取在
   8B 上，这条只是想把更大的尺寸也跑起来。
-- **DELTA 2** 随 RELEASE track 退役一并删除（NIGHTLY 上上游默认的 `spmd_types` 已可用）。
 - 1.7B / 32B / 30B-A3B 等其它真实尺寸（⚪）。

@@ -1,89 +1,61 @@
 # 路线图
 
-每个里程碑只引入它需要的机制。目录从第一天就建好（带 README），后续工作有处可放；代码不预建。
+现状看 `ascend_titan/models/registry.py`（每个模型的 R1–R8）与 `docs/capability-matrix.md`
+（每个特性的三态与归因）。这里只写**接下来做什么**，按门槛分期——每一期的解锁条件是进入
+下一期的前提，顺序不能调换。
 
-| M | 目标 | 新引入的机制 | 验收 |
-|---|---|---|---|
-| **M0** ✅ 2026-08-29 | 兼容性探测 | `tools/doctor.py`、`scripts/probe_compat.sh`、`constraints/` | 四方版本元组写入 `constraints/`；最远可 import 的 torchtitan SHA 已知；torch_npu 自动加载有结论；缺失 API 提 issue。**go/no-go 在此决定。** |
-| **M1** ✅ 2026-08-29 | Qwen3 跑通 | `setup()`、shim 注册表、`models/qwen3/recipes.py`、`kernels/attention.py` | `qwen3_debugmodel_npu` 10 步：① 单卡 eager ② `--comm.mode=fake_backend` ③ FSDP2×2。NPU golden 冻结。**如预测发生：** flex 与 varlen 在 NPU 上都失败，inner-attention override 因此提前到 M1；fake_backend 为 🔴 NPU-2，等 torch_npu 注册 fake 后端。 |
-| **M2** ✅ 2026-08-29 | 能力矩阵 | 上游 `tests/integration_tests` 用例在 NPU 上扫描（`tools/matrix.py`）、矩阵三态记录、nightly CI 两条腿（pinned + 最远 SHA）、归因自动初判 | M2 各轴（并行 × 注意力 × AC × compile）无 ⚪；每个 🔴 有归因。**结果：** NEXT 24 🟢 / STABLE 18 🟢，红格归入 6 个根因（TT-5 spmd_types 需 nightly FSDP2、OURS-8 compile、DEP、TT-KERNEL/TT-CUDA、OURS-2、OURS-9）；新增 RoPE override 与 PP shim；矩阵扫描工具进入 nightly。 |
-| **M3** ✅ 2026-08-30 | override 机制加固 | provenance 表（`ascend-titan-provenance`，并接入矩阵报告 `--provenance`）、注意力 custom_op + `register_fake`（compile 可追踪）、`opcheck`（autograd 检查在 NPU 上 NYI，TORCH-7）、第二个 override RMSNorm、注意力的 LSE 尾部（CP / attention sinks）、SituGLU（ops-nn） | 每次运行日志带 provenance；两个 override 带对齐测试。**结果：** 均已落地；`npu_baseline` 拆成 `npu_minimal` + `npu_fused`（P12）。 |
-| **M4** ✅ 2026-08-30 | Kimi-K3 + 融合算子 | `kernels/kda.py`（KDA + causal conv1d override）、`models/kimi_k3/`、`tools/bench.py`（性能基线附 provenance）、`tools/bisect.py`（上游回归自动二分） | kimi_k3 recipe 带 KDA / conv1d / SituGLU，性能基线附 provenance。**结果：** `kimi_k3_debugmodel_npu` 单卡 10 步 loss 4.10312（多模态 + KDA + MoE，视觉塔保留 flex、LM 走昇腾融合 varlen）。TT-11 证伪：`cutlass` 就是 `nvidia-cutlass-dsl`，有 aarch64 wheel。attn_res 的昇腾算子缺反向，只能推理用。性能极低（tps 47），等 Triton-Ascend 与 KDA 融合算子。 |
-| **M5** ✅ 2026-08-30（FP8 override 除外，见右） | 图模式 / 低精度 / 多模态 | `graph/`（torchair）、多模态轴、低精度轴 | 矩阵轴扩展；不新增机制类型。**结果：** 三条轴都进了能力矩阵并有实测：① 图模式 —— torchair `components=["loss"]` 🟢（qwen3 10 步 loss 5.11634），`["model"]` 🔴 OURS-13（自定义算子无 GE converter）；② 多模态 —— kimi_k3 debugmodel 🟢（视觉塔 + KDA + MoE）；③ 低精度 —— float8 张量分配 🟢（NPU-6 扩展），但转换 `aclnnInplaceCopy 561103`、`_scaled_mm` 明确要求 Ascend950，**910B2 的 CANN 对 float8 只支持按字节存储**。**因此 post-converter 树上的 FP8 override 没有写**：这台硬件上无从验证，按 P13 与"不加投机性代码"，等 Ascend950 / A3 再做。 |
+## 一 · 把线性注意力做实
 
-有意推迟、等有数据再定的决策：替换型 shim 的源码指纹（只在真出现替换型 shim 时做）、`AscendTrainer` 子类（尚无必要场景）、vendor 无关中间层（不做）。
+解锁条件：`fla-npu` 装上并通过对拍。
 
-## 2026-08-31：从"能跑"到"能交付"
+- **接入 `flash-linear-attention-npu`**（`../flash-linear-attention-npu`，AscendC 实现，
+  `fla/ops/ascendc/` 下有 `gdn` 与 `kda`，尚未安装）。它一次解两件事：Qwen3.5 的 R5——GDN
+  现在是纯 torch 的 chunk 递推，245 tps vs Qwen3 的 10,186 tps；以及给我们的实现一个
+  **独立于 attn_gym 的第二实现**用于互证。入口 `build.sh --soc`（910B2 选 A2）与
+  `gdn-verify.sh`。装第三方源码包记得带 `-c constraints/nightly.txt`。
+- **补齐 Qwen3.5 的 R2 / R4 / R6**。TP / PP / EP 未测；DCP 续训要先有一个冻结视觉塔的
+  机制（纯文本 recipe 让视觉塔没有优化器状态，上游只有 LoRA 自己做冻结）；R6 被 R5 卡住
+  （一步 67 秒，500 步要 9 小时）。后两条依赖上一件事先落地。
 
-`docs/model-release-criteria.md` 定义了 R1–R8，`registry.py` 的 🟢 从此只给 release 级；
-`tools/release_check.py` 把 R1 / R2 / R4 变成一条命令。今晚拿到的东西：
+## 二 · 把取证成本压下来
 
-**qwen3（参考模型）**
-- R1 真实形态：Qwen3-0.6B + 真实 HF tokenizer + 真实 C4 + 4096 上下文。
-- R2：单卡 / FSDP2×8 / FSDP2×4+TP2 / PP2×FSDP2-4 全绿。PP 的证据取在 **8B**：0.6B–4B（连
-  debugmodel）都 tie 了 embedding，上游禁止与 PP 并存；14B 在 8×910B2 上装不下（`FullAC` +
-  1×4096 微批仍 OOM，每卡 54.81 GiB 已分配）。8B 20 步 rc=0，47.72 GiB，tps 1152。
-  顺带修掉一个会误判的坑：PP 下只有最后一级算 loss，工具却在记录 rank 0（打出 `-4.00000`
-  占位符）——`release_check` / `bench` 现在记录最后一个 rank。
-- R4：DCP save/续训逐位一致（第 5 步存 → 第 10 步 loss `9.42568`）。HF 导出/导入是 R4 的
-  第三项，`release_check` 已经带上（`last_save_in_hf` 需要同时 `last_save_model_only`）。
-- R6：500 步 rc=0，loss 12.12 → 6.28，显存从第 51 步起恒定 19.08 GiB，无 NaN。
+解锁条件：nightly CI 跑在真实 runner 上。
 
-**qwen3.5**
-- "阻塞在 `fla`" 这条结论是错的：`fla-core` 有 aarch64 wheel，import 正常，挡住的只是它的
-  Triton 内核。`kernels/gdn.py` 的 override 已经接管。
-- 0.8B 语言侧真实尺寸可跑。视觉侧 🔴：`common/vision_encoder.py` 的 block-diagonal
-  document mask 读张量，撞 910B2 的 indirect-memory 限制（与 CP / 模型级 flex 同根因）。
-- GDN 的 chunk 递推不再走 attn_gym 的 reference：它的 chunk 内求逆是 63 次带整块 `clone()`
-  的前代回代，0.8B 上一步十分钟跑不完。换成闭式（幂零矩阵的 Neumann 级数倍增）+ 闭式反向
-  （`grad_A = Xᵀ g Xᵀ`，反向不再经过那条幂次链），`tests/unit/test_kernel_gdn.py` +
-  `tests/npu/test_kernel_gdn.py` 对 attn_gym 前反向、以及对 fp64 真值钉住。
-- **从零训练第 4–13 步发散 —— 已定位并修复（08-31 上午）**：根因是我们那个 chunk 内求逆用了
-  Neumann 级数倍增。和是有界的，中间的 `A^32` 不是，在训练几步后学到的门控值上溢出 fp32。
-  改成分块前代回代后 20 步 rc=0，loss 12.85958 → 8.30913。
-  定位靠的是"同一批输入同时喂我们和 attn_gym reference"——我们非有限、它有限，
-  再逐行 diff 证明两者数学上只差这一处。此前依次排除过学习率、warmup、优化器实现、
-  参数初始化、卡数，那些都只是把发散往后推。
+- **真实 runner 上的 nightly**。矩阵扫描与 `release_check` 目前都是手动触发。自动化之后
+  才能在 torch_npu 重建导致回归时当天发现。
+- **找到有效的廉价代理**。debugmodel golden 抓不到真实尺寸的数值问题——0.8B 发散时它全绿，
+  而修掉那个发散的改写让它逐位不变。需要介于两者之间的东西：固定输入下的逐层激活范数快照，
+  或算子级的极端输入压测（已有雏形）。
+- **对上游 eager 的对拍覆盖到每个 override**。防的是上游改语义而不改名字这种静默漂移。
+  改名字会在 import 时炸，改语义不会。
 
-**两条被推翻的结论（记下来免得再犯）**
-- ~~kimi_k3 的 🟢 不再复现~~ **这条判断本身是错的（当天晚些时候查清）**：它只在
-  `--debug.deterministic` 下失败，而 `check_golden.sh` 正好加了这个开关。
-  根因是 torchtitan 的 `set_determinism` 在非 ROCm 分支上重新编译 `_compiled_flex_attn`
-  并覆盖我们的 shim；上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支。
-  `shims/flex_eager_when_deterministic.py` 补上后，kimi_k3 与 qwen3.5 多模态的确定性 golden
-  都录上了（4.56418 / 3.87925）。
-  连带作废的还有"910B2 上任何读张量的 flex mask_mod 都编不出来"——直接调用 `flex_attention`
-  时前向、LSE、反向全通过；只有把整个函数包进 `torch.compile` 才会踩到。
-  由此推出的"CP 在 910B2 上不可能"也需要重测。
-- "chunk 128/256 会 NaN 所以必须用 64" 错了两次：第一次写成 chunk 尺寸的问题，
-  第二次写成训练配置的问题。真相是求逆的写法。chunk 留在 64 另有理由（转移矩阵的条件数，
-  实测 5.7e3 / 5.7e6 / 5.7e15），与那个 NaN 无关。
+## 三 · 扩模型覆盖
 
-**两个会让人白查一天的坑**（都已写进工具和文档）
-- `lr_scheduler.total_steps` 缺省回落到 `training.steps`，`warmup_steps` 被 clamp 到它：
-  短跑与长跑的**同一步**学习率不同。checkpoint 续训对比一度因此看起来是坏的。
-- `checkpoint.folder` 相对 dump folder 解析，三个运行必须用 `--dump_folder` 分开，
-  否则续训会加载自己上次写的 checkpoint。
+解锁条件：前两期就位，单个模型的验证成本可控。
 
-## 2026-08-30：M3 / M4 收尾，M5 进行中
+- **从 4 个专属 recipe 扩到上游主力集**。DeepSeek-V3、GPT-OSS、Kimi K2.7 目前只有矩阵覆盖。
+  加 recipe 本身是 trivial 的，成本全在取证——必须等第二期把成本压下来，否则只是把一堆 ⚪
+  变成另一堆 ⚪。
+- **Qwen3 的其它尺寸**。1.7B / 14B / 32B / 30B-A3B。14B 在 8×910B2 上已确认装不下
+  （`FullAC` + 1×4096 微批仍 OOM），更大的尺寸要先解决显存配平。
+- **MoE / EP 的深度覆盖**。矩阵里 `fsdp+ep` 已绿，但没有一个 MoE 模型走完 R1–R8。
 
-已完成
-- provenance 接入矩阵报告（`--provenance`）与性能基线（`tools/bench.py`）。
-- KDA / causal_conv1d override（`kernels/kda.py`）——不需要 fla-npu 也能跑：走 attn_gym 自己的 reference 实现。
-- ops-nn 的 python 扩展已装进 NIGHTLY venv（构建器硬编码 `-std=c++17`，torch 2.15 要 C++20，已本地修复，见下）。
-- 图模式（torchair）与多模态轴。
-- 上游回归自动二分：`python -m ascend_titan.tools.bisect --config <cfg> --good <sha> --bad origin/main`（在 scratch clone 上做，绝不动 `../torchtitan`）。
+## 四 · 硬件相关
 
-遗留问题处理（2026-08-30 晚）
-- ~~**OURS-10（gpt_oss + TP）**~~ **已关闭**：8 卡真跑 `tp=2 ep=4 dp_shard=4`，10 步 loss 8.26175 → 3.95126。原观测在正式版 torch 栈上。
-- ~~**Triton-Ascend 装到 NIGHTLY**~~ **已解决**：triton-ascend 3.2.2（自带 triton 3.2.0）与 torch 2.15 nightly + torch_npu master 共存可行，inductor 在 910B2 上能编前反向内核。环境 `/opt/venv-triton`，装法见 `constraints/npu-triton.txt`。
-- **NPU-9（新）**：`NPUCombinedScheduling` 未构造父类子调度器 → 编译 flex 抛 AttributeError。已修复 + UT + [issue #4447](https://gitcode.com/Ascend/pytorch/issues/4447) / [PR !45534](https://gitcode.com/Ascend/pytorch/merge_requests/45534)，修复后编译版 flex（causal mask）前反向通过。
-- **CP 与模型级 flex：910B2 上不可能**（新结论，归因硬件）。document mask 里的 `aten.index.Tensor` 需要 inductor 的 indirect-memory 路径，而该配置只在 `is_ascend950` 上启用；910B2 恒为 `None`。上游又强制 CP 必须配 flex。详见能力矩阵。`parallel/` 保持空目录。
-- **OURS-13**：自定义算子没有 GE converter，整模型进不了 torchair 图。仍待做。
-- **ops-nn `-std=c++17`**：远端是 `gitcode.com/cann/ops-nn`，不在授权范围（P10 只允许 `gitcode.com/ascend/*`），因此只本地修复 + 存 `patches/ops-nn/`，不提 issue。
-- **attn_res 融合算子**：ops-transformer 的 `block_attn_res_update` 只有前向，训练接不进来。
+- **上下文并行重测**。此前判定"910B2 上不可能"的前提（flex 编不出来）已被推翻，需要按实测
+  重走一遍。NIGHTLY 扫描里 CP 的 12 个红格归因是 `CANN`，前提没了不等于它就能跑。
+- **FP8**。910B2 上张量能分配，但所有转换报 `aclnnInplaceCopy 561103`、`_scaled_mm` 明确
+  要求 Ascend950。按"不加投机性代码"，post-converter 树上的 FP8 override 至今没写——没有
+  硬件就无从验证。
+- **OURS-13**：自定义算子缺 GE converter，整模型进不了 torchair 图。
 
-## 2026-08-30：基线切换（ADR-006）
-- 基线改为 NIGHTLY（torch nightly + torch_npu master 源码构建 + torchtitan main）；两条 shim、三个 torchtitan 补丁、14 个 CP 红格被证实为版本差。
-- 六个昇腾侧问题在 torch_npu / op-plugin 修复并带 UT（`patches/`），按 P9 提 gitcode PR；M3 的后续项（Triton-Ascend、kimi_k3）不变。
-- 行动清单见 `docs/design/2026-08-30-architecture-review.md` §8。
+## 贯穿始终
+
+`kernels/` 应该越来越薄。今天它是仓库里代码量最大的部分，但每一个昇腾侧融合算子成熟，
+就应该有一段自研数值代码退化成适配器。如果这一层还在长大，说明昇腾的算子生态没有跟上——
+那是这个项目真正的长期风险。
+
+## 明确推迟的决策
+
+替换型 shim 的源码指纹（只在真出现替换型 shim 时做）、`AscendTrainer` 子类（尚无必要场景）、
+vendor 无关中间层（不做）。

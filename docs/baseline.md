@@ -7,10 +7,8 @@
 | track | torch | torch_npu | torchtitan | 文件 | 状态 |
 |---|---|---|---|---|---|
 | **NIGHTLY**（默认、唯一门禁） | 2.15.0.dev20260812+cpu（torch_npu master `requirements_2.15.txt` 的 pin） | master `15514cc70` 源码构建（op-plugin `2b02a5aa0`），`ci/build.sh --python=3.12 --torch=2.15.0 --disable_torchair`，256 核 gcc 11.4 **8 分 28 秒** | `13da2d77c` | `constraints/nightly.txt` + `torch_npu.sha` + `torchtitan.sha` | 🟢 |
-| RELEASE（信息性） | 2.13.0（+cpu wheel） | 2.13.0rc1（PyPI） | `13da2d77c` | `constraints/npu.txt` | 🟢（需 2 条 shim） |
-| ~~STABLE~~ | 2.12.0 | 2.12.0 | `13da2d77c` | `constraints/npu-stable.txt` | 废弃 |
 
-为什么是 nightly：torchtitan main 与 torch_npu master 都面向 torch nightly；正式版基线造出的 2 条 shim、5 个 torchtitan 补丁中的 3 个、14 个 CP 红格全是版本差（`docs/design/2026-08-30-architecture-review.md` §2）。
+为什么是 nightly：torchtitan main 与 torch_npu master 都面向 torch nightly。正式版 torch 是唯一被支持之外的东西——不为它写 shim、不为它保留兼容代码。
 
 ## NIGHTLY 实测（2026-08-30，全部 `ASCEND_TITAN_SKIP_SHIMS=1`，即**不加任何 shim**）
 
@@ -50,7 +48,13 @@ recipe 定义变了，旧 golden 随之失效，四条曲线在 NIGHTLY 上重�
 | `--comm.mode=fake_backend`（NPU-2，最终 wheel） | 🟢 单卡模拟 8 卡干跑 `step: 1  loss: 7.66238` |
 
 ## 生效中的 shim
-NIGHTLY 上 **0**：`dist_set_timeout`（polyfill）与 `pp_step_presplit_*`（wrap）在 torch 2.15 上探测到原生实现后自动 no-op；文件保留到 RELEASE track 退役。
+3 条，都实测承重（关掉就炸）：
+
+- `flex_block_mask_eager_lm` / `_vision` —— torchtitan 无条件编译 `create_block_mask`，
+  昇腾没有 inductor 后端时抛 `0 active drivers`；换成上游自己的未编译函数。
+  装上 Triton-Ascend 后自动让位。
+- `flex_eager_when_deterministic` —— `set_determinism` 在非 ROCm 分支上重新编译
+  `_compiled_flex_attn`，这条路在昇腾上不通；上游对 ROCm 的处理就是改用 eager（TT-12）。
 
 ## 复现
 ```bash

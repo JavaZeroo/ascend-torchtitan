@@ -12,7 +12,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        track: [npu, npu-stable]
         titan: [pinned, probe]
     continue-on-error: ${{ matrix.titan == 'probe' }}
     steps:
@@ -20,7 +19,7 @@ jobs:
       - name: environment
         run: |
           python -m venv .venv && . .venv/bin/activate
-          CONSTRAINTS=constraints/${{ matrix.track }}.txt WITH_TORCH=1 TITAN_DIR=$RUNNER_TEMP/torchtitan ./scripts/install.sh
+          CONSTRAINTS=constraints/nightly.txt WITH_TORCH=1 TITAN_DIR=$RUNNER_TEMP/torchtitan ./scripts/install.sh
           if [ "${{ matrix.titan }}" = probe ]; then TITAN_DIR=$RUNNER_TEMP/torchtitan ./scripts/probe_compat.sh | tee probe.txt; fi
           ascend-titan-doctor --json > doctor.json
       - name: unit + npu tests
@@ -40,7 +39,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.track }}-${{ matrix.titan }}
+          name: nightly-${{ matrix.titan }}
           path: |
             doctor.json
             probe.txt

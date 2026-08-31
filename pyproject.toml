@@ -14,7 +14,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 # torchtitan itself is deliberately NOT listed here: it is pinned by commit SHA
-# (see constraints/npu.txt and docs/upstream-tracking.md), which pyproject
+# (see docs/upstream-tracking.md), which pyproject
 # cannot express for a PyPI dependency. Install it with scripts/install.sh.
 dependencies = []
 

@@ -26,9 +26,7 @@ CRITERIA = ("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8")
 """docs/model-release-criteria.md: 真实形态 / 并行 / 数值 / checkpoint /
 性能 / 长稳 / 文档 / 无降级.
 
-Before 2026-08-31 a 🟢 here meant "the debugmodel runs". It now means all eight
-have a recorded command and output, which is a much higher bar and the reason
-several entries moved to 🟡: nothing regressed, the bar did.
+🟢 要求八条全部有记录下来的命令与输出。
 """
 
 
@@ -134,7 +132,7 @@ MODELS: dict[str, ModelEntry] = {
             "语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 "
             "`kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），"
             "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。"
-            "多模态 debugmodel 也能跑，golden 已冻结（此前记的视觉塔阻塞是误判，见 TT-12）；"
+            "多模态 debugmodel 也能跑，golden 已冻结（确定性模式需要 TT-12 那条 shim）；"
             "DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；"
             "GDN 没有融合算子，性能是主要缺口。"
         ),

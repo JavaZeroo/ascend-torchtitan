@@ -5,8 +5,6 @@
 | `nightly.txt` | **NIGHTLY**（默认、唯一门禁，ADR-006）：torch nightly（日期 = torch_npu master `requirements_2.15.txt` 的 pin）+ 源码构建的 torch_npu（`==2.15.0` 匹配 `2.15.0+git<sha>`）。 |
 | `torch_npu.sha` | torch_npu（gitcode Ascend/pytorch）master 的 commit；`scripts/build_torch_npu.sh` 检出它构建（子模块 op-plugin 由该 commit 决定）。 |
 | `torchtitan.sha` | 固定的 torchtitan commit。 |
-| `npu.txt` | **RELEASE**（信息性，不门禁）：PyPI 最新 torch_npu（2.13.0rc1）+ torch 2.13.0。 |
-| `npu-stable.txt` | 已废弃（torch 2.12 / torch_npu 2.12.0）；保留一个发布周期后删除。 |
 | `npu-triton.txt` | RELEASE + Triton-Ascend（inductor / fla-npu 实验）；待改为只含增量的 `extras/triton.txt`。 |
 | `titan-deps.txt` | torchtitan 的依赖列表，**去掉** `attn-gym[linear]` extra（它会拉 `nvidia-cutlass-dsl[cu13]`）。 |
 

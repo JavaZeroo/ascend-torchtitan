@@ -36,7 +36,7 @@ Triton-Ascend（DEP-INDUCTOR，未装）。其余**全部**是上游默认：
 |---|---|
 | `ComplexRoPE`（复数 cache 索引） | **NPU-3**：`aclnnIndex` 不支持复数 → 已在 op-plugin 修复并提 PR |
 | `ChunkedLossWrapper` | **TT-4**：正式版 torch 上 backward 报 "data is not allocated yet"；NIGHTLY 🟢 |
-| `spmd_types` 后端 | **TT-5 / TORCH-6**：正式版 torch 的 FSDP2 不读 `spmd_types`；NIGHTLY 🟢 |
+| `spmd_types` 后端 | 上游默认，NIGHTLY 直接可用。（历史上正式版 torch 的 FSDP2 不读 `spmd_types`；NIGHTLY 🟢 |
 | stock `VarlenAttention` → `aten::_flash_attention_forward` | **NPU-1**：torch_npu 没有该算子的 NPU 内核 → 已在 torch_npu 修复并提 PR |
 
 **这条路径变红 = 昇腾侧回归。** 它是 `patches/` 里那几个修复的验收用例：任何一个失效，这里先红。

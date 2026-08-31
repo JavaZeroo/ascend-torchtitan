@@ -8,7 +8,7 @@ torchtitan main 面向 torch nightly（README；CI 装 `--pre torch … /whl/nig
 理由是"torch_npu 只发正式版配套"。2026-08-30 实测推翻了这个前提：torch_npu master 的 `requirements.txt` 钉 `torch==2.14.0.dev20260719+cpu`、
 `requirements_2.15.txt` 钉 `torch==2.15.0.dev20260812+cpu`，`version.txt` 列 `2.15.0`，`ci/build.sh --torch=2.15.0` 就是官方构建路径；
 在开发容器里对 torch 2.15.0.dev20260812 源码构建 master `15514cc70` 耗时 8 分 28 秒、零报错。
-正式版基线的代价：2 条 shim、`patches/torchtitan` 5 个补丁中的 3 个、`patches/pytorch` 2 个补丁中的 1 个、矩阵里 14 个 CP 红格（TT-5）
+正式版基线的代价：多条只为版本差存在的 shim 与补丁，以及的 1 个、矩阵里 14 个 CP 红格（TT-5）
 全部只是 torch 版本差；这些"接口补丁"没有一条是昇腾问题。
 
 ## 决定
@@ -27,4 +27,4 @@ torchtitan main 面向 torch nightly（README；CI 装 `--pre torch … /whl/nig
 - 环境搭建多一步构建（`scripts/build_torch_npu.sh`，产物缓存于 `/opt/wheels/`，元数据含源码/op-plugin SHA 与 sha256）。
 - `constraints/nightly.txt` 成为默认；`scripts/install.sh` 识别 `.dev` pin 走 nightly index 与本地 torch_npu wheel。
 - `npu_baseline` 的版本差增量改为特性探测（`_torch_fsdp_reads_spmd_types`），在 nightly 上自动消失。
-- golden 增加 NIGHTLY 元组；STABLE golden 与 `constraints/npu-stable.txt` 删除。
+- golden 只按 NIGHTLY 元组记录。

@@ -46,12 +46,9 @@ def qwen3_debugmodel_stock_varlen() -> Trainer.Config:
 
 
 def qwen3_debugmodel_npu_ce_loss() -> Trainer.Config:
-    """Cell loss/plain_ce: unchunked ``CrossEntropyLoss``.
+    """Cell loss/chunked: 普通 ``CrossEntropyLoss`` 而不是上游默认的 ``ChunkedLossWrapper``。
 
-    The reference recipe runs upstream's ``ChunkedLossWrapper`` (TT-4 is a
-    release-torch-only gap). This probe keeps the unchunked path measurable --
-    it is what the pre-2026-08-30 golden was recorded against, and it is the
-    fallback to reach for when isolating a chunked-loss regression.
+    参考 recipe 用上游默认；这条探针让非 chunked 的那条路可测。
     """
     config = qwen3_debugmodel_npu()
     assert config.model_spec is not None
@@ -67,18 +64,6 @@ def qwen3_debugmodel_npu_fused_norm() -> Trainer.Config:
     """
     config = qwen3_debugmodel_npu()
     config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
-    return config
-
-
-def qwen3_debugmodel_npu_partial_dtensor() -> Trainer.Config:
-    """Cell parallel/spmd_types: the ``partial_dtensor`` backend instead of the default.
-
-    The reference recipe runs upstream's ``spmd_types`` (TT-5 / TORCH-6 is a
-    release-torch-only gap). This probe keeps the alternative measurable, and it
-    is the configuration a release-torch run needs.
-    """
-    config = qwen3_debugmodel_npu()
-    config.parallelism.spmd_backend = "partial_dtensor"
     return config
 
 

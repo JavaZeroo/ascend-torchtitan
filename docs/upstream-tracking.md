@@ -11,8 +11,6 @@
 ## shim ↔ 上游 issue
 | shim | 类型 | 目标 | 上游 | 删除条件 |
 |---|---|---|---|---|
-| `dist_set_timeout` | polyfill | `torch.distributed:set_timeout` | 版本差（TT-2 / TORCH-3），NIGHTLY 上不存在 | **NIGHTLY 上已自动 no-op**（2026-08-30 验证）；RELEASE track 退役后删除文件 |
-| `pp_step_presplit_single` / `_multi` | wrap | `torch.distributed.pipelining.schedules:PipelineScheduleSingle/Multi` | 版本差（TT-8 / TORCH-4），NIGHTLY 上不存在 | 同上 |
 
 shim 数量：**2 个文件，NIGHTLY 上生效 0**。健康目标：0（P8 之后新的 shim 只能来自 NIGHTLY 上可复现的 TT/TORCH 问题）。
 

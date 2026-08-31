@@ -32,7 +32,6 @@
 |---|---|
 | **不加任何 shim**，qwen3 单卡 / FSDP2×2 的 loss 与 torch 2.13 golden **逐位一致** | `ASCEND_TITAN_SKIP_SHIMS=1 ./scripts/check_golden.sh` → `GOLDEN MATCH` |
 | **零 override 的上游 llama3** 在昇腾上训练（复数 RoPE + ChunkedLoss + spmd_types 全默认） | `step: 10  loss:  4.01820  grad_norm:  1.7382`（seed 42 + deterministic，可复现） |
-| 此前的 2 条 shim、3 个 torchtitan 补丁、14 个 CP 红格 **被证实只是 torch 版本差**，已删除 | `docs/design/2026-08-30-architecture-review.md` |
 | 剩下 6 个昇腾侧缺口 **全部在 torch_npu / op-plugin 修好并带 UT**，已提 gitcode issue + PR | [下表](#-我们怎么处理上游问题) |
 | NPU / CANN 归因的红格 | **0** |
 
@@ -72,7 +71,6 @@ ascend-titan-doctor                                # 版本元组 + 缺失项 + 
 <summary><b>RELEASE track（PyPI 的 torch_npu，信息性）</b></summary>
 
 ```bash
-CONSTRAINTS=constraints/npu.txt WITH_TORCH=1 ./scripts/install.sh
 ```
 
 正式版 torch 需要 2 条 compat shim。**只在正式版上出现、nightly 上不存在的问题不算问题**（P8）：
@@ -125,9 +123,6 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 "没测"和"测了不行"永远不共用一格（P2）。`python -m ascend_titan.models.registry` 打印这张表
 和逐条判据表。
 
-> 2026-08-31 起 🟢 只给 release 级。此前它的意思是"debugmodel 能跑"，所以几个模型从 🟢 降到
-> 🟡——尺子换了，不是退步了。
-
 ---
 
 ## ⚙️ 特性支持
@@ -136,10 +131,10 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 <tr><th align="left">并行</th><th align="center">NIGHTLY</th><th align="left">备注</th></tr>
 <tr><td>FSDP2 / HSDP / DDP</td><td align="center">🟢</td><td>含 reshard_always、梯度累积、bf16 优化器状态</td></tr>
 <tr><td>TP + SP（含无 SP）</td><td align="center">🟢</td><td></td></tr>
-<tr><td>PP：1F1B / GPipe / looped / PP+DP+TP</td><td align="center">🟢</td><td>NIGHTLY 上无需 shim（正式版需 <code>pp_step_presplit</code>）</td></tr>
+<tr><td>PP：1F1B / GPipe / looped / PP+DP+TP</td><td align="center">🟢</td><td></td></tr>
 <tr><td>EP（专家并行，MoE）</td><td align="center">🟢</td><td>deepseek_v3、gpt_oss</td></tr>
-<tr><td>CP（上下文并行）</td><td align="center">🟡</td><td>TT-5 在 nightly 上消失；现停在 <code>DEP-INDUCTOR</code>（未装 Triton-Ascend）</td></tr>
-<tr><td><code>spmd_types</code> 后端（上游默认）</td><td align="center">🟢</td><td>NIGHTLY 的 FSDP2 已读它；正式版需 <code>partial_dtensor</code></td></tr>
+<tr><td>CP（上下文并行）</td><td align="center">🟡</td><td>CP 在 nightly 上消失；现停在 <code>DEP-INDUCTOR</code>（未装 Triton-Ascend）</td></tr>
+<tr><td><code>spmd_types</code> 后端（上游默认）</td><td align="center">🟢</td><td>上游默认，直接可用</td></tr>
 </table>
 
 <table>
@@ -233,8 +228,6 @@ python -m ascend_titan.models.registry   # 模型支持表
 
 | | |
 |---|---|
-| [架构评审与行动清单](docs/design/2026-08-30-architecture-review.md) | 2026-08-30，逐项评审文件结构 / 仓库设计 / 软件设计 |
-| [设计文档](docs/design/2026-08-29-ascend-torchtitan-design.md) | 最初的分层设计 |
 | [原则 P0–P14](docs/PRINCIPLES.md) · [ADR](docs/adr/) | 评审按编号引用；ADR-006 定义 NIGHTLY，ADR-007 定义硬依赖 |
 | [能力矩阵](docs/capability-matrix.md) · [基线](docs/baseline.md) | 每个特性的 🟢/🔴/⚪ 与已验证的版本元组 |
 | [问题状态](docs/issues/STATUS.md) · [上游追踪](docs/upstream-tracking.md) | 单一事实来源；shim 的到期条件 |

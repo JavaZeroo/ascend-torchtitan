@@ -39,7 +39,6 @@ import torch.distributed.fsdp._fully_shard._fsdp_param as fp
 
 src = inspect.getsource(fp)
 print(
-    "TT-5/TORCH-6 fsdp_param mentions spmd_types:",
     "spmd_types" in src,
     "| _is_spmd_types_available:",
     hasattr(dist, "_is_spmd_types_available"),

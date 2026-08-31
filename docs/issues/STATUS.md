@@ -15,16 +15,11 @@
 | NPU-7 | torch_npu inductor `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` | 已提交：issue [4440](https://gitcode.com/Ascend/pytorch/issues/4440) · PR [!45528](https://gitcode.com/Ascend/pytorch/merge_requests/45528)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-7-inductor-make-reduction-strict.patch` | 复现 ✅（stock flex：`LoweringException: TypeError: make_reduction() got an unexpected keyword argument 'strict_reduction'`）；修复验证 ✅（见下表） |
 | NPU-8 | torch_npu 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → `spmd_types` 循环导入 | 已提交：issue [4441](https://gitcode.com/Ascend/pytorch/issues/4441) · PR [!45529](https://gitcode.com/Ascend/pytorch/merge_requests/45529)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-8-dtensor-public-imports.patch` | 复现 ✅（`python -c "import spmd_types"` → `Failed to load the backend extension: torch_npu`）；修复验证 ✅（见下表） |
 | NPU-4 | ArgSort int 回退 AiCpu（性能警告） | 无需处理 | 记录 | — |
-| NPU-5 | torch_npu 2.13.0rc1 拉入 attn-gym 0.0.6？ | 无需处理（RELEASE track 事项） | — | — |
 | TORCH-1 | FlexAttention 设备白名单 | 已确认（torch 侧仍在）；**torch_npu master 已绕开** | torch_npu master `utils/patch_flexattention.py`；NIGHTLY 上 `flex_attention` eager 前反向 ✅。模型级 stock flex 走 `torch.compile` → inductor：NPU-7 + Triton-Ascend（`DEP-INDUCTOR`） | eager ✅；compile 见第二轮 |
 | TORCH-2 | fake 后端不可扩展 | 无需处理 | torch_npu 侧追加即可（NPU-2） | — |
-| TORCH-3 / TORCH-4 | `set_timeout` / PP `step(arg_mbs=)` 仅 nightly | 已关闭（版本差） | NIGHTLY 原生存在；两条 shim 自动 no-op | ✅ `ASCEND_TITAN_SKIP_SHIMS=1` golden 逐位一致 |
-| TORCH-5 | 2.12 pipelining `fork_rng` 默认 cuda | 已关闭（版本差） | — | — |
-| TORCH-6 / TT-5 | FSDP2 × spmd_types 仅 nightly | 已关闭（版本差）；CP 用例复测见第二轮 | `npu_baseline` 第 3 步改为特性探测（`_torch_fsdp_reads_spmd_types`） | 第二轮矩阵子集 |
 | TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已确认（NIGHTLY 仍在） | `patches/evidence/pytorch/0001-TORCH-7-*.patch`；本仓 NPU 测试用数值梯度 | — |
 | TORCH-8 | `varlen.py` rng_state 占位用 uint64 | 已确认（NIGHTLY 仍在）；**昇腾侧由 NPU-6 解决** | `patches/evidence/pytorch/0002-TORCH-8-*.patch` 仅作证据 | — |
 | TT-1 | core 无条件 `import triton` | 已确认（NIGHTLY 仍在） | `constraints/titan-deps.txt` 装纯 Python `triton`；`patches/evidence/torchtitan/0004-TT-1-*.patch` | ✅ import OK |
-| TT-2 / TT-8 / TT-9 | `set_timeout` 无特性检查 / PP `step(arg_mbs=)` 无 fallback / fused_mla 用 `torch.Tag.inplace` | 已关闭（版本差） | 补丁已删除 | ✅ |
 | TT-3 | `separate_full_blocks` 仅 nightly | 已关闭（版本差） | — | — |
 | TT-4 | ChunkedLossWrapper backward "not allocated" | **已关闭（NIGHTLY 不复现）** | `npu_baseline` 不再展开 loss（此前是 P1/P9 违规） | ✅ 单卡 step10 loss 5.10291；FSDP2×2 step10 loss 5.07796（与 CE golden 差 bf16 级） |
 | TT-6 | kimi_k3 attn_res 无 Configurable 节点 | 已确认 | 上游 ask（不提），等 kimi_k3 稳定 | — |
@@ -32,7 +27,7 @@
 | TT-10 | 树内 Triton override / DistMuon 写死 CUDA | 无需处理 | 昇腾替代在 L1 | ✅（swiglu 已替代） |
 | TT-11 | kimi_k3 导入需要 `cutlass` | **已关闭（证伪）** | `cutlass` 就是 `nvidia-cutlass-dsl`，有 aarch64 wheel；装上即可 import，会执行 cute 内核的节点由 `kernels/kda.py` override 掉 | ✅ kimi_k3 debugmodel 单卡 10 步 loss 4.10312 |
 | OURS-1 | attention host offsets D2H | 已修复（本仓） | custom_op 内部；每步一次 D2H 仍在 | — |
-| OURS-2/4/8/9 | LSE / provenance / compile graph break / override 冲突 | 已修复（本仓） | 见 CHANGELOG | ✅ |
+| OURS-2/4/8/9 | LSE / provenance / compile graph break / override 冲突 | 已修复（本仓） | 见 git log | ✅ |
 | OURS-3 | 滑窗 `sparse_mode=4` 未测 | 待确认 | 补 NPU 测试 | 待做 |
 | OURS-5 | 未与 GPU golden 对比 | 阻塞 | 需 GPU 机器 | — |
 | OURS-6 | issue 未提交 | 已关闭 | torch_npu / op-plugin 六项已按 P9 提交（见 NPU-* 行）；torchtitan / pytorch 按 P10 不提 | — |

@@ -11,12 +11,9 @@
 | 对齐测试 | `tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2）——都对 attn_gym reference 钉前向、反向、chunk 尺寸无关性 |
 | 最近验证 | torch 2.15.0.dev20260812 + torch_npu 2.15.0（master 源码构建 + `patches/`），CANN 9.1.0，2026-08-31 |
 
-## 1. `fla` 那条阻塞已经没有了
+## 1. GDN 与 causal conv1d 的 override
 
-早先这份文档写着"`import torchtitan.models.qwen3_5` 直接 `ModuleNotFoundError: No module named 'fla'`"。
-实测不成立：`fla-core` 有 aarch64 wheel，装上就能 import，模型包正常加载。
-
-真正不能用的是 fla 的**内核**——它们是给 CUDA 写的 Triton，`bishengir-compile` 不收。
+`fla-core` 有 aarch64 wheel，装上就能 import，模型包正常加载。真正不能用的是它的**内核**——它们是给 CUDA 写的 Triton，`bishengir-compile` 不收。
 所以 `kernels/gdn.py` 用 `@override` 把两个节点换掉：
 
 | 节点 | 上游实现 | 我们的实现 |
@@ -45,9 +42,6 @@ chunk 内那步要对单位下三角的转移矩阵求逆，它用 `for row in r
 迅速变大——实测最大元素 5.7e3 (C=64)、5.7e6 (C=128)、5.7e15 (C=256)，后面所有乘法
 都要乘上它。这是分解本身的性质，与求逆写法无关。性能要从别处来，见第 5 节。
 
-（早先这里写着"128/256 会 NaN 所以必须用 64"，是错的：chunk 64 当时同样会 NaN，
-那是求逆写法的问题，已修。）
-
 ## 2. 跑起来
 
 ```bash
@@ -72,42 +66,24 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh
 会被 clamp 到它。0.8B 的配置是 lr 5e-3 + 20 步 warmup + 1000 步，用 `--training.steps 5`
 跑就等于第一步直接满学习率。
 
-### 曾经在第 4–13 步发散——是我们的求逆，已修
+### 为什么求逆用分块前代回代
 
-`qwen35_0_8b_npu` 从随机初始化跑，一度会在第 4–13 步 loss 变非有限。**根因是
-`kernels/gdn.py` 里 chunk 内那个求逆**，2026-08-31 修掉。
+chunk 内那步要对单位下三角的转移矩阵求逆。`(I-A)^-1 = I + A + … + A^(C-1)` 对幂零的 A 是
+精确的，倍增法 `log2(C)` 次 matmul 就能算完——**但不能用**：和有界，中间的 `A^32` 不是，
+在训练几步之后学到的门控值上它溢出 fp32，整个 0.8B 会在第 4–13 步 loss 变非有限。
+attn_gym 的前代回代从不形成这些幂，所以它没事。
 
-定位过程（每一步都排除了一个当时看起来最像的嫌疑）：
-
-| 试的东西 | 结果 |
-|---|---|
-| 学习率 5e-3 → 1e-3 → 5e-4 | 只把发散推到第 10 / 更晚，消不掉 |
-| warmup 20 → 200 | 推到第 13 步 |
-| 优化器 fused → foreach | 只差一步（第 4 → 第 5） |
-| 参数初始化 | `A_log ∈ [0.17, 2.73]`、`dt_bias=1.0`，与上游 flex 路径一致 |
-| 卡数 | 单卡与 8 卡一样 |
-| 全模块前向钩子 | 第一处非有限出在 `AscendGatedDeltaKernel`，**输入有限、输出非有限** |
-| 同输入喂 attn_gym reference | **我们非有限、它有限**（max 3.3e-2）——是我们的实现 |
-| 与 reference 逐行 diff | 数学上唯一的差别就是那个求逆 |
-
-原来的写法是 Neumann 级数倍增：`(I-A)^-1 = I + A + … + A^(C-1)` 对幂零的 A 是精确的，
-`log2(C)` 次 matmul 就能算完。但**最终的和有界，中间的 `A^32` 不是**——在训练几步之后
-学到的门控值上它溢出 fp32。attn_gym 的前代回代从不形成这些幂，所以它没事。
-
-现在用分块前代回代（`X = I + A X`，对角块用级数、其余每个块行一次 matmul，用的都是
-已定的 X），拿到替换法的数值和 matmul 的开销。三种写法在 910B2 上实测：
+现在用分块前代回代：对角块小到可以安全用级数，其余每个块行一次 matmul，用的都是已定的 X。
+三种写法在 910B2 上实测：
 
 | 方法 | chunks=1 | chunks=64 | |
 |---|--:|--:|---|
-| Neumann 倍增 | 0.50 ms | 0.52 ms | 溢出 |
+| Neumann 倍增 | 0.50 ms | 0.52 ms | 溢出，不能用 |
 | `torch.linalg.solve_triangular` | 1.05 ms | 54.93 ms | 正确但开销随 chunk 线性增长 |
 | **分块前代回代** | 1.50 ms | 2.44 ms | 用它 |
 
-修后 20 步：loss 12.85958 → 8.30913，rc=0。第 4 步 grad_norm 仍然冲到 21.8，但随后
-7.5 → 4.4 → 2.2 → 1.3 收回来了——梯度尖峰本身是能扛过去的，是求逆溢出把它变成了 NaN。
-
-`qwen35_debugmodel_npu_text` 的 golden 在这次改动后**逐位不变**：新旧写法在正常区间
-数值恒等，只在旧写法会溢出的地方才分道扬镳。
+20 步：loss 12.85958 → 8.30913，rc=0。第 4 步 grad_norm 会冲到 21.8 然后收回来
+（7.5 → 4.4 → 2.2 → 1.3）——尖峰本身能扛，是求逆溢出把它变成 NaN。
 
 ## 3. recipe
 
@@ -119,20 +95,18 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh
 | `qwen35_0_8b_npu` | 1 | Qwen3.5-0.8B，真实 tokenizer + 真实 C4 + 4096 上下文 |
 | `qwen35_0_8b_npu_fsdp2` | 8 | 上面 × FSDP2 8 路 |
 
-## 4. 视觉侧：能跑（此前记的阻塞是误判）
+## 4. 视觉侧：能跑，但确定性模式要一条 shim
 
-`qwen35_debugmodel_npu` 用 cc12m-test，会走视觉塔。它一度被记成"910B2 硬件级不可解"，
-2026-08-31 查清是误判：**只在 `--debug.deterministic` 下失败**。
+`qwen35_debugmodel_npu` 用 cc12m-test，会走视觉塔，在昇腾上正常训练——golden 已冻结：
+10 步 loss 13.12734 → 3.87925。
 
-torchtitan 的 `set_determinism` 在非 ROCm 分支上会把 `FlexAttention._compiled_flex_attn`
-重新编译（并覆盖我们装的 eager shim），这条路在昇腾上不通。上游对 ROCm 的处理就是改用 eager，
-昇腾缺这条分支——`shims/flex_eager_when_deterministic.py` 补上即可。机制与实测见
-`tests/repro/probe_flex_deterministic.py` 与 `docs/capability-matrix.md` 的 TT-12。
+唯一的例外是 `--debug.deterministic`：torchtitan 的 `set_determinism` 在非 ROCm 分支上会把
+`FlexAttention._compiled_flex_attn` 重新编译（并覆盖我们装的 eager shim），这条路在昇腾上
+不通。上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支——`shims/flex_eager_when_deterministic.py`
+补上即可。机制见 `tests/repro/probe_flex_deterministic.py` 与能力矩阵的 TT-12。
 
-补上之后，多模态 debugmodel 的 golden 也录了：10 步 loss 13.12734 → 3.87925，逐位复现。
-
-真实尺寸的证据仍然取在**语言侧**（`qwen35_0_8b_npu` 换成纯文本 C4），因为真实 cc12m 是图文
-数据集，不在这台机器的下载预算里——这是数据的限制，不是能力的限制。
+真实尺寸的证据取在**语言侧**（`qwen35_0_8b_npu` 换成纯文本 C4），因为真实 cc12m 是图文数据集，
+不在这台机器的下载预算里——这是数据的限制，不是能力的限制。
 
 ## 5. 已知缺口（离 🟢 还差什么）
 
@@ -178,9 +152,6 @@ HF 导出/导入不受影响（它只存模型，不存优化器状态），已�
 
 循环里每个算子还要过一遍 activation-checkpoint 的 dispatch mode，所以步时是被 Python
 派发次数支配的，不是算力。chunk 尺寸又被数值条件卡死在 64（上面第 1 节）——这条路走到头了。
-
-（早先我从 dataloader 的 batch 里没看到 `cu_seqlens`，据此以为走的是 dense 单次调用。
-错了：模型内部会从 `positions` 推出 `cu_seqlens`，packed 路径一直是激活的。）
 
 出路按可行性排：
 

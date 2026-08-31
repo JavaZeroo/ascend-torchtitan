@@ -54,21 +54,6 @@ def qwen3_debugmodel_npu() -> Trainer.Config:
     # DELTA 2: no checkpoint I/O in the smoke run (DCP on NPU is its own cell).
     config.checkpoint.enable = False
 
-    # The spmd backend stays upstream's ``spmd_types``. It used to be forced to
-    # "partial_dtensor" because FSDP2 only builds DTensor shards from spmd_types
-    # annotations on torch >= 2.14.0.dev (TT-5 / TORCH-6) -- again a torch version
-    # gap, not an NPU one, so on NIGHTLY the delta only made the reference path
-    # differ from upstream (P8/P12). ``probes.qwen3_debugmodel_npu_partial_dtensor``
-    # keeps the alternative backend measurable. (matrix: parallel/spmd_types)
-
-    # The loss stays upstream's ChunkedLossWrapper. It used to be swapped for a
-    # plain CrossEntropyLoss because the chunked loss (upstream #4143) drives
-    # FSDP's lm_head unshard by hand and its backward hit "data is not allocated
-    # yet" on release torch + NPU (TT-4) -- a torch version gap that does not
-    # exist on NIGHTLY, so carrying the delta only made the reference path differ
-    # from upstream for no reason (P8/P12). ``probes.qwen3_debugmodel_npu_ce_loss``
-    # keeps the non-chunked path measurable. (matrix: loss/chunked)
-
     return config
 
 

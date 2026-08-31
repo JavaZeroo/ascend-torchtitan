@@ -14,4 +14,4 @@
 - [ ] CPU 上 `pytest tests/unit` 通过
 - [ ] 涉及路径的 NPU 测试 / 冒烟运行
 - [ ] 没有改动 `../torchtitan`
-- [ ] 文档已更新（矩阵 / upstream-tracking / CHANGELOG）
+- [ ] 文档已更新（矩阵 / upstream-tracking）

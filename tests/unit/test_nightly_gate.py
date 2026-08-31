@@ -1,42 +1,58 @@
-"""NIGHTLY gate (P8): on a torch that already has the APIs our shims polyfill/wrap, the shims
-must be no-ops -- the target objects stay torch's own. A shim that still takes effect on the
-NIGHTLY baseline is a version-gap shim that should not exist."""
+"""NIGHTLY gate (P8)：不为正式版 torch 保留兼容代码。
+
+只在正式版 torch 上出现、nightly 上不存在的问题不写 shim，也不留 shim。可检查的代理：
+**没有一条 shim 允许以 `torch.*` 为目标**——nightly 上 torch 自身的缺口是 torch 的 bug，
+按 P10 记录、不 shim；合法的 shim 全都指向 torchtitan 的设计缺口（无条件 `torch.compile`、
+硬编码的设备判断这类没有开关的地方）。
+
+历史上违反这条的两个例子都已删除：`dist_set_timeout`（polyfill 补 `torch.distributed`
+缺的 API）与 `pp_step_presplit`（包 `torch.distributed.pipelining`，只为 torch ≤ 2.13）。
+"""
 
 import importlib
-import inspect
+import pkgutil
 
-import pytest
-import torch
-import torch.distributed as dist
+from ascend_titan.compat import registry
 
 
-def _nightly_features_present() -> bool:
-    from torch.distributed.pipelining.schedules import PipelineScheduleSingle
+def _registered():
+    """重新执行每个 shim 模块的装饰器。
 
-    return hasattr(dist, "set_timeout") and (
-        "arg_mbs" in inspect.signature(PipelineScheduleSingle.step).parameters
-    )
-
-
-@pytest.mark.skipif(not _nightly_features_present(), reason="torch predates the NIGHTLY baseline")
-def test_shims_are_noops_on_nightly_torch():
-    from torch.distributed.pipelining.schedules import PipelineScheduleMulti, PipelineScheduleSingle
-
-    from ascend_titan.compat import registry
+    不能只调 `_discover()`：别的测试跑过之后模块已在 `sys.modules` 里，import 是缓存命中，
+    装饰器不会再跑，注册表会是空的。
+    """
+    import ascend_titan.compat.shims as pkg
 
     registry.reset_for_tests()
-    for mod in (
-        "ascend_titan.compat.shims.dist_set_timeout",
-        "ascend_titan.compat.shims.pp_step_presplit",
-    ):
-        importlib.reload(importlib.import_module(mod))
-    orig_timeout = dist.set_timeout
-    orig_single, orig_multi = PipelineScheduleSingle.step, PipelineScheduleMulti.step
-    registry.apply_all()
-    assert dist.set_timeout is orig_timeout, "polyfill replaced torch's own set_timeout"
-    assert not hasattr(dist.set_timeout, "__ascend_shim__")
-    assert (
-        PipelineScheduleSingle.step is orig_single and PipelineScheduleMulti.step is orig_multi
-    ), "pp_step_presplit wrapped a torch that already accepts arg_mbs"
-    assert torch.__version__  # keep torch referenced for the skip condition
+    for info in pkgutil.iter_modules(pkg.__path__):
+        importlib.reload(importlib.import_module(f"{pkg.__name__}.{info.name}"))
+    return dict(registry._REGISTRY)
+
+
+def test_no_shim_targets_torch_itself():
+    shims = _registered()
+    assert shims, "shim 注册表是空的——discovery 坏了"
+    offenders = {
+        name: s.target for name, s in shims.items() if s.target.split(":")[0].startswith("torch.")
+    }
+    assert not offenders, (
+        f"这些 shim 以 torch 自身为目标：{offenders}。"
+        "nightly 上 torch 的缺口按 P10 记录并推动上游，不在本仓 shim。"
+    )
+    registry.reset_for_tests()
+
+
+def test_every_shim_targets_torchtitan():
+    shims = _registered()
+    for name, s in shims.items():
+        module = s.target.split(":")[0]
+        assert module.startswith("torchtitan."), f"{name} 指向 {module}，不是 torchtitan 的缺口"
+    registry.reset_for_tests()
+
+
+def test_no_polyfills_remain():
+    """polyfill 只用来补旧 torch 缺的 API——nightly-first 之后不该再有。"""
+    shims = _registered()
+    polyfills = [name for name, s in shims.items() if s.kind == "polyfill"]
+    assert not polyfills, f"这些是给旧 torch 补 API 的 polyfill，应当删除：{polyfills}"
     registry.reset_for_tests()

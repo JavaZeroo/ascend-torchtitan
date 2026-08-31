@@ -92,14 +92,6 @@ def _flex_attention_is_usable() -> bool:
         return False
 
 
-def _torch_fsdp_reads_spmd_types() -> bool:
-    """True when torch's FSDP2 builds DTensor shards from spmd_types annotations
-    (``torch.distributed._is_spmd_types_available`` exists; nightly >= 2.14.0.dev)."""
-    import torch.distributed as dist
-
-    return hasattr(dist, "_is_spmd_types_available")
-
-
 def npu_minimal(config: Trainer.Config) -> Applied:
     """Apply, in place, only the deltas an upstream config cannot run without. Idempotent.
 
@@ -158,23 +150,6 @@ def npu_minimal(config: Trainer.Config) -> Applied:
     if has_complex_rope and not block_override and ROPE_OVERRIDE not in config.override.imports:
         config.override.imports = [*config.override.imports, ROPE_OVERRIDE]
     a.rope_override = has_complex_rope and not block_override
-
-    # 3. spmd_types needs FSDP2 to read spmd_types annotations, which only torch
-    #    nightly (>= 2.14.0.dev) does (TT-5 / TORCH-6: a torch-version gap, not an
-    #    NPU one). Feature-check, like upstream's check_if_feature_in_pytorch: on a
-    #    torch that has the integration the upstream default is left untouched.
-    if not _torch_fsdp_reads_spmd_types():
-        if config.parallelism.spmd_backend != "partial_dtensor":
-            config.parallelism.spmd_backend = "partial_dtensor"
-            a.spmd_backend = "partial_dtensor"
-        if getattr(config.debug, "spmd_typechecking", False):
-            config.debug.spmd_typechecking = False
-            a.notes.append("spmd_typechecking off")
-
-    # (Removed 2026-08-30: the ChunkedLossWrapper backward failure TT-4 does not exist on the
-    #  NIGHTLY track -- torch 2.15.0.dev + torch_npu master, 1 NPU and FSDP2x2 both pass -- and
-    #  unwrapping the loss here was a P1/P9 violation: it worked around a suspected torch_npu
-    #  defect inside the baseline.)
 
     logger.info("[ascend_titan] npu_minimal: %s", a.summary())
     return a
