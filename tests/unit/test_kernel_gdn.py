@@ -218,3 +218,89 @@ def test_inverse_backward_matches_float64_ground_truth():
     # ours masks the rest to zero instead of reporting the chain rule's leftovers.
     torch.testing.assert_close(ours.grad, truth.grad.tril(-1), rtol=1e-9, atol=1e-9)
     assert (ours.grad.triu() == 0).all()
+
+
+def _reference_per_segment(q, k, v, g, beta, bounds):
+    """attn_gym's reference run independently per packed segment, then concatenated.
+
+    That *is* the definition of packing for a recurrence: the state must restart
+    at every document boundary.
+    """
+    from attn_gym.linear.gdn import chunk_gdn
+
+    from ascend_titan.kernels.gdn import l2norm
+
+    out = []
+    for begin, end in zip(bounds[:-1], bounds[1:], strict=True):
+        if end <= begin:
+            continue
+        piece = chunk_gdn(
+            l2norm(q[begin:end].unsqueeze(0)).transpose(1, 2),
+            l2norm(k[begin:end].unsqueeze(0)).transpose(1, 2),
+            v[begin:end].unsqueeze(0).transpose(1, 2),
+            g[begin:end].unsqueeze(0).transpose(1, 2),
+            beta[begin:end].unsqueeze(0).transpose(1, 2),
+            impl="reference",
+        )
+        piece = piece[0] if isinstance(piece, tuple) else piece
+        out.append(piece.transpose(1, 2).squeeze(0))
+    return torch.cat(out, dim=0)
+
+
+def test_packed_path_matches_per_segment_reference():
+    """The packed branch had no test at all -- and it is the branch that runs.
+
+    Real C4 packed to 4096 tokens carries dozens of document boundaries, so
+    ``AscendGatedDeltaKernel.forward`` takes the ``cu_seqlens`` loop, not the
+    dense call that every other test in this file exercises. Segment lengths
+    below and above ``CHUNK_SIZE`` are both included: a short segment is padded
+    to a full chunk, which is exactly where an off-by-one would hide.
+    """
+    from ascend_titan.kernels.gdn import AscendGatedDeltaKernel
+
+    kernel = AscendGatedDeltaKernel(AscendGatedDeltaKernel.Config())
+
+    gen = torch.Generator().manual_seed(9)
+    heads, key_dim, value_dim = 4, 32, 32
+    lengths = [7, 64, 65, 130]  # < chunk, == chunk, > chunk, multi-chunk
+    tokens = sum(lengths)
+    bounds = [0]
+    for n in lengths:
+        bounds.append(bounds[-1] + n)
+
+    q = torch.randn(tokens, heads, key_dim, generator=gen)
+    k = torch.randn(tokens, heads, key_dim, generator=gen)
+    v = torch.randn(tokens, heads, value_dim, generator=gen)
+    g = -torch.rand(tokens, heads, generator=gen)
+    beta = torch.rand(tokens, heads, generator=gen)
+
+    cu = torch.tensor(bounds, dtype=torch.int32)
+    got = kernel(q, k, v, g, beta, cu_seqlens=cu, cu_seqlens_cpu=cu)
+    want = _reference_per_segment(q, k, v, g, beta, bounds)
+
+    assert got.shape == want.shape, (got.shape, want.shape)
+    torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
+
+
+def test_packed_path_is_not_the_dense_path():
+    """A packed run must differ from ignoring the boundaries -- else the loop is dead.
+
+    Guards against a regression where ``cu_seqlens`` stops reaching the kernel
+    and the recurrence silently runs across document boundaries.
+    """
+    from ascend_titan.kernels.gdn import AscendGatedDeltaKernel
+
+    kernel = AscendGatedDeltaKernel(AscendGatedDeltaKernel.Config())
+    gen = torch.Generator().manual_seed(10)
+    tokens, heads, dim = 128, 4, 32
+    args = (
+        torch.randn(tokens, heads, dim, generator=gen),
+        torch.randn(tokens, heads, dim, generator=gen),
+        torch.randn(tokens, heads, dim, generator=gen),
+        -torch.rand(tokens, heads, generator=gen),
+        torch.rand(tokens, heads, generator=gen),
+    )
+    cu = torch.tensor([0, 40, 128], dtype=torch.int32)
+    packed = kernel(*args, cu_seqlens=cu, cu_seqlens_cpu=cu)
+    dense = kernel(*args)
+    assert not torch.allclose(packed, dense, rtol=1e-3, atol=1e-3)
