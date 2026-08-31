@@ -190,10 +190,12 @@ MODELS: dict[str, ModelEntry] = {
         recipes="ascend_titan.models.kimi_k3.recipes",
         flavors=("kimi_k3_debugmodel_npu", "kimi_k3_debugmodel_npu_fused"),
         blocker=(
-            "视觉塔的 block-diagonal document mask：保留 flex 撞 "
-            "`SubgraphLoweringException`（910B2 无 indirect-memory lowering），"
-            "转 varlen 撞 `attention_masks must be VarlenMetadata, got BlockMask`。"
-            "两条都实测过；需要二分定位从绿变红的那次改动。"
+            "视觉塔的 block-diagonal document mask。三条规避都实测无效："
+            "保留 flex 撞 `SubgraphLoweringException`（910B2 无 indirect-memory "
+            "lowering）、转 varlen 撞 `attention_masks must be VarlenMetadata`、"
+            "关掉 flex 自带的编译（`_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG`）仍进 "
+            "inductor。torch 的 flex_attention 不存在未编译路径，所以这不是 shim "
+            "能解决的。"
         ),
         notes=(
             "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
