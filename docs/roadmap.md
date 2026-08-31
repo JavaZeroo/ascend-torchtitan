@@ -46,8 +46,15 @@
   参数初始化、卡数，那些都只是把发散往后推。
 
 **两条被推翻的结论（记下来免得再犯）**
-- kimi_k3 的 🟢 不再复现：2026-08-30 记的单卡 loss 4.10312，今天撞视觉塔的 document mask。
-  保留 flex 与转 varlen 两条路都实测过，都失败。已降为 🔴 并记待二分，不再声称它绿。
+- ~~kimi_k3 的 🟢 不再复现~~ **这条判断本身是错的（当天晚些时候查清）**：它只在
+  `--debug.deterministic` 下失败，而 `check_golden.sh` 正好加了这个开关。
+  根因是 torchtitan 的 `set_determinism` 在非 ROCm 分支上重新编译 `_compiled_flex_attn`
+  并覆盖我们的 shim；上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支。
+  `shims/flex_eager_when_deterministic.py` 补上后，kimi_k3 与 qwen3.5 多模态的确定性 golden
+  都录上了（4.56418 / 3.87925）。
+  连带作废的还有"910B2 上任何读张量的 flex mask_mod 都编不出来"——直接调用 `flex_attention`
+  时前向、LSE、反向全通过；只有把整个函数包进 `torch.compile` 才会踩到。
+  由此推出的"CP 在 910B2 上不可能"也需要重测。
 - "chunk 128/256 会 NaN 所以必须用 64" 错了两次：第一次写成 chunk 尺寸的问题，
   第二次写成训练配置的问题。真相是求逆的写法。chunk 留在 64 另有理由（转移矩阵的条件数，
   实测 5.7e3 / 5.7e6 / 5.7e15），与那个 NaN 无关。

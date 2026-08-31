@@ -88,36 +88,50 @@ triton-ascend 3.2.2（自带 triton 3.2.0）**可以和 torch 2.15 nightly + tor
 | `triton.backends` 里有 `ascend` 且 `is_active()` | 🟢 |
 | `torch.compile(f, backend="inductor")` 简单逐点 + 归约图（前反向） | 🟢 |
 | `torch.compile(flex_attention)` + causal block mask（不读张量） | 🔴 → **🟢（NPU-9 修复后）** |
-| `torch.compile(flex_attention)` + 读张量的 mask_mod（document mask） | 🔴 **910B2 硬件限制**，见下 |
-| torchtitan `1d_compile` 用例（llama3 + `compile.enable`） | 🔴 同上（它的 flex 掩码就是 document mask） |
+| 直接调 `flex_attention(...)` + 读张量的 mask_mod | **🟢** 前向 / LSE / 反向实测均通过 |
+| `torch.compile(flex_attention, options=...)` + 读张量的 mask_mod | 🔴 `SubgraphLoweringException`，见下 |
+| torchtitan `1d_compile` 用例（llama3 + `compile.enable`） | 🔴 同上 |
 
-### 为什么 document mask 编不了（归因：硬件 / CANN，不是缺陷）
+### document mask：机制、以及它到底卡在哪一条路上
 
-链条一路查到底：
+链条（2026-08-30 查，机制部分仍然成立）：
 
 1. flex 的 `mask_mod` 是 **pointwise 子图**，torch 的 `PointwiseSubgraphLowering` 明确禁止在其中创建 buffer。
 2. document mask 里 `segment_ids[q_idx]` 是 `aten.index.Tensor`。
 3. torch_npu 把 `aten.index` 放在 `INDIRECT_MEM_FALLBACK_LIST` 里，只有
    `inductor_indirect_memory_mode` 打开时才有真正的 lowering，否则 fallback 成 ExternKernel（=建 buffer）。
 4. `torch_npu/_inductor/config.py`：`inductor_indirect_memory_mode` **只在 `is_ascend950` 时才赋值**，
-   910B2 上恒为 `None`，`INDUCTOR_INDIRECT_MEMORY_MODE` 环境变量在这台机器上根本不会被读。
+   910B2 上恒为 `None`（实测 `is_ascend950=False`、`indirect_memory_mode=None`）。
 
-实测确认：`soc=Ascend910B2, is_ascend950=False, indirect_memory_mode=None`；失败算子经
-`PointwiseSubgraphLowering.call_function` 打点确认就是 `aten.index.Tensor`。
+**2026-08-31 修正：当时由此得出的结论"任何读张量的 flex mask_mod 都编不出来"过宽了。**
+实测（`tests/repro/probe_flex_deterministic.py`，910B2）：
 
-**结论：910B2 上 inductor 没有 indirect-memory（SIMT）支持，任何读张量的 flex mask_mod 都编不出来。**
-这不是 torch_npu 的 bug，是 A2 硬件没有这条路径，要 Ascend950。
-连带结论：**CP 在 910B2 上不可能跑通**——上游强制 CP 必须配 FlexAttention，而 torchtitan 的
-掩码就是 document mask。
+| 怎么调用 | 读张量的 mask_mod |
+|---|---|
+| `flex_attention(q, k, v, block_mask=bm)` —— 它内部只编译 HOP 包装器 | 🟢 前向 / LSE / 反向全过 |
+| `torch.compile(flex_attention, options=FlexAttention.inductor_configs)` | 🔴 `SubgraphLoweringException` |
+
+也就是说：默认路径是通的，只有把**整个** `flex_attention` 函数包进 `torch.compile` 才会踩到上面那条链。
+两者为何有此差别（HOP 包装器那条路上 `aten.index` 为什么没走到 fallback）尚未查清，**不要**在查清前
+把任何一边推广成通则——这一条已经错过一次。
+
+实际会踩到的只有一处：torchtitan 的 `set_determinism` 在非 ROCm 分支上正是这么做的（TT-12）。
+`shims/flex_eager_when_deterministic.py` 按上游给 ROCm 的同一做法改走 eager 后，
+kimi_k3 与 qwen3.5 多模态的确定性 golden 都录上了。
+
+**CP 需要重测。** 此前"CP 在 910B2 上不可能"是从上面那条过宽的结论推出来的：
+CP 强制配 flex，而 flex 被认为编不了。既然默认路径的 flex 是通的，这个推论不再成立——
+但也不等于 CP 就能跑（它还有 TT-5 等其它约束），要实测才算。
 
 ## 多模态（M5，2026-08-30 实测）
 
 | 模型 / 路径 | NIGHTLY | 说明 |
 |---|:--:|---|
-| kimi_k3 debugmodel（视觉塔 + KDA + MoE） | 🔴 | **2026-08-31 复测不再复现**（2026-08-30 曾记录单卡 10 步 `loss 4.10312`）。现在撞的是下面那行的视觉塔 document mask。两条路都堵：保留 flex → `SubgraphLoweringException`；把视觉塔的 flex 转成 varlen → `attention_masks must be VarlenMetadata, got BlockMask`（两个都实测过）。需要二分定位是哪次改动/哪个 wheel 让它从绿变红——在那之前不再声称它绿 |
+| kimi_k3 debugmodel（视觉塔 + KDA + MoE） | 🟢 | 单卡 10 步 `loss 4.56418`，golden 已冻结并逐位复现。08-31 一度记成 🔴，那是误判：它只在 `--debug.deterministic` 下失败，而 `check_golden.sh` 正好加了这个开关。见下面 TT-12 那行 |
 | 视觉塔的 BlockMask 构建 | 🟢 | 靠 shim `flex_block_mask_eager`（上游无条件 `torch.compile`，无开关）。注意它只解决**构建掩码**那一步，`flex_attention` 自身的 lowering 不在它管辖内 |
-| 视觉塔的 FlexAttention 节点 | 🔴 | `npu_minimal` 不转换它（那条路径没有 varlen 掩码，转了会撞 `attention_masks must be VarlenMetadata, got BlockMask`，实测过）。**但"不转换"不等于"走 eager"**：torch 的 `flex_attention` 在不处于 dynamo 时会自己 `torch.compile(..., fullgraph=True)`，所以必然进 torch_npu 的 inductor lowering。shim 只能改变编译边界，改不了这一点 |
-| 视觉塔的 block-diagonal document mask | 🔴 | 910B2 硬件限制（同 CP / 模型级 flex）。`common/vision_encoder.py:57` 的 `mask_mod` 是 `segment_ids[q_idx] == segment_ids[kv_idx]`，读张量 ⇒ pointwise 子图里建 buffer ⇒ `SubgraphLoweringException`。2026-08-31 在 `qwen35_debugmodel_npu` 与 `kimi_k3_debugmodel_npu` 上都实测。三条规避都试过且都无效：把 `create_block_mask` 换成 eager（报错在 `flex_attention` 自身的 lowering 里）、把 flex 节点转成 varlen（BlockMask 不是 VarlenMetadata）、`_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG=True`（仍然进 inductor，且 torch 标注它会破坏反向）|
+| 视觉塔的 FlexAttention 节点 | 🟢 | `npu_minimal` 不转换它（那条路径没有 varlen 掩码，转了会撞 `attention_masks must be VarlenMetadata, got BlockMask`，实测过）。torch 的 `flex_attention` 在不处于 dynamo 时会自己 `torch.compile(..., fullgraph=True)`，昇腾上这条路是通的——前向、LSE、反向实测均通过 |
+| 视觉塔的 block-diagonal document mask | 🟢 | `common/vision_encoder.py:57` 的 `mask_mod` 读张量（`segment_ids[q_idx] == segment_ids[kv_idx]`）。**在昇腾上能跑**：前向、LSE、反向都通过（`tests/repro/probe_flex_deterministic.py`）。此前记成硬件限制是误判——真正的触发条件是`--debug.deterministic`，见 TT-12 |
+| **TT-12** flex + 确定性模式 | 🟢（已加 shim） | `set_determinism` 在非 ROCm 分支上把 `_compiled_flex_attn` 重新编译（并覆盖我们的 shim），这条路在昇腾上不通：读张量的掩码 → `SubgraphLoweringException`，causal 掩码 → `InductorError`。上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支。`shims/flex_eager_when_deterministic.py` 补上后两个模型的 golden 都录了 |
 | KDA（Kimi Delta Attention） | 🟢 | `kernels/kda.py`：上游 kernel 要 CUDA + Blackwell，改走 attn_gym 的 `impl="reference"` + 自写 depthwise causal conv1d |
 | `nvidia-cutlass-dsl` | 🟢 | 有 aarch64 wheel；只 import 不执行（会执行 cute 内核的节点都被 override 掉） |
 | qwen3_5 多模态 collator | 🔴 | 视觉塔的 document mask（上一行）。**不是 DEP-FLA**：`fla-core` 有 aarch64 wheel，装上就能 import，只是它的 Triton 内核编不出来——那条路已由 `kernels/gdn.py` 的 override 接管。qwen3_5 的语言侧真实尺寸可跑，见 `ascend_titan/models/qwen3_5/README.md` |

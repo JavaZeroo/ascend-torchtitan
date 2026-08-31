@@ -134,9 +134,9 @@ MODELS: dict[str, ModelEntry] = {
             "语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 "
             "`kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），"
             "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。"
-            "视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制）；"
+            "多模态 debugmodel 也能跑，golden 已冻结（此前记的视觉塔阻塞是误判，见 TT-12）；"
             "DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；"
-            "GDN 没有融合算子，性能是第三个缺口。"
+            "GDN 没有融合算子，性能是主要缺口。"
         ),
         recipes="ascend_titan.models.qwen3_5.recipes",
         flavors=(
@@ -146,7 +146,7 @@ MODELS: dict[str, ModelEntry] = {
             "qwen35_0_8b_npu",
             "qwen35_0_8b_npu_fsdp2",
         ),
-        golden=("qwen35_debugmodel_npu_text",),
+        golden=("qwen35_debugmodel_npu", "qwen35_debugmodel_npu_text"),
         criteria={
             "R1": "🟢",  # 0.8B 20 步 12.88826 → 8.14589
             "R2": "🟡",  # 单卡 / FSDP2×8 🟢；TP/PP/EP 未测
@@ -183,25 +183,19 @@ MODELS: dict[str, ModelEntry] = {
         name="kimi_k3",
         upstream="torchtitan.models.kimi_k3",
         title="Kimi K3",
-        status="🔴",
+        status="🟡",
         summary=(
-            "多模态 + KDA + MoE。2026-08-30 曾跑通 10 步（单卡 loss 4.10312），"
-            "2026-08-31 复测不再复现。"
+            "多模态 + KDA + MoE，单卡 10 步 loss 4.56418，golden 已冻结并逐位复现。"
+            "只有 debugmodel：R1–R8 一条都没取。"
         ),
         recipes="ascend_titan.models.kimi_k3.recipes",
         flavors=("kimi_k3_debugmodel_npu", "kimi_k3_debugmodel_npu_fused"),
-        blocker=(
-            "视觉塔的 block-diagonal document mask。三条规避都实测无效："
-            "保留 flex 撞 `SubgraphLoweringException`（910B2 无 indirect-memory "
-            "lowering）、转 varlen 撞 `attention_masks must be VarlenMetadata`、"
-            "关掉 flex 自带的编译（`_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG`）仍进 "
-            "inductor。torch 的 flex_attention 不存在未编译路径，所以这不是 shim "
-            "能解决的。"
-        ),
+        golden=("kimi_k3_debugmodel_npu",),
         notes=(
             "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
-            "KDA 走 `kernels/kda.py` 的 override，flex 路径靠 `flex_block_mask_eager` "
-            "shim 走 eager。融合变体（ops-nn SiTU-GLU）实测 loss 4.29434 / tps 48。"
+            "KDA 走 `kernels/kda.py` 的 override；确定性模式下 flex 靠 "
+            "`flex_eager_when_deterministic` shim 走 eager（TT-12）。"
+            "融合变体（ops-nn SiTU-GLU）实测 loss 4.29434 / tps 48。"
             "性能极低，Triton-Ascend 到位前不做性能基线。"
         ),
     ),

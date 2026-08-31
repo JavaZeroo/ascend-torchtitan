@@ -20,9 +20,9 @@ ascend_titan/models/
 | 模型 | 状态 | 我们的 recipe | 说明 / 阻塞 |
 |---|:--:|---|---|
 | **Qwen3** (`qwen3`) | 🟢 | `qwen3` | 参考模型，release 级：0.6B 真实尺寸 + 真实 tokenizer/C4，单卡 / FSDP2×8 / TP2 / PP2 全绿，golden 逐位冻结，500 步长稳、checkpoint 续训逐位一致、HF 权重往返、性能基线带 provenance。 |
-| **Qwen3.5** (`qwen3_5`) | 🟡 | `qwen3_5` | 语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制）；DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；GDN 没有融合算子，性能是第三个缺口。 |
+| **Qwen3.5** (`qwen3_5`) | 🟡 | `qwen3_5` | 语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。多模态 debugmodel 也能跑，golden 已冻结（此前记的视觉塔阻塞是误判，见 TT-12）；DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；GDN 没有融合算子，性能是主要缺口。 |
 | **Llama 3** (`llama3`) | 🟡 | `llama3` | 零 override 的 stock 参考路径：复数 RoPE + ChunkedLoss + spmd_types 全部走上游默认实现。只有 debugmodel：R1–R8 一条都没取，按新判据是 🟡 而不是 🟢。 |
-| **Kimi K3** (`kimi_k3`) | 🔴 | `kimi_k3` | 多模态 + KDA + MoE。2026-08-30 曾跑通 10 步（单卡 loss 4.10312），2026-08-31 复测不再复现。 **阻塞：**视觉塔的 block-diagonal document mask。三条规避都实测无效：保留 flex 撞 `SubgraphLoweringException`（910B2 无 indirect-memory lowering）、转 varlen 撞 `attention_masks must be VarlenMetadata`、关掉 flex 自带的编译（`_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG`）仍进 inductor。torch 的 flex_attention 不存在未编译路径，所以这不是 shim 能解决的。 |
+| **Kimi K3** (`kimi_k3`) | 🟡 | `kimi_k3` | 多模态 + KDA + MoE，单卡 10 步 loss 4.56418，golden 已冻结并逐位复现。只有 debugmodel：R1–R8 一条都没取。 |
 | **DeepSeek-V3** (`deepseek_v3`) | 🟡 | —（矩阵覆盖） | MoE + EP 在矩阵扫描里通过（fsdp+ep、hsdp+ep）；没有专属 recipe，通过矩阵 runner 跑上游配置。 **阻塞：**fused_mla_swiglu：OURS-9（override 节点冲突）；MTP + helion_rope：DEP-HELION。 |
 | **GPT-OSS** (`gpt_oss`) | 🟡 | —（矩阵覆盖） | pp+fsdp+ep+sacop 在矩阵里 🟢（attention sinks 的 LSE 尾部已实现）。 **阻塞：**fsdp+tp+ep：OURS-10（TP2+EP4 下路由 softmax backward 形状不匹配），待查。 |
 | **Kimi K2.7** (`kimi_k2_7`) | 🟡 | —（矩阵覆盖） | muon / MoE 用例在矩阵里覆盖；无专属 recipe。 **阻塞：**DistMuon 是 CUDA-only（TT-CUDA）。 |
@@ -31,8 +31,7 @@ ascend_titan/models/
 
 状态口径改了（2026-08-31）：🟢 现在**只**给 release 级——`docs/model-release-criteria.md`
 的 R1–R8 每一条都有记录下来的命令与输出。此前的 🟢 意思是"debugmodel 能跑"，
-所以 Llama 3 从 🟢 降到 🟡：不是退步了，是尺子换了。Kimi K3 降到 🔴 是另一回事——
-它是真的跑不了了（2026-08-30 的绿今天不再复现）。
+所以 Llama 3 与 Kimi K3 从 🟢 降到 🟡：不是退步了，是尺子换了。
 
 ### release 判据逐条
 

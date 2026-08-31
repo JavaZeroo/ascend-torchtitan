@@ -119,24 +119,20 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh
 | `qwen35_0_8b_npu` | 1 | Qwen3.5-0.8B，真实 tokenizer + 真实 C4 + 4096 上下文 |
 | `qwen35_0_8b_npu_fsdp2` | 8 | 上面 × FSDP2 8 路 |
 
-## 4. 视觉侧：910B2 上跑不了，归因硬件
+## 4. 视觉侧：能跑（此前记的阻塞是误判）
 
-`qwen35_debugmodel_npu` 用 cc12m-test，会走视觉塔，然后死在：
+`qwen35_debugmodel_npu` 用 cc12m-test，会走视觉塔。它一度被记成"910B2 硬件级不可解"，
+2026-08-31 查清是误判：**只在 `--debug.deterministic` 下失败**。
 
-```
-InductorError: LoweringException: SubgraphLoweringException:
-Buffers cannot be created while lowering a pointwise subgraph.
-  File ".../torchtitan/models/common/vision_encoder.py", line 57, in mask_mod
-```
+torchtitan 的 `set_determinism` 在非 ROCm 分支上会把 `FlexAttention._compiled_flex_attn`
+重新编译（并覆盖我们装的 eager shim），这条路在昇腾上不通。上游对 ROCm 的处理就是改用 eager，
+昇腾缺这条分支——`shims/flex_eager_when_deterministic.py` 补上即可。机制与实测见
+`tests/repro/probe_flex_deterministic.py` 与 `docs/capability-matrix.md` 的 TT-12。
 
-`vision_encoder.py` 的 `create_block_diagonal_mask` 里 `mask_mod` 是
-`segment_ids[q_idx] == segment_ids[kv_idx]`——**读张量**。flex 的 `mask_mod` 是 pointwise
-子图，读张量要走 inductor 的 indirect-memory 路径，而 `torch_npu/_inductor/config.py` 里
-`inductor_indirect_memory_mode` 只在 `is_ascend950` 时赋值；910B2 上恒为 `None`。
-与 CP、模型级 flex document mask 是同一个根因，详见 `docs/capability-matrix.md`。
+补上之后，多模态 debugmodel 的 golden 也录了：10 步 loss 13.12734 → 3.87925，逐位复现。
 
-所以真实尺寸的证据取在**语言侧**（`qwen35_0_8b_npu` 换成纯文本 C4）。这不是把问题藏起来：
-多模态那格是红的，写在这里，也写在能力矩阵里。
+真实尺寸的证据仍然取在**语言侧**（`qwen35_0_8b_npu` 换成纯文本 C4），因为真实 cc12m 是图文
+数据集，不在这台机器的下载预算里——这是数据的限制，不是能力的限制。
 
 ## 5. 已知缺口（离 🟢 还差什么）
 

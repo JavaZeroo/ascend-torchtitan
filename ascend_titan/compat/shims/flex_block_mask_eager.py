@@ -20,24 +20,26 @@ The two mask builders have a genuine uncompiled twin: ``create_block_mask``
 called directly builds the same BlockMask without entering inductor. Those two
 shims work.
 
-The third one does not, and this is worth stating plainly because the shim's
-first version claimed otherwise. ``torch.nn.attention.flex_attention`` has **no**
+The third one is subtler. ``torch.nn.attention.flex_attention`` has **no**
 uncompiled path::
 
     with setup_compilation_env() as backend:
         flex_fn = torch.compile(_flex_attention_hop_wrapper, backend=backend,
                                 fullgraph=True)
 
-Whenever it is not already under dynamo it compiles itself. Substituting it for
-upstream's pre-compiled callable only moves the ``torch.compile`` inside torch;
-inductor is entered either way. So on 910B2 any flex attention -- including a
-vision tower's -- goes through torch_npu's inductor lowering, and a mask_mod that
-reads a tensor cannot be lowered there (Ascend950-only indirect memory). No shim
-can change that. torch's own escape hatch,
-``_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG``, is documented as breaking the backward
-pass, so it is a debugging aid, not a training path.
+Whenever it is not already under dynamo it compiles itself, so substituting it
+for upstream's pre-compiled callable only moves the ``torch.compile`` inside
+torch. That turns out to matter anyway: compiling just the HOP wrapper works on
+910B2 -- document masks included, forward / LSE / backward all measured -- while
+compiling the whole ``flex_attention`` function does not. See
+``tests/repro/probe_flex_deterministic.py``.
 
-This buys reachability for mask construction, not speed, and not flex itself.
+So this shim does buy something, but it is not what the first version claimed
+("910B2 cannot lower a tensor-reading mask_mod" was wrong -- see
+docs/capability-matrix.md). The one place the whole function still gets compiled
+is ``set_determinism``, which re-assigns the attribute after we set it; that is
+handled separately by ``flex_eager_when_deterministic``.
+
 Once Triton-Ascend is installed the shims step aside on their own.
 
 Feature-gated, not version-gated (P12): as soon as triton reports an active

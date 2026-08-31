@@ -124,12 +124,6 @@ def test_causal_conv1d_matches_upstreams_own_dense_expression(npu_stub):
     weight_C1W = torch.randn(channels, 1, width, generator=gen)
 
     x_1CT = F.pad(x_TC.transpose(0, 1).unsqueeze(0), [width - 1, 0])
-    want = (
-        F.silu(F.conv1d(x_1CT, weight_C1W, None, groups=channels))
-        .squeeze(0)
-        .transpose(0, 1)
-    )
-    got = ascend_causal_conv1d(
-        x_TC.unsqueeze(0), weight_C1W[:, 0], activation="silu"
-    ).squeeze(0)
+    want = F.silu(F.conv1d(x_1CT, weight_C1W, None, groups=channels)).squeeze(0).transpose(0, 1)
+    got = ascend_causal_conv1d(x_TC.unsqueeze(0), weight_C1W[:, 0], activation="silu").squeeze(0)
     torch.testing.assert_close(got, want, rtol=1e-5, atol=1e-5)

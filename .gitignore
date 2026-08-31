@@ -10,3 +10,6 @@ outputs/
 .venv/
 # local-only claude settings
 .claude/settings.local.json
+
+# inductor 报错时自动落的调试产物
+torch_compile_debug/
