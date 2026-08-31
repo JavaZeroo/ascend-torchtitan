@@ -69,14 +69,13 @@ We stay at 64 anyway, for conditioning. The intra-chunk transition matrix is
 ``beta * (k_i . k_j) * decay``, so bounded by one; its largest entry grows fast
 with the chunk size -- measured 5.7e3 (C=64), 5.7e6 (C=128), 5.7e15 (C=256) --
 and everything downstream multiplies by it. That is a property of the
-decomposition, not of how we invert: forward substitution produces the same
-numbers, which is why fla and attn_gym also use 64. It is also the size our
-alignment tests target.
+decomposition, not of how we invert, which is why fla and attn_gym also use 64.
+It is also the size our alignment tests target.
 
-(An earlier note here blamed the step-4 non-finite loss in qwen3.5-0.8B on
-raising this value. That was wrong: C=64 diverges at step 4 too. The divergence
-is in the training configuration, not the chunk size -- see
-models/qwen3_5/README.md.)
+(An earlier note here blamed qwen3.5-0.8B's step-4 non-finite loss on raising
+this value, and a later one blamed the training configuration. Both were wrong:
+it was the Neumann series in ``_UnitLowerInverse``, which C=64 also triggered.
+See that class.)
 """
 
 

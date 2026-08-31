@@ -1,6 +1,6 @@
 # Qwen3.5 on Ascend
 
-**状态 🟡 — 语言侧真实尺寸能跑，视觉侧被 910B2 的 flex 限制挡住，性能是主要缺口。**
+**状态 🟡 — 语言侧真实尺寸能训，视觉侧被 910B2 的 flex 限制挡住，性能是主要缺口。**
 判据见 `docs/model-release-criteria.md`。
 
 | | |
@@ -34,17 +34,19 @@ chunk 内那步要对单位下三角的转移矩阵求逆，它用 `for row in r
 每次迭代都 `clone()` 整块 `[B, H, chunks, C, C]`。debugmodel 尺寸下看不出来；0.8B（24 层、
 4096 上下文、外面还套着 SelectiveAC 的 `__torch_dispatch__`）下**一步十分钟跑不完**。
 
-`ascend_chunk_gdn` 是同一个分解，只把那个循环换成闭式：严格下三角矩阵幂零，
-`(I - A)^-1 = I + A + A² + …` 是有限和，倍增法 `log2(C)` 步算完，全是 matmul。
+`ascend_chunk_gdn` 是同一个分解，只把那个循环换成**分块**前代回代：对角块小到可以
+安全用级数，其余每个块行一次 matmul。（一开始用的是整块的 Neumann 级数倍增，那是错的——
+它会溢出，见第 2 节。）
 `tests/unit/test_kernel_gdn.py`（CPU）与 `tests/npu/test_kernel_gdn.py`（910B2）
 逐项对 attn_gym 的 reference 钉住：前向、梯度、bf16。
 
-**chunk 尺寸不是可调的旋钮。** 步时正比于 `tokens / chunk_size`，实测 step-1 tps
-64 → 231、128 → 314、256 → 385；但 128 与 256 都在第 4 步 loss 变 inf，64 正常。
-原因不在求逆的写法，而在 chunk 内的转移矩阵本身：`(I - A)^-1` 里 A 的元素是
-`beta * (k_i · k_j) * decay`（量级 1），逆的最大元素随 C 增长——实测 5.7e3 (C=64)、
-5.7e6 (C=128)、5.7e15 (C=256)，后面所有乘法都被它吃掉。前代回代同样如此，所以
-fla 与 attn_gym 都用 64。性能要从别处来，见第 5 节。
+**chunk 尺寸留在 64**，与 fla / attn_gym 一致。步时正比于 `tokens / chunk_size`
+（实测 step-1 tps 64 → 231、128 → 314、256 → 385），但 chunk 内转移矩阵的逆随 C
+迅速变大——实测最大元素 5.7e3 (C=64)、5.7e6 (C=128)、5.7e15 (C=256)，后面所有乘法
+都要乘上它。这是分解本身的性质，与求逆写法无关。性能要从别处来，见第 5 节。
+
+（早先这里写着"128/256 会 NaN 所以必须用 64"，是错的：chunk 64 当时同样会 NaN，
+那是求逆写法的问题，已修。）
 
 ## 2. 跑起来
 
@@ -70,118 +72,42 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh
 会被 clamp 到它。0.8B 的配置是 lr 5e-3 + 20 步 warmup + 1000 步，用 `--training.steps 5`
 跑就等于第一步直接满学习率。
 
-### 从零训练会发散（不是内核；学习率能推迟，不能消除）
+### 曾经在第 4–13 步发散——是我们的求逆，已修
 
-即使把 LR 曲线钉对，`qwen35_0_8b_npu` 从随机初始化跑仍然会炸，且与卡数无关：
+`qwen35_0_8b_npu` 从随机初始化跑，一度会在第 4–13 步 loss 变非有限。**根因是
+`kernels/gdn.py` 里 chunk 内那个求逆**，2026-08-31 修掉。
 
-| step | 8 卡 FSDP2 loss / grad_norm | 单卡 loss / grad_norm |
-|--:|--:|--:|
-| 1 | 12.92388 / 0.8510 | 12.90188 / 1.0562 |
-| 2 | 12.21161 / 1.1073 | 12.43087 / 1.2797 |
-| 3 | 10.83435 / 2.9801 | 11.33137 / 2.3391 |
-| 4 | 11.50074 / 19.9772 | 非有限，中止 |
-| 5 | 非有限，中止 | — |
+定位过程（每一步都排除了一个当时看起来最像的嫌疑）：
 
-梯度范数逐步翻倍、loss 在发散前一步反弹——优化器炸掉的形状。梯度裁剪是开着的
-（`training.max_norm` 默认 1.0），而打出来的是裁剪**前**的范数，所以非有限来自反向本身。
-
-**不是 GDN 的数值问题**，前反向都查过：`ascend_chunk_gdn` 在最坏参数（beta→1、decay→0）下，
-seq 16384 的前向与 seq 4096 的梯度都与 attn_gym reference 一致（前向差 1.6e-7、梯度差 4.6e-5），
-两边都有限。这两条都固化在 `tests/unit/test_kernel_gdn.py` 里。
-
-**凡是缩小更新幅度的旋钮都只能推迟它，不能消除**：
-
-| 改什么 | 结局 |
+| 试的东西 | 结果 |
 |---|---|
-| 原样（lr 5e-3、warmup 20/1000） | 第 4–5 步非有限 |
-| lr → 1e-3 | 第 10 步非有限（第 7 步 grad_norm 已 14.4） |
-| lr → 5e-4 | 10 步跑完，但第 9 步 grad_norm 10.5 |
-| warmup 20 → 200（lr 不动） | 第 13 步非有限（第 9 步 grad_norm 9.45） |
+| 学习率 5e-3 → 1e-3 → 5e-4 | 只把发散推到第 10 / 更晚，消不掉 |
+| warmup 20 → 200 | 推到第 13 步 |
+| 优化器 fused → foreach | 只差一步（第 4 → 第 5） |
+| 参数初始化 | `A_log ∈ [0.17, 2.73]`、`dt_bias=1.0`，与上游 flex 路径一致 |
+| 卡数 | 单卡与 8 卡一样 |
+| 全模块前向钩子 | 第一处非有限出在 `AscendGatedDeltaKernel`，**输入有限、输出非有限** |
+| 同输入喂 attn_gym reference | **我们非有限、它有限**（max 3.3e-2）——是我们的实现 |
+| 与 reference 逐行 diff | 数学上唯一的差别就是那个求逆 |
 
-四次的形状一模一样：grad_norm 先出现一次尖峰（6–14）、回落、再往上，然后非有限。
-"越小越晚"是**有东西在累积**的形状，不是"学习率大了一点"。
+原来的写法是 Neumann 级数倍增：`(I-A)^-1 = I + A + … + A^(C-1)` 对幂零的 A 是精确的，
+`log2(C)` 次 matmul 就能算完。但**最终的和有界，中间的 `A^32` 不是**——在训练几步之后
+学到的门控值上它溢出 fp32。attn_gym 的前代回代从不形成这些幂，所以它没事。
 
-**我们替换掉的每一块都已经单独验过，都不是它：**
+现在用分块前代回代（`X = I + A X`，对角块用级数、其余每个块行一次 matmul，用的都是
+已定的 X），拿到替换法的数值和 matmul 的开销。三种写法在 910B2 上实测：
 
-- GDN 递推：最坏门控（beta→1、decay→0）下，seq 16384 的前向与 seq 4096 的梯度都与
-  attn_gym reference 一致且有限（`tests/unit/test_kernel_gdn.py`）。
-- causal conv1d：与上游 dense 分支自己的 `F.pad` + `F.conv1d` + `silu` 逐位一致
-  （`tests/unit/test_kernel_kda.py`）——不是跟我自己写的 naive 版比。
-- 门控数学（`g_TN` / `beta_TN`）：从上游逐字抄的。
-- 同一套代码在 debugmodel 尺寸、同样 lr 5e-3 下 10 步稳定下降，golden 已冻结。
+| 方法 | chunks=1 | chunks=64 | |
+|---|--:|--:|---|
+| Neumann 倍增 | 0.50 ms | 0.52 ms | 溢出 |
+| `torch.linalg.solve_triangular` | 1.05 ms | 54.93 ms | 正确但开销随 chunk 线性增长 |
+| **分块前代回代** | 1.50 ms | 2.44 ms | 用它 |
 
-**2026-08-31 更晚：探针把它抓住了。** 挂一个只报"第一处非有限"的钩子跑下来：
+修后 20 步：loss 12.85958 → 8.30913，rc=0。第 4 步 grad_norm 仍然冲到 21.8，但随后
+7.5 → 4.4 → 2.2 → 1.3 收回来了——梯度尖峰本身是能扛过去的，是求逆溢出把它变成了 NaN。
 
-```
-step: 4  loss: 11.28086  grad_norm: 21.4275
-step: 5  loss: 10.30357  grad_norm: 10.4862
-__NONFINITE__ step=6 at gdn.output (out) shape=(1, 16, 1372, 128)
-```
-
-**输入全是有限的，输出不是**——所以 inf 是 GDN 前向自己算出来的，不是训练配置。
-（探针先查 q/k/v/g/beta 再查输出。）这推翻了上面"不是内核"的判断：内核与
-attn_gym reference 一致这件事仍然成立，但那只说明**两边会一起炸**，不说明不炸。
-
-再缩一次范围，答案不是那个逆：
-
-```
-__INV__ FIRST NON-FINITE INVERSE
-__INV__ shape=(1, 16, 25, 64, 64) max|A|=nan
-__INV__ solve_triangular finite=False max=nan
-```
-
-`max|A|=nan` —— **逆的输入就已经是 NaN**，所以倍增法和求逆本身都是无辜的（顺带确认
-`torch.linalg.solve_triangular` 在昇腾上能跑，只是喂给它的已经是 NaN）。
-
-第三个探针逐个查门控那一段，答案更靠前：
-
-```
-__DECAY__ first non-finite at log_decay(in): nan=40960 inf=0 shape=(1, 16, 4096)
-```
-
-**`log_decay` 进到 chunk 递推时就已经是 NaN**（65536 个元素里 40960 个）。它由上游的表达式
-算出来，我们逐字抄的那一行：
-
-```python
-g_TN = -torch.exp(A_log_N.float()) * F.softplus(a_TN.float() + dt_bias_N)
-```
-
-机制在 CPU 上两行就能复现：
-
-| `A_log` | `a` | `exp(A_log)` | `softplus(a)` | `g` |
-|--:|--:|--:|--:|--:|
-| 4 | 0 | 5.46e+01 | 6.93e-01 | -37.8 |
-| 89 | 0 | inf | 6.93e-01 | **-inf** |
-| 100 | -200 | inf | 0 | **nan** |
-
-`A_log` 涨过 ~88，`exp` 就溢出成 inf；再乘一个下溢到 0 的 softplus，`inf × 0 = nan`。
-即使不到 NaN 而只是 `-inf`，后面 `cum_i - cum_j` 里两个 `-inf` 相减照样是 NaN。
-
-### 所以现在的结论
-
-NaN 的**出生地**是门控表达式，在我们的 chunk 递推之前，而且那一行是上游的。
-但要说清楚：`A_log` 能涨到 88 本身是前面几步梯度尖峰（grad_norm 2.5 → 25）的**后果**，
-所以这是"坏掉之后在哪里变成 NaN"，不一定是"为什么会坏"。两件事要分开继续查。
-
-**没有在这里加钳位**。把 `g` 夹到有限值会让训练继续跑下去，但那是把一个已经坏掉的运行
-变成静默的坏——上游的非有限检查现在正在做它该做的事。真要修，要么在 log 空间算这个门控
-（`-exp(A_log + log softplus(...))`，避开 `inf × 0`），要么先解决梯度为什么会尖峰；
-两条都要有实测才动。
-
-recipe 保持上游的值，这一格记 🟡。
-
-
-还没排除的两条，都需要现在没有的东西：
-
-1. **attn_gym 的 reference 与 fla 的真实内核是否等价。** 我们对拍的是 reference，如果
-   reference 本身与 fla 的分块公式有稳定性差异，两边会一起错而我们看不出来。
-   本来以为要一张 CUDA 卡才能证伪，但 `../flash-linear-attention-npu` 提供了昇腾上的第二
-   实现（见第 5 节），装上就能直接对拍。
-2. **上游这个配置在 C4 上本来能不能训。** 上游 0.8B 配的是多模态 cc12m；拿它当对照跑一次
-   就能把"数据"这个变量分开，但 cc12m 是图文数据集，不在这台机器的下载预算里。
-
-值得先试的低成本方向：GDN 的跨 chunk 状态递推在 decay→0 时不会遗忘，`state` 会沿 64 个
-chunk 单调累积——打一下 `state` 的范数随步数的变化，看是不是它在涨。
+`qwen35_debugmodel_npu_text` 的 golden 在这次改动后**逐位不变**：新旧写法在正常区间
+数值恒等，只在旧写法会溢出的地方才分道扬镳。
 
 ## 3. recipe
 
@@ -216,7 +142,7 @@ Buffers cannot be created while lowering a pointwise subgraph.
 
 | 判据 | 状态 | 缺什么 |
 |---|:--:|---|
-| R1 真实形态 | 🟡 | 形态齐了（0.8B + 真实 tokenizer + 真实 C4 + 4096 上下文），但从零训练第 5 步发散——见上面第 2 节，先要定位到学习率还是别的 |
+| R1 真实形态 | 🟢 | 0.8B + 真实 tokenizer + 真实 C4 + 4096 上下文，20 步 loss 12.85958 → 8.30913（rc=0）|
 | R2 并行覆盖 | 🟡 | 单卡与 FSDP2×8 都能起来并推进（8 卡逐步日志见第 2 节），但都在第 5 步撞上同一个发散；TP / PP / EP 未测 |
 | R3 数值可信 | 🟡 | 算子级对拍 🟢：`tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2，fp32/bf16 前向 + 梯度）都对 attn_gym reference 通过；语言侧 golden 已冻结并逐位复现（`qwen35_debugmodel_npu_text`）。缺的是**真实尺寸**下的长步数下降曲线——它卡在下面那条发散上 |
 | R4 checkpoint | ⚪ | 未跑 |
