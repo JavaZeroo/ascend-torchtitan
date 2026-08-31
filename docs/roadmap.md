@@ -22,9 +22,13 @@ qwen3.5 发散事件的直接对策。两边都对 float64 参考解收敛，bf1
 - **导入时机是硬约束**。`fla_npu` 必须在第一个 NPU 算子执行之前 import——它在 `__init__` 里设
   `ASCEND_CUSTOM_OPP_PATH`，而 CANN 的算子注册表一旦初始化就不再重读。晚导入会以
   `aclnnStatus=161001`（NULLPTR，查不到算子）失败。接进来时导入点应当在 `_bootstrap.setup()`。
-- **`npu_solve_tri` 不是我们那条路径的直接替换**。它在 `solve_tri_def.cpp` 里把输入 dtype 写死成
-  `{DT_FLOAT16, DT_BF16}`，而我们的 GDN 契约是 FP32 递推（fp32 下我们 rel≈1e-7，bf16 下退到 4e-3）。
-  换过去等于拿数值精度换速度，而这个算子恰好就是当初咬人的地方——要换必须先有 R4 级别的取证。
+- **精度结构不同，但不是降级**。这套算子的支持组合（`chunk_gated_delta_rule_fwd_h` 有 10 组）
+  长这样：data=BF16 / gate=FLOAT / state=FLOAT——**递推状态和门控留在 fp32**，只有矩阵乘的
+  操作数是 bf16。这是混合精度训练的常规结构，不是把递推降到 bf16。我们现在的做法（`promote_types`
+  把所有东西升到 fp32、autocast 关掉）比它更严，也更慢。
+  唯一真正的缺口是 `npu_solve_tri`：`solve_tri_def.cpp` 里只声明 `{DT_FLOAT16, DT_BF16}`，没有
+  fp32 组合，而它算的正是转移矩阵——当初咬人的地方。fp32 下我们 rel≈1e-7，bf16 下它 1.42e-3。
+  所以换过去要按 R4 取证：先看 qwen3.5 的 golden 是否受影响，别凭"上游也这么做"就直接换。
 - **他们的整网示例跑不起来**，`examples/flash_gated_delta_rule.py` 的 `l2norm` / `chunk_local_cumsum`
   等走 Triton-Ascend，本机没装，报 `0 active drivers`（和 flex attention 那次同一个缺口）。
   可用的是 AscendC 那一批直接调用，非 AscendC 的部分继续用我们自己的 torch 实现。
