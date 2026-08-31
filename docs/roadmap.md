@@ -6,13 +6,28 @@
 
 ## 一 · 把线性注意力做实
 
-解锁条件：`fla-npu` 装上并通过对拍。
+解锁条件：**已达成**——`fla-npu` 已在 NIGHTLY 上构建安装并通过对拍。
 
-- **接入 `flash-linear-attention-npu`**（`../flash-linear-attention-npu`，AscendC 实现，
-  `fla/ops/ascendc/` 下有 `gdn` 与 `kda`，尚未安装）。它一次解两件事：Qwen3.5 的 R5——GDN
-  现在是纯 torch 的 chunk 递推，245 tps vs Qwen3 的 10,186 tps；以及给我们的实现一个
-  **独立于 attn_gym 的第二实现**用于互证。入口 `build.sh --soc`（910B2 选 A2）与
-  `gdn-verify.sh`。装第三方源码包记得带 `-c constraints/nightly.txt`。
+`flash-linear-attention-npu`（`../flash-linear-attention-npu`，AscendC 实现）现已可用：
+`build.sh --pkg --soc=ascend910b --vendor_name=fla_npu` 出 `.run`，再 `torch_custom/fla_npu/build.sh`
+编 wheel 并把 OPP 叠进去（顺序不能反）。它的 pip 步骤带 `--no-deps`，实测没有动 torch 三元组。
+
+`tests/repro/probe_solve_tri_crosscheck.py` 是那个**独立于 attn_gym 的第二实现**互证——
+qwen3.5 发散事件的直接对策。两边都对 float64 参考解收敛，bf16 下我们 4.07e-3 / 它 1.42e-3
+（C=64），彼此之差就是 bf16 噪声；这独立佐证了当初把 Neumann doubling 换成分块前代的改写
+是对的。速度上它明显更好：C=64 时 0.467 ms vs 我们 1.356 ms，且 C 翻倍它几乎不变而我们线性翻倍。
+
+接下来做 R5（GDN 现在是纯 torch 的 chunk 递推，245 tps vs Qwen3 的 10,186 tps）时，三条实测约束：
+
+- **导入时机是硬约束**。`fla_npu` 必须在第一个 NPU 算子执行之前 import——它在 `__init__` 里设
+  `ASCEND_CUSTOM_OPP_PATH`，而 CANN 的算子注册表一旦初始化就不再重读。晚导入会以
+  `aclnnStatus=161001`（NULLPTR，查不到算子）失败。接进来时导入点应当在 `_bootstrap.setup()`。
+- **`npu_solve_tri` 不是我们那条路径的直接替换**。它在 `solve_tri_def.cpp` 里把输入 dtype 写死成
+  `{DT_FLOAT16, DT_BF16}`，而我们的 GDN 契约是 FP32 递推（fp32 下我们 rel≈1e-7，bf16 下退到 4e-3）。
+  换过去等于拿数值精度换速度，而这个算子恰好就是当初咬人的地方——要换必须先有 R4 级别的取证。
+- **他们的整网示例跑不起来**，`examples/flash_gated_delta_rule.py` 的 `l2norm` / `chunk_local_cumsum`
+  等走 Triton-Ascend，本机没装，报 `0 active drivers`（和 flex attention 那次同一个缺口）。
+  可用的是 AscendC 那一批直接调用，非 AscendC 的部分继续用我们自己的 torch 实现。
 - **补齐 Qwen3.5 的 R2 / R4 / R6**。TP / PP / EP 未测；DCP 续训要先有一个冻结视觉塔的
   机制（纯文本 recipe 让视觉塔没有优化器状态，上游只有 LoRA 自己做冻结）；R6 被 R5 卡住
   （一步 67 秒，500 步要 9 小时）。后两条依赖上一件事先落地。
