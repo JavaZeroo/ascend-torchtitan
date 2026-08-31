@@ -80,38 +80,83 @@ models/qwen3_5/README.md.)
 """
 
 
+BASE_BLOCK = 16
+"""Diagonal-block size for the inverse. See :class:`_UnitLowerInverse`."""
+
+
+def _series_inverse(strictly_lower: torch.Tensor) -> torch.Tensor:
+    """``(I - A)^-1`` by the Neumann series, evaluated by doubling.
+
+    Exact for nilpotent ``A``: ``I + A + ... + A^(C-1)``, in ``log2(C)`` matmuls.
+    Only used on the small diagonal blocks, where the highest power formed is
+    ``A^(BASE_BLOCK/2)`` -- at full chunk size the intermediate powers are far
+    larger than the sum they telescope into, and overflow fp32.
+    """
+    size = strictly_lower.shape[-1]
+    eye = torch.eye(size, dtype=strictly_lower.dtype, device=strictly_lower.device)
+    inverse = eye + strictly_lower
+    power = strictly_lower
+    covered = 2
+    while covered < size:
+        power = power @ power
+        inverse = inverse + power @ inverse
+        covered *= 2
+    return inverse
+
+
 class _UnitLowerInverse(torch.autograd.Function):
     """``(I - A)^-1`` for a *strictly* lower-triangular ``A``, with an exact backward.
 
-    Forward is a triangular solve. ``I - A`` is unit lower triangular, so
-    substitution gets the inverse directly -- the same thing attn_gym's reference
-    does with its ``for row in range(1, chunk_size)`` loop, but as one op instead
-    of 63 iterations that each clone the whole block.
+    Forward is block forward substitution -- substitution's numerics at matmul's
+    cost. With ``X = I + A X`` and ``A_ii`` strictly lower inside each diagonal
+    block::
 
-    **Not** the Neumann series. ``A`` is nilpotent, so
-    ``(I - A)^-1 = I + A + ... + A^(C-1)`` is exact and can be evaluated by
-    doubling in ``log2(C)`` matmuls. That is what this did first, and it was
-    wrong: the sum is bounded, the individual powers on the way there are not.
-    On qwen3.5-0.8B after three training steps, with learned gates (``|g|`` up to
-    30, ``|q|``/``|k|`` under 0.8), the doubling overflowed fp32 while attn_gym's
-    reference stayed finite on the *same inputs* (max 3.3e-2) -- that is what took
-    the run non-finite at step 4. Substitution never forms the powers.
+        X_ii     = (I - A_ii)^-1                        (batched, small blocks)
+        X[i, :i] = X_ii @ (A[i, :i] @ X[:i, :i])        (one matmul per block row)
+
+    Every step after the diagonal uses an already-final ``X``, never a power of
+    ``A``. That is the property attn_gym's ``for row in range(1, chunk_size)``
+    loop has and the Neumann series does not.
+
+    Three implementations were measured on 910B2 (batched ``[1, 16, chunks, 64, 64]``):
+
+    ==================  =========  ==========  ===================================
+    method              chunks=1   chunks=64   note
+    ==================  =========  ==========  ===================================
+    Neumann doubling      0.50 ms     0.52 ms  overflows fp32 on trained gates
+    ``solve_triangular``  1.05 ms    54.93 ms  correct; cost is linear in chunks
+    block substitution    1.50 ms     2.44 ms  correct and flat -- this one
+    ==================  =========  ==========  ===================================
 
     Backward is the closed form and does not care how the forward was computed:
     ``X = (I - A)^-1`` has ``dX = X dA X``, so ``grad_A = X^T @ grad_X @ X^T``
-    masked back to strictly lower -- two matmuls, and nothing that saw ``A^32``.
+    masked back to strictly lower -- two matmuls.
     """
 
     @staticmethod
     def forward(ctx, strictly_lower_NCC: torch.Tensor) -> torch.Tensor:
         size = strictly_lower_NCC.shape[-1]
-        eye = torch.eye(size, dtype=strictly_lower_NCC.dtype, device=strictly_lower_NCC.device)
-        inverse = torch.linalg.solve_triangular(
-            eye - strictly_lower_NCC,
-            eye.expand_as(strictly_lower_NCC),
-            upper=False,
-            unitriangular=True,
+        block = min(BASE_BLOCK, size)
+        if size % block:
+            block = size
+        blocks = size // block
+
+        diagonal = torch.stack(
+            [
+                strictly_lower_NCC[..., i * block : (i + 1) * block, i * block : (i + 1) * block]
+                for i in range(blocks)
+            ],
+            dim=-3,
         )
+        diagonal_inverse = _series_inverse(diagonal)
+
+        inverse = torch.zeros_like(strictly_lower_NCC)
+        for i in range(blocks):
+            begin, end = i * block, (i + 1) * block
+            inverse[..., begin:end, begin:end] = diagonal_inverse[..., i, :, :]
+            if i:
+                below = strictly_lower_NCC[..., begin:end, :begin] @ inverse[..., :begin, :begin]
+                inverse[..., begin:end, :begin] = diagonal_inverse[..., i, :, :] @ below
         ctx.save_for_backward(inverse)
         return inverse
 
