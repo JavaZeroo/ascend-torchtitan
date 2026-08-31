@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ascend-torchtitan 现状</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ink: #10151c;
+    --paper: #f6f8f9;
+    --surface: #ffffff;
+    --sunken: #eef1f4;
+    --hairline: #dbe2e6;
+    --hairline-strong: #c3ced5;
+    --muted: #5a6672;
+    --accent: #0d6e7a;
+    --accent-soft: #e2f1f2;
+    --pass: #2b7a4b;
+    --pass-soft: #e4f2e8;
+    --partial: #a1701a;
+    --partial-soft: #f7eedb;
+    --fail: #b23a2f;
+    --fail-soft: #fae7e4;
+    --untested: #8b95a1;
+    --untested-soft: #eceff2;
+
+    --sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --display: "Archivo", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+
+    --col: 1180px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e4eaef;
+      --paper: #0e1319;
+      --surface: #161d25;
+      --sunken: #1b232c;
+      --hairline: #2a343f;
+      --hairline-strong: #3b4855;
+      --muted: #94a2b0;
+      --accent: #56ccd6;
+      --accent-soft: #14313a;
+      --pass: #63c98a;
+      --pass-soft: #16301f;
+      --partial: #d8ab4e;
+      --partial-soft: #322715;
+      --fail: #e8776a;
+      --fail-soft: #34191a;
+      --untested: #7f8b98;
+      --untested-soft: #1e262f;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ink: #e4eaef;
+    --paper: #0e1319;
+    --surface: #161d25;
+    --sunken: #1b232c;
+    --hairline: #2a343f;
+    --hairline-strong: #3b4855;
+    --muted: #94a2b0;
+    --accent: #56ccd6;
+    --accent-soft: #14313a;
+    --pass: #63c98a;
+    --pass-soft: #16301f;
+    --partial: #d8ab4e;
+    --partial-soft: #322715;
+    --fail: #e8776a;
+    --fail-soft: #34191a;
+    --untested: #7f8b98;
+    --untested-soft: #1e262f;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--col); margin: 0 auto; padding: 0 28px 96px; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  code, .mono { font-family: var(--mono); font-size: 0.88em; }
+  code { background: var(--sunken); padding: 0.08em 0.34em; border-radius: 3px; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { border-bottom: 1px solid var(--hairline); padding: 52px 0 30px; display: grid; gap: 18px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.13em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  h1 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(2.1rem, 4.6vw, 3.1rem); line-height: 1.06;
+    letter-spacing: -0.022em; margin: 0; text-wrap: balance;
+  }
+  .standfirst { max-width: 64ch; color: var(--muted); font-size: 1.02rem; margin: 0; }
+  .baseline { display: flex; flex-wrap: wrap; gap: 8px 10px; padding-top: 4px; }
+  .pin {
+    font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--hairline);
+    background: var(--surface); border-radius: 3px; padding: 4px 9px; color: var(--muted);
+  }
+  .pin b { color: var(--ink); font-weight: 500; }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 58px; }
+  h2 {
+    font-family: var(--display); font-weight: 600; font-size: 1.42rem;
+    letter-spacing: -0.012em; margin: 0 0 6px; text-wrap: balance;
+  }
+  .lede { color: var(--muted); max-width: 70ch; margin: 0 0 26px; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 1.02rem; letter-spacing: -0.005em; margin: 0 0 8px; }
+  p { max-width: 72ch; }
+
+  /* ---------- chips & dots ---------- */
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em;
+    padding: 2px 8px 2px 6px; border-radius: 999px; white-space: nowrap;
+  }
+  .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+  .chip.pass { color: var(--pass); background: var(--pass-soft); }
+  .chip.partial { color: var(--partial); background: var(--partial-soft); }
+  .chip.fail { color: var(--fail); background: var(--fail-soft); }
+  .chip.untested { color: var(--untested); background: var(--untested-soft); }
+
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; }
+  .dot.pass { background: var(--pass); }
+  .dot.partial { background: var(--partial); }
+  .dot.fail { background: var(--fail); }
+  .dot.untested { background: var(--untested-soft); border: 1.5px solid var(--untested); }
+
+  /* ---------- tables ---------- */
+
+  .scroll-x { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  table th, table td { border-bottom: 1px solid var(--hairline); padding: 11px 10px; text-align: left; vertical-align: top; }
+  thead th {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--hairline-strong); white-space: nowrap;
+  }
+  tbody th { font-family: var(--display); font-weight: 600; font-size: 0.98rem; white-space: nowrap; }
+  td small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.5; margin-top: 3px; }
+  td.num { text-align: right; font-family: var(--mono); }
+  table.matrix { min-width: 720px; }
+  table.matrix td.crit { text-align: center; width: 58px; }
+  table.risk { min-width: 760px; font-size: 14px; }
+  table.risk td { max-width: none; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+
+  /* ---------- ranked essence ---------- */
+
+  .rank { display: grid; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 4px; overflow: hidden; }
+  .rank > div { background: var(--surface); padding: 17px 18px; display: grid; grid-template-columns: 92px 1fr; gap: 20px; }
+  .rank .weight {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--accent); padding-top: 3px;
+  }
+  .rank .weight span { display: block; margin-top: 6px; height: 3px; border-radius: 2px; background: var(--accent); opacity: 0.9; }
+  .rank .weight span.w3 { width: 100%; }
+  .rank .weight span.w2 { width: 62%; }
+  .rank .weight span.w1 { width: 30%; }
+  .rank p { margin: 6px 0 0; color: var(--muted); font-size: 13.8px; }
+  .rank p + p { margin-top: 8px; }
+  .rank .verdict { color: var(--ink); }
+
+  /* ---------- roadmap ---------- */
+
+  .phases { display: grid; gap: 14px; }
+  .phase {
+    border: 1px solid var(--hairline); background: var(--surface);
+    border-radius: 4px; padding: 18px 19px;
+    display: grid; grid-template-columns: 150px 1fr; gap: 22px;
+  }
+  .phase .when {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent);
+  }
+  .phase .when b { display: block; font-family: var(--display); font-size: 1.05rem; letter-spacing: -0.01em; color: var(--ink); margin-top: 5px; text-transform: none; font-weight: 600; }
+  .phase .gate {
+    margin-top: 10px; font-size: 11.5px; color: var(--muted); font-family: var(--mono); line-height: 1.5;
+    border-top: 1px solid var(--hairline); padding-top: 8px;
+  }
+  .phase ul { margin: 0; padding-left: 18px; }
+  .phase li { margin-bottom: 7px; }
+  .phase li:last-child { margin-bottom: 0; }
+  .phase li b { font-weight: 600; }
+  .phase li span { color: var(--muted); }
+
+  /* ---------- misc ---------- */
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--hairline); background: var(--surface); border-radius: 4px; padding: 16px 17px; }
+  .card p { margin: 6px 0 0; color: var(--muted); font-size: 13.5px; }
+  .card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
+  .card li { margin-bottom: 4px; }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 13px 16px; border-radius: 0 4px 4px 0; font-size: 14px; max-width: 74ch;
+  }
+  .note.warn { border-left-color: var(--partial); background: var(--partial-soft); }
+
+  .sev { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; white-space: nowrap; }
+  .sev.high { color: var(--fail); }
+  .sev.mid { color: var(--partial); }
+  .sev.low { color: var(--muted); }
+
+  footer {
+    margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--hairline);
+    color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 6px 20px;
+  }
+
+  @media (max-width: 680px) {
+    .rank > div, .phase { grid-template-columns: 1fr; gap: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+<style>
+  /* 复刻 artifact 发布时注入的骨架，便于本地直接用浏览器打开 */
+  :root { color-scheme: light dark; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">torchtitan · 昇腾 910B2 · 树外扩展</div>
+    <h1>ascend-torchtitan 现状</h1>
+    <p class="standfirst">
+      结果、判断、以及未来会撞上什么。把 torchtitan 跑在昇腾 NPU 上，方式是<strong>扩展而不 fork</strong>——
+      上游按 commit SHA 固定为已安装依赖，我们只加 shim、override 和 recipe。
+    </p>
+    <div class="baseline">
+      <span class="pin">基线 <b>NIGHTLY</b></span>
+      <span class="pin">torch <b>2.15.0.dev20260812</b></span>
+      <span class="pin">torch_npu <b>master 15514cc70</b>（源码构建 + 8 个在途补丁）</span>
+      <span class="pin">torchtitan <b>13da2d77c</b></span>
+      <span class="pin">CANN <b>9.1.0</b></span>
+      <span class="pin">910B2 × 8</span>
+    </div>
+  </header>
+
+  <!-- ============ 结果 ============ -->
+  <section>
+    <h2>结果</h2>
+    <p class="lede">
+      判据是 R1–R8，元规则一条：每条都要有可复现的命令和记录下来的输出，没有输出的按未达成算。
+    </p>
+
+    <div class="scroll-x">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>模型</th>
+            <th style="text-align:center">R1<br><span style="font-weight:400;text-transform:none;letter-spacing:0">形态</span></th>
+            <th style="text-align:center">R2<br><span style="font-weight:400;text-transform:none;letter-spacing:0">并行</span></th>
+            <th style="text-align:center">R3<br><span style="font-weight:400;text-transform:none;letter-spacing:0">数值</span></th>
+            <th style="text-align:center">R4<br><span style="font-weight:400;text-transform:none;letter-spacing:0">存取</span></th>
+            <th style="text-align:center">R5<br><span style="font-weight:400;text-transform:none;letter-spacing:0">性能</span></th>
+            <th style="text-align:center">R6<br><span style="font-weight:400;text-transform:none;letter-spacing:0">长稳</span></th>
+            <th style="text-align:center">R7<br><span style="font-weight:400;text-transform:none;letter-spacing:0">文档</span></th>
+            <th style="text-align:center">R8<br><span style="font-weight:400;text-transform:none;letter-spacing:0">降级</span></th>
+            <th>结论</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Qwen3</th>
+            <td class="crit"><span class="dot pass"></span></td><td class="crit"><span class="dot pass"></span></td>
+            <td class="crit"><span class="dot pass"></span></td><td class="crit"><span class="dot pass"></span></td>
+            <td class="crit"><span class="dot pass"></span></td><td class="crit"><span class="dot pass"></span></td>
+            <td class="crit"><span class="dot pass"></span></td><td class="crit"><span class="dot pass"></span></td>
+            <td>
+              <span class="chip pass">release 级</span>
+              <small>0.6B 真实 tokenizer + 真实 C4 + 4096 上下文；单卡 / FSDP2×8 / TP2 / PP2 全绿；
+              续训与不中断<strong>逐位相同</strong>、HF 权重完整往返；500 步显存恒定无 NaN；10,186 tps 带 provenance。</small>
+            </td>
+          </tr>
+          <tr>
+            <th>Qwen3.5</th>
+            <td class="crit"><span class="dot pass"></span></td><td class="crit"><span class="dot partial"></span></td>
+            <td class="crit"><span class="dot partial"></span></td><td class="crit"><span class="dot fail"></span></td>
+            <td class="crit"><span class="dot fail"></span></td><td class="crit"><span class="dot untested"></span></td>
+            <td class="crit"><span class="dot pass"></span></td><td class="crit"><span class="dot pass"></span></td>
+            <td>
+              <span class="chip partial">能训，三个缺口</span>
+              <small>语言侧 0.8B 单卡 20 步 12.88826 → 8.14589、FSDP2×8 → 8.06005。
+              缺口：视觉塔在 910B2 上跑不了、纯文本 recipe 导致 DCP 续训缺优化器状态、GDN 无融合算子（245 tps）。</small>
+            </td>
+          </tr>
+          <tr>
+            <th>Llama 3</th>
+            <td class="crit" colspan="8" style="text-align:center;color:var(--muted);font-size:12px">R1–R8 未取</td>
+            <td>
+              <span class="chip partial">只有 debugmodel</span>
+              <small>零 override 的上游参考路径，用作对照——它证明"不改也能跑"，这本身是有价值的基准。</small>
+            </td>
+          </tr>
+          <tr>
+            <th>Kimi K3</th>
+            <td class="crit" colspan="8" style="text-align:center;color:var(--muted);font-size:12px">R1–R8 未取</td>
+            <td>
+              <span class="chip fail">阻塞</span>
+              <small>KDA / MoE / cutlass 都不是问题；卡在视觉塔的 document mask，硬件级不可解。</small>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot pass"></span> 达成</span>
+      <span><span class="dot partial"></span> 部分，缺口已列出</span>
+      <span><span class="dot fail"></span> 未达成，有归因</span>
+      <span><span class="dot untested"></span> 未评估（不等于坏）</span>
+    </div>
+
+    <p class="lede" style="margin-top:20px">
+      另有 DeepSeek-V3、GPT-OSS、Kimi K2.7、Muse Glimmer 四个模型没有专属 recipe，通过矩阵 runner 跑上游配置；Flux 未评估。
+      能力矩阵按特性维度记录三态与归因，问题状态收敛在 <code>docs/issues/STATUS.md</code>，向昇腾侧已提交 8 个 torch_npu / op-plugin 修复。
+    </p>
+  </section>
+
+  <!-- ============ 精华 ============ -->
+  <section>
+    <h2>我认为的精华</h2>
+    <p class="lede">
+      按"抽掉它会怎样"排序，不是按代码量。排在最前的两块都不是算子。
+    </p>
+
+    <div class="rank">
+      <div>
+        <div class="weight">承重<span class="w3"></span></div>
+        <div>
+          <h3>对上游 <code>Configurable</code> 节点做 override</h3>
+          <p class="verdict">这是整个项目能成立的前提，也是"扩展而不 fork"这句话的全部技术含量。</p>
+          <p>torchtitan 把每一处计算都暴露成配置树上的一个节点。于是替换 fla 的 CUDA 内核、替换 RoPE、替换 SwiGLU，都不需要动一行模型代码——
+          <code>derive()</code> 出一个新配置，装配点只有 recipe 里的一行 <code>override.imports</code>。
+          如果上游没有这套机制，这个仓库只能是一个 fork，然后死于每周的合并冲突。</p>
+          <p>配套的两条约束同样重要：只 override <strong>已有</strong>的节点（没有节点就请上游抽一个，而不是替换父块），
+          以及按实例选择通过 <code>fqns=</code> 表达而不是在工厂里 <code>if</code>。前者防止我们悄悄 fork 一个 block，后者让生效范围可审计。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="weight">承重<span class="w3"></span></div>
+        <div>
+          <h3>判据 + 证据纪律</h3>
+          <p class="verdict">这是让仓库的结论<em>可信</em>的东西，也是唯一能对抗自欺的机制。</p>
+          <p>R1–R8 把"支持这个模型"从一句形容词变成八条要出示命令与输出的断言；provenance 表证明跑的是声称的实现；
+          三态里"没测"和"测了不行"永远不共用一格。</p>
+          <p>它的价值不是理论上的。仅这一轮它就推翻了仓库自己的三条既有结论：Kimi K3 的绿复测不再复现、
+          TT-11（"cutlass 是 CUDA-only"）证伪、DEP-FLA（"fla 装不上"）证伪。
+          没有这套纪律，这三条错误认知会一直躺在文档里指导后续决策。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="weight">承重<span class="w2"></span></div>
+        <div>
+          <h3>归因机制与上游边界</h3>
+          <p class="verdict">让红格从"沮丧"变成"工单"。</p>
+          <p>每个失败都要落到一个代码：<code>NPU</code> / <code>TT</code> / <code>DEP</code> / <code>CANN</code> / <code>HARNESS</code>。
+          归因规则是数据（<code>triage.toml</code>）不是代码，新增一条不用改 Python，还能对历史结果离线重算。</p>
+          <p>更关键的是两条不容商量的边界：<strong>torch_npu 的缺陷只能修不能绕</strong>（在本仓任何位置绕过都是违规），
+          <strong>github.com/pytorch 只读</strong>。这让"这个坑归谁"永远有答案，也让本仓不会长出一堆越活越久的 workaround。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="weight">有价值<span class="w2"></span></div>
+        <div>
+          <h3>工具链：matrix / release_check / bench / provenance</h3>
+          <p class="verdict">普通工程，但没有它就拿不到证据。</p>
+          <p>把上游 <code>tests/integration_tests</code> 的用例搬到 NPU 上批量跑并自动归因，把 R1/R2/R4 变成一条命令，
+          把性能数字和"生效的实现"绑在一起。这些不是洞见，但它们决定了取证的成本——而取证成本决定了判据能不能坚持下去。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="weight">可替换<span class="w1"></span></div>
+        <div>
+          <h3><code>kernels/</code> 里的算子实现</h3>
+          <p class="verdict">工作量最大的一层，恰恰是最该被替换掉的一层。</p>
+          <p>attention / rope / rms_norm / swiglu 本质是薄封装；真正有原创数值内容的只有 GDN 与 KDA 的 chunk 递推，
+          而它们存在的理由是"昇腾还没有对应的融合算子"。<code>flash-linear-attention-npu</code> 一旦接上，
+          这一层里最重的部分应该退化成适配器。</p>
+          <p>把大量精力投在这里是阶段性的必要，不是长期资产。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ trivial ============ -->
+  <section>
+    <h2>哪些工作是 trivial 的</h2>
+    <p class="lede">
+      说清楚这个不是贬低，是为了不把它们当成进展来汇报。
+    </p>
+    <div class="cards">
+      <div class="card">
+        <h3>recipe 本身</h3>
+        <p>一个 recipe 就是三到五行增量：换个 <code>attn_backend</code>、加一行 <code>override.imports</code>、换数据集。
+        这是刻意设计的结果（增量越少，红格的归因越干净），但写一个 recipe 不构成智力工作。新增模型的真实成本在验证，不在 recipe。</p>
+      </div>
+      <div class="card">
+        <h3>shim 层</h3>
+        <p>目前只有两条，在 NIGHTLY 上都自动 no-op。这一层被设计成会萎缩到零——投在这里的努力按定义是临时的。
+        删掉一条 shim 是值得庆祝的 PR，这句话不是修辞。</p>
+      </div>
+      <div class="card">
+        <h3>debugmodel golden</h3>
+        <p>最便宜的回归探测器，但<strong>探测能力很弱</strong>。这一轮的实证：0.8B 在真实尺寸上发散时 golden 全绿；
+        而修掉那个发散的求逆改写，golden 逐位不变。它能抓装配错误，抓不到真实尺寸下的数值问题。
+        不该把它当成质量保证。</p>
+      </div>
+      <div class="card">
+        <h3>文档与表格维护</h3>
+        <p>状态表已经改成由 <code>registry.py</code> 生成而不是手抄，这类机械劳动应该继续往工具里赶。
+        RELEASE track（torch 2.13）目前是纯负担，只做信息性报告，应当退役。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 风险 ============ -->
+  <section>
+    <h2>风险与困难</h2>
+    <p class="lede">
+      按"卡住什么"和"什么能解开"两列看。前三条不是这个仓库能自己解决的。
+    </p>
+
+    <div class="scroll-x">
+      <table class="risk">
+        <thead>
+          <tr><th style="width:200px">风险</th><th>它卡住什么</th><th style="width:230px">什么能解开</th><th style="width:64px">程度</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>910B2 没有 indirect-memory lowering</th>
+            <td>读张量的 <code>mask_mod</code> 在 inductor 里 lower 不出来。而 torch 的 <code>flex_attention</code> 不存在未编译路径——它自己会
+            <code>torch.compile(fullgraph=True)</code>——所以<strong>任何</strong> flex 都必然进 inductor。
+            连带卡死：上下文并行（CP 强制配 flex）、所有视觉塔的 block-diagonal 掩码、任何依赖 document mask 的模型。
+            三条规避已逐一实测无效。</td>
+            <td>只有换硬件（Ascend950 / A3），或 torch_npu 侧为读张量的 mask_mod 提供支持。本仓无解。</td>
+            <td><span class="sev high">高</span></td>
+          </tr>
+          <tr>
+            <th>线性注意力的性能是结构性缺口</th>
+            <td>GDN / KDA 走纯 torch 的 chunk 递推，两层串行循环（每文档一次 × 段内每 chunk 一次），
+            循环里每个算子还要过 activation-checkpoint 的 dispatch mode。步时被 Python 派发次数支配，不是算力。
+            实测 245 tps vs Qwen3 的 10,186 tps——<strong>40 倍差距</strong>，且不是靠改数学能补的。</td>
+            <td>昇腾侧的融合算子（<code>flash-linear-attention-npu</code> 已在同级目录，未接入），
+            或把 GDN 子图整体交给 torchair 图模式。</td>
+            <td><span class="sev high">高</span></td>
+          </tr>
+          <tr>
+            <th>行业正在往线性/混合注意力走</th>
+            <td>上一条的战略含义。Qwen3.5、Kimi 这一代都是 GDN / KDA + 稀疏注意力的混合结构。
+            我们的性能故事恰好在行业前进的方向上最弱：稠密注意力有融合算子且跑得好，线性注意力慢 40 倍。</td>
+            <td>同上，且优先级应当高于"再多支持几个稠密模型"。</td>
+            <td><span class="sev high">高</span></td>
+          </tr>
+          <tr>
+            <th>基线是一个我们不控制的移动目标</th>
+            <td>torch_npu 从 master 源码构建、带 8 个在途补丁。每次重建都可能静默改变行为——
+            这一轮就出现过：Kimi K3 的绿在 wheel 重建后消失，而本仓提交没动过相关代码。
+            上游 torchtitan 也在 pre-1.0 阶段重构配置树，override 的目标节点可能改名或改语义。</td>
+            <td>节点改名会在 import 时炸（可接受）；<strong>改语义不会</strong>——只能靠对上游 eager 的对拍测试兜住。
+            这类测试目前覆盖不全。</td>
+            <td><span class="sev high">高</span></td>
+          </tr>
+          <tr>
+            <th>取证成本随模型数线性增长</th>
+            <td>一次真实尺寸的验证 15–60 分钟，R1–R8 全套要几小时。让仓库可信的纪律，同时也是迭代速度的上限。
+            这一轮验证一个假设 = 15 分钟，逼出了"把出问题的张量抓下来离线迭代"的做法。</td>
+            <td>需要真正有效的廉价代理（现在的 debugmodel golden 不是），以及跑在真实 runner 上的 nightly CI。</td>
+            <td><span class="sev mid">中</span></td>
+          </tr>
+          <tr>
+            <th>没有 GPU 做交叉验证</th>
+            <td>我们能证明"自己与 attn_gym reference 一致"，证明不了"reference 与 fla 的真实内核等价"。
+            线性注意力这一族的数值正确性因此存在一个无法闭合的环节。</td>
+            <td>一张能跑 fla 的 CUDA 卡；或接入 <code>fla-npu</code> 拿到昇腾上的第二实现来互证。后者更现实。</td>
+            <td><span class="sev mid">中</span></td>
+          </tr>
+          <tr>
+            <th>共享单机</th>
+            <td>8 张卡与其他作业共享。同卡并发 HCCL 直接报错，CPU 争用会污染步时测量——
+            这一轮有一次性能对比就是被自己并发的任务毁掉的。</td>
+            <td>工程上已有缓解（按卡集分配 HCCL 端口、卡表强制升序），根本上需要独占资源。</td>
+            <td><span class="sev low">低</span></td>
+          </tr>
+          <tr>
+            <th>知识密度</th>
+            <td>真正会咬人的知识是分散的细节：LR 曲线绑在 <code>training.steps</code> 上、PP 下只有最后一级算 loss、
+            卡表必须升序、步时被派发次数支配。它们目前活在 docstring 与几篇文档里。</td>
+            <td>已经在做的：把每个坑写进它所属的工具而不是一篇通用文档。这条要持续。</td>
+            <td><span class="sev low">低</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn" style="margin-top:22px">
+      <b>最容易被低估的一条</b>：让人栽跟头的从来不是"跑不起来"，而是<strong>跑得完、有输出、但结论是错的</strong>。
+      这一轮清掉六条这样的坑（LR 曲线耦合、checkpoint 目录相对解析、PP 下记录 rank 0 拿到占位符、
+      多卡卡表原样进环境变量、报告标错步号、数据集看起来卡在 step 0）。
+      它们都不会报错，只会安静地给出一个错误的判断。防它们的唯一办法是：任何结论都要能说出它的证据是哪条命令的哪一行输出。
+    </div>
+  </section>
+
+  <!-- ============ Roadmap ============ -->
+  <section>
+    <h2>Roadmap</h2>
+    <p class="lede">
+      按门槛分期，不按时间承诺。每一期的"解锁条件"是进入下一期的前提——顺序不能调换。
+    </p>
+
+    <div class="phases">
+      <div class="phase">
+        <div class="when">
+          第一期
+          <b>把线性注意力做实</b>
+          <div class="gate">解锁条件<br>fla-npu 装上并通过对拍</div>
+        </div>
+        <div>
+          <ul>
+            <li><b>接入 <code>flash-linear-attention-npu</code></b>
+              <span>—— 同级目录里就有一份 AscendC 实现的 GDN / KDA 算子库。它一次解两件事：R5 的 40 倍性能差距，
+              以及给我们的 chunk 递推一个<em>独立于 attn_gym</em> 的第二实现来互证。这是当前投入产出比最高的一件事。</span></li>
+            <li><b>补齐 Qwen3.5 的 R2 / R4 / R6</b>
+              <span>—— TP / PP / EP 未测；DCP 续训要先有一个冻结视觉塔的机制（上游目前只有 LoRA 自己做）；
+              R6 长稳被 R5 卡住，一步 67 秒跑 500 步要 9 小时。这三条里有两条依赖第一件事先落地。</span></li>
+            <li><b>退役 RELEASE track</b>
+              <span>—— torch 2.13 那条线目前只做信息性报告，是纯维护负担。</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="when">
+          第二期
+          <b>把取证成本压下来</b>
+          <div class="gate">解锁条件<br>nightly CI 跑在真实 runner 上</div>
+        </div>
+        <div>
+          <ul>
+            <li><b>真实 runner 上的 nightly</b>
+              <span>—— 矩阵扫描 + release_check 现在都是手动触发。变成每晚自动跑，才能在 torch_npu 重建导致回归时<em>当天</em>发现，
+              而不是几周后复测时才发现（Kimi K3 就是这么丢的）。</span></li>
+            <li><b>找到有效的廉价代理</b>
+              <span>—— debugmodel golden 抓不到真实尺寸的数值问题，这一轮已有实证。需要的是介于两者之间的东西：
+              比如固定输入下的逐层激活范数快照，或者算子级的极端输入压测（已经有雏形）。</span></li>
+            <li><b>对上游 eager 的对拍覆盖到每个 override</b>
+              <span>—— 防的是上游改语义而不改名字这种静默漂移。目前覆盖不全。</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="when">
+          第三期
+          <b>扩模型覆盖</b>
+          <div class="gate">解锁条件<br>前两期就位，单个模型的验证成本可控</div>
+        </div>
+        <div>
+          <ul>
+            <li><b>从 4 个专属 recipe 扩到上游主力集</b>
+              <span>—— DeepSeek-V3、GPT-OSS、Kimi K2.7 目前只有矩阵覆盖。加 recipe 本身是 trivial 的，
+              成本全在取证——所以必须等第二期把成本压下来再做，否则只是把一堆 ⚪ 变成另一堆 ⚪。</span></li>
+            <li><b>Qwen3 的其它尺寸</b>
+              <span>—— 1.7B / 14B / 32B / 30B-A3B。14B 在 8×910B2 上已确认装不下，更大的尺寸要先解决显存配平
+              （bf16 优化器状态、更激进的重计算）。</span></li>
+            <li><b>MoE / EP 的深度覆盖</b>
+              <span>—— 矩阵里 <code>fsdp+ep</code> 已绿，但没有一个 MoE 模型走完 R1–R8。</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="when">
+          第四期
+          <b>等硬件解锁</b>
+          <div class="gate">解锁条件<br>Ascend950 / A3 可用</div>
+        </div>
+        <div>
+          <ul>
+            <li><b>flex attention 与上下文并行</b>
+              <span>—— 910B2 上已判定为不可能，且已确认没有任何 shim 能绕。硬件换代后需要整体重测，
+              而不是假设它会自然变绿。</span></li>
+            <li><b>多模态</b>
+              <span>—— 视觉塔的 document mask 是同一个根因。Kimi K3 与 Qwen3.5 的多模态路径都在等这一条。</span></li>
+            <li><b>FP8</b>
+              <span>—— 910B2 上张量能分配，但所有转换失败、<code>_scaled_mm</code> 明确要求 Ascend950。
+              按"不加投机性代码"的原则，post-converter 树上的 FP8 override 至今没有写——没有硬件就无从验证。</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:24px">
+      <b>贯穿始终的一条</b>：<code>kernels/</code> 应该越来越薄。今天它是仓库里代码量最大的部分，
+      但每一个昇腾侧融合算子成熟，就应该有一段自研数值代码退化成适配器。
+      如果三年后这一层还在长大，说明昇腾的算子生态没有跟上——那才是这个项目真正的长期风险。
+    </div>
+  </section>
+
+  <!-- ============ 失败模式 ============ -->
+  <section>
+    <h2>什么会让这个项目失败</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>纪律先松，然后全盘不可信</h3>
+        <p>只要开始接受"应该可以"的推断、接受没有输出的绿格、接受一次"临时绕一下"的 workaround，
+        整张状态表就会退化成愿望清单。这一轮推翻的三条旧结论说明：<strong>连有纪律的时候都会错</strong>，
+        没纪律的时候只会错得看不出来。</p>
+      </div>
+      <div class="card">
+        <h3>被算子生态拖住</h3>
+        <p>如果昇腾侧的线性注意力算子迟迟不成熟，我们就得一直自己写数值代码——
+        而自研数值代码正是这一轮出问题的地方（Neumann 级数在真实训练输入上溢出）。
+        自己写得越多，这类隐患越多。</p>
+      </div>
+      <div class="card">
+        <h3>硬件代差固化</h3>
+        <p>flex / CP / 多模态 / FP8 四件事全部压在 Ascend950 上。如果硬件迟迟不到位，
+        本仓能覆盖的模型集会被行业甩开——不是因为我们做得不好，而是因为新模型默认就用这些特性。</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>ascend-torchtitan · 树外扩展，不 fork</span>
+    <span>判据：docs/model-release-criteria.md</span>
+    <span>状态截至 2026-08-31</span>
+  </footer>
+
+</div>
+</body>
+</html>
