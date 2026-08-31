@@ -320,8 +320,9 @@
             <th>Kimi K3</th>
             <td class="crit" colspan="8" style="text-align:center;color:var(--muted);font-size:12px">R1–R8 未取</td>
             <td>
-              <span class="chip fail">阻塞</span>
-              <small>KDA / MoE / cutlass 都不是问题；卡在视觉塔的 document mask，硬件级不可解。</small>
+              <span class="chip partial">只有 debugmodel</span>
+              <small>多模态 + KDA + MoE，单卡 10 步 loss 4.56418，golden 已冻结并逐位复现。
+              曾被记成硬件级阻塞，那是误判——真正的触发条件只是 <code>--debug.deterministic</code>。</small>
             </td>
           </tr>
         </tbody>
@@ -456,12 +457,14 @@
         </thead>
         <tbody>
           <tr>
-            <th>910B2 没有 indirect-memory lowering</th>
-            <td>读张量的 <code>mask_mod</code> 在 inductor 里 lower 不出来。而 torch 的 <code>flex_attention</code> 不存在未编译路径——它自己会
-            <code>torch.compile(fullgraph=True)</code>——所以<strong>任何</strong> flex 都必然进 inductor。
-            连带卡死：上下文并行（CP 强制配 flex）、所有视觉塔的 block-diagonal 掩码、任何依赖 document mask 的模型。
-            三条规避已逐一实测无效。</td>
-            <td>只有换硬件（Ascend950 / A3），或 torch_npu 侧为读张量的 mask_mod 提供支持。本仓无解。</td>
+            <th>拿一个失败的运行推广成通则</th>
+            <td>方法论风险，排第一是因为它已经咬过我们一次。视觉塔的 flex 曾被连着三次错误归因——
+            "910B2 缺 indirect-memory lowering"、"flex 自己会编译所以无解"、"Kimi K3 硬件级阻塞"——
+            全部写进了仓库并发布。真相是：<strong>只在 <code>--debug.deterministic</code> 下失败</strong>，
+            因为 torchtitan 的 <code>set_determinism</code> 会重新编译并覆盖我们装的 eager shim，
+            而上游只为 ROCm 写了 eager 分支。补一条 shim 就修好了，两个模型的 golden 现在都冻结了。</td>
+            <td>单变量对照，一次只切一个开关。判据体系能抓住结论错，但抓不住<em>归因</em>错——
+            归因错要靠这个习惯。</td>
             <td><span class="sev high">高</span></td>
           </tr>
           <tr>
@@ -600,16 +603,14 @@
       <div class="phase">
         <div class="when">
           第四期
-          <b>等硬件解锁</b>
-          <div class="gate">解锁条件<br>Ascend950 / A3 可用</div>
+          <b>硬件相关</b>
+          <div class="gate">部分需 Ascend950；<br>CP 那条只需重测</div>
         </div>
         <div>
           <ul>
-            <li><b>flex attention 与上下文并行</b>
-              <span>—— 910B2 上已判定为不可能，且已确认没有任何 shim 能绕。硬件换代后需要整体重测，
-              而不是假设它会自然变绿。</span></li>
-            <li><b>多模态</b>
-              <span>—— 视觉塔的 document mask 是同一个根因。Kimi K3 与 Qwen3.5 的多模态路径都在等这一条。</span></li>
+            <li><b>上下文并行重测</b>
+              <span>—— 此前判定"910B2 上不可能"的前提（flex 编不出来）已被推翻，需要按实测重走一遍。
+              CP 还有 TT-5 等其它约束，前提没了不等于它就能跑。</span></li>
             <li><b>FP8</b>
               <span>—— 910B2 上张量能分配，但所有转换失败、<code>_scaled_mm</code> 明确要求 Ascend950。
               按"不加投机性代码"的原则，post-converter 树上的 FP8 override 至今没有写——没有硬件就无从验证。</span></li>
@@ -642,9 +643,9 @@
         自己写得越多，这类隐患越多。</p>
       </div>
       <div class="card">
-        <h3>硬件代差固化</h3>
-        <p>flex / CP / 多模态 / FP8 四件事全部压在 Ascend950 上。如果硬件迟迟不到位，
-        本仓能覆盖的模型集会被行业甩开——不是因为我们做得不好，而是因为新模型默认就用这些特性。</p>
+        <h3>把"暂时不会"当成"永远不能"</h3>
+        <p>视觉塔那条错误归因差一点就让 Kimi K3 与 Qwen3.5 的多模态路径被永久记成硬件阻塞、不再有人回头看。
+        一条写进文档的"不可能"会让后续所有人停止尝试——它的成本远高于一次红格。</p>
       </div>
     </div>
   </section>
