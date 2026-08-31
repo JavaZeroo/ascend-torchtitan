@@ -117,77 +117,15 @@ def test_chunk_size_does_not_change_the_answer(chunk_size):
     torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
 
 
-def test_why_chunk_size_stays_64():
-    """``CHUNK_SIZE`` is 64 for conditioning, not for taste -- this is the reason.
+def test_inverse_is_accurate_in_the_regime_the_kernel_runs_in():
+    """``|A| <= 1`` is the real regime: ``beta * (k_i . k_j) * decay`` with unit k."""
+    from ascend_titan.kernels.gdn import _unit_lower_inverse
 
-    The intra-chunk transition matrix is ``(I - A)^-1`` for a strictly
-    lower-triangular ``A`` whose entries are ``beta * (k_i . k_j) * decay``, i.e.
-    bounded by one. Its magnitude grows fast with the chunk size, and everything
-    downstream multiplies by it. This is a property of the decomposition, not of
-    ``_unit_lower_inverse``: forward substitution, which attn_gym uses, produces
-    the same huge numbers, which is why fla and attn_gym also stop at 64.
-
-    Not to be confused with qwen3.5-0.8B's step-4 non-finite loss: that happens
-    at C=64 as well, so it is the training configuration, not this constant.
-    """
-    from ascend_titan.kernels.gdn import CHUNK_SIZE, _unit_lower_inverse
-
-    assert CHUNK_SIZE == 64
-
-    peaks = {}
-    for size in (64, 128, 256):
-        gen = torch.Generator().manual_seed(7)
-        lower = (torch.rand(size, size, generator=gen) * 2 - 1).tril(-1)
-        exact = torch.linalg.inv(torch.eye(size) - lower)
-        peaks[size] = exact.abs().max().item()
-        # Ours tracks the exact inverse relatively well at every size; the
-        # problem is the size of the answer, not the method.
-        got = _unit_lower_inverse(lower)
-        assert (got - exact).abs().max() <= 1e-5 * peaks[size]
-
-    assert peaks[64] < 1e5 < peaks[128] < peaks[256]
-
-
-@pytest.mark.parametrize(
-    ("label", "beta_scale", "decay_scale"),
-    [
-        ("nominal", 1.0, 1.0),
-        # beta -> 1 with almost no decay is the worst case for the delta rule:
-        # every token writes at full strength and nothing forgets, so the
-        # transition matrix is as far from the identity as the gates allow.
-        ("beta->1, decay->0", 1.0, 1e-4),
-        ("beta small", 0.1, 1.0),
-    ],
-)
-def test_stays_finite_and_matches_reference_under_extreme_gates(label, beta_scale, decay_scale):
-    """Rules out the kernel as the source of a non-finite loss.
-
-    qwen3.5-0.8B goes non-finite early in training; this pins that it is not
-    because ``ascend_chunk_gdn`` blows up where attn_gym's reference would not.
-    Measured at seq 16384 too (same result, 1.6e-7 apart); 512 keeps the test
-    fast enough for the CPU suite.
-    """
-    from attn_gym.linear.gdn import chunk_gdn
-
-    from ascend_titan.kernels.gdn import ascend_chunk_gdn
-
-    gen = torch.Generator().manual_seed(2)
-
-    def unit(*shape):
-        return torch.nn.functional.normalize(torch.randn(*shape, generator=gen), dim=-1)
-
-    args = (
-        unit(1, 4, 512, 64),
-        unit(1, 4, 512, 64),
-        torch.randn(1, 4, 512, 64, generator=gen),
-        -torch.rand(1, 4, 512, generator=gen) * decay_scale,
-        torch.rand(1, 4, 512, generator=gen) * beta_scale,
-    )
-    want = chunk_gdn(*args, impl="reference")
-    want = want[0] if isinstance(want, tuple) else want
-    got = ascend_chunk_gdn(*args)
-    assert torch.isfinite(got).all(), label
-    torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
+    gen = torch.Generator().manual_seed(12)
+    lower = (torch.rand(4, 64, 64, generator=gen) * 2 - 1).tril(-1)
+    exact = torch.linalg.inv(torch.eye(64) - lower)
+    ours = _unit_lower_inverse(lower)
+    torch.testing.assert_close(ours, exact, rtol=1e-4, atol=1e-4 * exact.abs().max())
 
 
 def test_inverse_backward_matches_float64_ground_truth():

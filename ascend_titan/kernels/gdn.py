@@ -83,35 +83,35 @@ models/qwen3_5/README.md.)
 class _UnitLowerInverse(torch.autograd.Function):
     """``(I - A)^-1`` for a *strictly* lower-triangular ``A``, with an exact backward.
 
-    Forward: ``A`` is nilpotent (``A**C == 0``), so the Neumann series terminates::
+    Forward is a triangular solve. ``I - A`` is unit lower triangular, so
+    substitution gets the inverse directly -- the same thing attn_gym's reference
+    does with its ``for row in range(1, chunk_size)`` loop, but as one op instead
+    of 63 iterations that each clone the whole block.
 
-        (I - A)^-1 = I + A + A^2 + ... + A^(C-1)
+    **Not** the Neumann series. ``A`` is nilpotent, so
+    ``(I - A)^-1 = I + A + ... + A^(C-1)`` is exact and can be evaluated by
+    doubling in ``log2(C)`` matmuls. That is what this did first, and it was
+    wrong: the sum is bounded, the individual powers on the way there are not.
+    On qwen3.5-0.8B after three training steps, with learned gates (``|g|`` up to
+    30, ``|q|``/``|k|`` under 0.8), the doubling overflowed fp32 while attn_gym's
+    reference stayed finite on the *same inputs* (max 3.3e-2) -- that is what took
+    the run non-finite at step 4. Substitution never forms the powers.
 
-    and doubling evaluates it in ``log2(C)`` steps -- with ``S_m = sum_{k<m} A^k``,
-    ``S_2m = S_m + A^m @ S_m``. For C=64 that is 10 batched matmuls against the 63
-    masked row updates (each cloning the full block) that forward substitution
-    needs.
-
-    Backward is *not* differentiated through that chain. ``X = (I - A)^-1`` has
-    ``dX = X dA X``, so ``grad_A = X^T @ grad_X @ X^T`` masked back to strictly
-    lower -- two matmuls, and nothing that saw ``A^32``. Letting autograd walk the
-    doubling instead would both keep every intermediate power alive for the
-    backward pass and push their magnitudes through it; the powers are much larger
-    than the sum they telescope into, which is exactly how a finite loss ends up
-    with a non-finite gradient.
+    Backward is the closed form and does not care how the forward was computed:
+    ``X = (I - A)^-1`` has ``dX = X dA X``, so ``grad_A = X^T @ grad_X @ X^T``
+    masked back to strictly lower -- two matmuls, and nothing that saw ``A^32``.
     """
 
     @staticmethod
     def forward(ctx, strictly_lower_NCC: torch.Tensor) -> torch.Tensor:
         size = strictly_lower_NCC.shape[-1]
         eye = torch.eye(size, dtype=strictly_lower_NCC.dtype, device=strictly_lower_NCC.device)
-        inverse = eye + strictly_lower_NCC
-        power = strictly_lower_NCC
-        covered = 2
-        while covered < size:
-            power = power @ power
-            inverse = inverse + power @ inverse
-            covered *= 2
+        inverse = torch.linalg.solve_triangular(
+            eye - strictly_lower_NCC,
+            eye.expand_as(strictly_lower_NCC),
+            upper=False,
+            unitriangular=True,
+        )
         ctx.save_for_backward(inverse)
         return inverse
 
