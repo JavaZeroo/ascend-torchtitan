@@ -133,7 +133,7 @@ MODELS: dict[str, ModelEntry] = {
         summary=(
             "语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 "
             "`kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），"
-            "但从零训练第 4–10 步发散，未定位。"
+            "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。"
             "视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制）；"
             "GDN 没有融合算子，性能是另一个缺口。"
         ),
@@ -147,10 +147,10 @@ MODELS: dict[str, ModelEntry] = {
         ),
         golden=("qwen35_debugmodel_npu_text",),
         criteria={
-            "R1": "🟡",  # 0.8B 语言侧形态齐了，但从零训练第 5 步发散（学习率待定位）
-            "R2": "🟡",  # 单卡与 FSDP2×8 都能推进，撞同一个发散；TP/PP/EP 未测
+            "R1": "🟢",  # 0.8B 20 步 12.88826 → 8.14589
+            "R2": "🟡",  # 单卡 / FSDP2×8 🟢；TP/PP/EP 未测
             "R3": "🟡",  # 对拍 🟢 + 语言侧 golden 已冻结；缺真实尺寸的长步数曲线
-            "R4": "⚪",
+            "R4": "🔴",  # HF 往返 🟢；DCP 续训缺视觉塔的优化器状态（纯文本增量的代价）
             "R5": "🔴",  # 纯 torch chunk 递推，无融合算子
             "R6": "⚪",  # 被 R5 卡住：一步约 2 分钟，500 步要十几个小时
             "R7": "🟢",  # models/qwen3_5/README.md

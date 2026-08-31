@@ -1,0 +1,69 @@
+[
+  {
+    "name": "real-size 1 NPU",
+    "criterion": "R1",
+    "command": "NPU=1 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh --training.steps 20 --lr_scheduler.total_steps 1000",
+    "ok": true,
+    "detail": "step 1 loss 12.88826 -> step 20 loss 8.14589",
+    "steps": [
+      [
+        1,
+        12.88826
+      ],
+      [
+        10,
+        8.3385
+      ],
+      [
+        20,
+        8.14589
+      ]
+    ],
+    "seconds": 1345.1
+  },
+  {
+    "name": "FSDP2 x8",
+    "criterion": "R2",
+    "command": "NPU=8 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu_fsdp2 ./scripts/run_train.sh --training.steps 20 --lr_scheduler.total_steps 1000",
+    "ok": true,
+    "detail": "step 1 loss 12.90316 -> step 20 loss 8.06005",
+    "steps": [
+      [
+        1,
+        12.90316
+      ],
+      [
+        10,
+        7.99828
+      ],
+      [
+        20,
+        8.06005
+      ]
+    ],
+    "seconds": 1506.9
+  },
+  {
+    "name": "checkpoint save/resume",
+    "criterion": "R4",
+    "command": "NPU=1 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh --checkpoint.enable --checkpoint.interval 5 --training.steps {N} --lr_scheduler.total_steps 10 --debug.seed 42 --debug.deterministic",
+    "ok": false,
+    "detail": "RuntimeError: [rank0]:[rank0]: RuntimeError: Missing key in checkpoint state_dict: optimizer.state.vision_encoder.pos_embed.step.",
+    "steps": [],
+    "seconds": 1130.9
+  },
+  {
+    "name": "HF export/import",
+    "criterion": "R4",
+    "command": "NPU=1 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu ./scripts/run_train.sh --checkpoint.enable --checkpoint.last_save_in_hf --training.steps 5 # then --checkpoint.initial_load_in_hf --checkpoint.initial_load_path <dir>",
+    "ok": true,
+    "detail": "exported at step 5 loss 12.93624; reloaded loss 9.91788 (untrained was 12.93624)",
+    "steps": [
+      [
+        1,
+        9.91788
+      ]
+    ],
+    "seconds": 467.1
+  }
+]

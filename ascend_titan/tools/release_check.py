@@ -167,6 +167,11 @@ def checkpoint_roundtrip(
             "--debug.deterministic",
             "--lr_scheduler.total_steps",
             str(2 * steps),
+            # Without this the recipe's own log_freq (10 upstream) means a short
+            # run logs only step 1, and the report then labels step 1's loss as
+            # the final step's.
+            "--metrics.log_freq",
+            "1",
         ]
 
         def go(extra: list[str]) -> list[tuple[int, float]]:
@@ -279,7 +284,14 @@ def hf_roundtrip(
     root = Path(tempfile.mkdtemp(prefix="ascend_titan_hf_", dir="/tmp"))
     t0 = time.time()
     try:
-        common = ["--debug.seed", "42", "--lr_scheduler.total_steps", str(2 * steps)]
+        common = [
+            "--debug.seed",
+            "42",
+            "--lr_scheduler.total_steps",
+            str(2 * steps),
+            "--metrics.log_freq",
+            "1",  # see checkpoint_roundtrip: otherwise only step 1 is logged
+        ]
 
         def go(extra: list[str]) -> list[tuple[int, float]]:
             env = os.environ.copy()

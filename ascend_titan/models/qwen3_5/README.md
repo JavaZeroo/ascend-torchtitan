@@ -143,13 +143,33 @@ Buffers cannot be created while lowering a pointwise subgraph.
 | 判据 | 状态 | 缺什么 |
 |---|:--:|---|
 | R1 真实形态 | 🟢 | 0.8B + 真实 tokenizer + 真实 C4 + 4096 上下文，20 步 loss 12.85958 → 8.30913（rc=0）|
-| R2 并行覆盖 | 🟡 | 单卡与 FSDP2×8 都能起来并推进（8 卡逐步日志见第 2 节），但都在第 5 步撞上同一个发散；TP / PP / EP 未测 |
+| R2 并行覆盖 | 🟡 | 单卡 🟢（12.88826 → 8.14589）；FSDP2×8 🟢（12.90316 → 8.06005）；TP / PP / EP 未测 |
 | R3 数值可信 | 🟡 | 算子级对拍 🟢：`tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2，fp32/bf16 前向 + 梯度）都对 attn_gym reference 通过；语言侧 golden 已冻结并逐位复现（`qwen35_debugmodel_npu_text`）。缺的是**真实尺寸**下的长步数下降曲线——它卡在下面那条发散上 |
-| R4 checkpoint | ⚪ | 未跑 |
+| R4 checkpoint | 🔴 | HF 导出/导入 🟢（读回 loss 9.91788，随机初始 12.93624）；**DCP 续训 🔴**，归因见下 |
 | R5 性能 | 🔴 | **主要缺口**，见下 |
 | R6 长稳 | ⚪ | **被 R5 卡住**：0.8B 一步约 2 分钟，500 步要十几个小时。等 GDN 快起来再取；用 debugmodel 跑 500 步不算数（判据要求真实尺寸） |
 | R7 文档 | 🟢 | 本文 |
 | R8 无隐藏降级 | 🟢 | `ascend-titan-provenance --module ascend_titan.models.qwen3_5 --config qwen35_0_8b_npu`：`AscendFusionAttention` ×6、`AscendGatedDeltaKernel` ×18、`AscendInnerGatedDeltaNet` ×18，共 42 个 ascend 节点 |
+
+### R4：纯文本 recipe 的续训会失败，这是我们那条增量的代价
+
+```
+RuntimeError: Missing key in checkpoint state_dict:
+optimizer.state.vision_encoder.pos_embed.step
+```
+
+`qwen35_0_8b_npu` 把多模态 collator 换成了 `TextCollator`（DELTA 3），于是视觉塔**拿不到
+梯度**，AdamW 从不为它建优化器状态，保存的 checkpoint 里自然没有这些键；而 DCP 的 load
+planner 会按当前 optimizer 的完整参数集去要，于是缺键报错。
+
+两条出路都堵着：
+
+- **冻结视觉塔**是语义上正确的做法（`requires_grad=False` 的参数根本不会进优化器，
+  见上游 `optimizer.py:195`），但上游没有通用的冻结开关——只有 LoRA 自己做——所以这
+  不是一条 recipe 增量能表达的东西。
+- **跑多模态**就不用绕，但视觉塔在 910B2 上跑不了（第 4 节）。
+
+HF 导出/导入不受影响（它只存模型，不存优化器状态），已经 🟢。
 
 ### R5：GDN 没有融合算子
 
