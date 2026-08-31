@@ -242,3 +242,19 @@ def test_packed_path_is_not_the_dense_path():
     packed = kernel(*args, cu_seqlens=cu, cu_seqlens_cpu=cu)
     dense = kernel(*args)
     assert not torch.allclose(packed, dense, rtol=1e-3, atol=1e-3)
+
+
+@pytest.mark.parametrize("size", [8, 16, 24, 32, 64])
+def test_inverse_handles_sizes_that_do_not_divide_the_base_block(size):
+    """``BASE_BLOCK`` does not divide every chunk size; that path must still be exact.
+
+    Sizes below the base block, equal to it, and indivisible by it (24) all take
+    a different branch in ``_UnitLowerInverse.forward``.
+    """
+    from ascend_titan.kernels.gdn import _unit_lower_inverse
+
+    gen = torch.Generator().manual_seed(size)
+    lower = (torch.rand(3, size, size, generator=gen) * 2 - 1).tril(-1)
+    exact = torch.linalg.inv(torch.eye(size) - lower)
+    got = _unit_lower_inverse(lower)
+    torch.testing.assert_close(got, exact, rtol=1e-4, atol=1e-4 * exact.abs().max())
