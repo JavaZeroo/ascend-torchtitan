@@ -16,11 +16,29 @@ drivers`` before a single step runs -- even though ``create_block_mask`` itself
 works perfectly in eager, and torch_npu master makes eager ``flex_attention``
 itself work on NPU (fwd + bwd measured, tests/repro/probe_npu_gaps.py).
 
-So the shims substitute upstream's own uncompiled functions -- same functions,
-same results, just not traced. This buys reachability, not speed: eager flex
-attention and eager mask construction are both much slower than the compiled
-versions, and torch itself warns as much. Once Triton-Ascend is installed the
-shims step aside on their own.
+The two mask builders have a genuine uncompiled twin: ``create_block_mask``
+called directly builds the same BlockMask without entering inductor. Those two
+shims work.
+
+The third one does not, and this is worth stating plainly because the shim's
+first version claimed otherwise. ``torch.nn.attention.flex_attention`` has **no**
+uncompiled path::
+
+    with setup_compilation_env() as backend:
+        flex_fn = torch.compile(_flex_attention_hop_wrapper, backend=backend,
+                                fullgraph=True)
+
+Whenever it is not already under dynamo it compiles itself. Substituting it for
+upstream's pre-compiled callable only moves the ``torch.compile`` inside torch;
+inductor is entered either way. So on 910B2 any flex attention -- including a
+vision tower's -- goes through torch_npu's inductor lowering, and a mask_mod that
+reads a tensor cannot be lowered there (Ascend950-only indirect memory). No shim
+can change that. torch's own escape hatch,
+``_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG``, is documented as breaking the backward
+pass, so it is a debugging aid, not a training path.
+
+This buys reachability for mask construction, not speed, and not flex itself.
+Once Triton-Ascend is installed the shims step aside on their own.
 
 Feature-gated, not version-gated (P12): as soon as triton reports an active
 backend on this machine, both shims return the original compiled callables and
@@ -43,7 +61,9 @@ _REASON = (
 _UPSTREAM = "draft:docs/issues/torchtitan.md#compiled-block-mask"
 _WHY_NOT_WRAP = (
     "the target *is* the compiled callable; wrapping it would still enter "
-    "inductor. The replacement is upstream's own uncompiled function."
+    "inductor. For the two mask builders the replacement is upstream's own "
+    "uncompiled function; for flex_attention itself there is no such function "
+    "(see the module docstring)."
 )
 
 
@@ -89,8 +109,10 @@ def flex_block_mask_eager_lm(original):
 @shim(
     target="torchtitan.models.common.attention:FlexAttention._compiled_flex_attn",
     reason="FlexAttention.forward always calls a torch.compile'd flex_attention, "
-    "regardless of config.compile.enable; torch_npu master makes eager "
-    "flex_attention work on NPU (fwd + bwd), inductor does not",
+    "regardless of config.compile.enable. NOTE: this shim moves the compile "
+    "boundary but cannot avoid inductor -- torch's flex_attention compiles "
+    "itself (fullgraph=True) when not already under dynamo. Kept because the "
+    "smaller graph fails later and more legibly; see the module docstring",
     upstream=_UPSTREAM,
     kind="replace",
     why_not_wrap=_WHY_NOT_WRAP,
