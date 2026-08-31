@@ -135,7 +135,8 @@ MODELS: dict[str, ModelEntry] = {
             "`kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），"
             "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。"
             "视觉侧 🔴（视觉塔的 document mask 撞 910B2 的 indirect-memory 限制）；"
-            "GDN 没有融合算子，性能是另一个缺口。"
+            "DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；"
+            "GDN 没有融合算子，性能是第三个缺口。"
         ),
         recipes="ascend_titan.models.qwen3_5.recipes",
         flavors=(
