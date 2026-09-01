@@ -63,6 +63,17 @@ class TransformReport:
     gdn_fused_override: bool = False
     notes: list[str] = field(default_factory=list)
 
+    @property
+    def is_noop(self) -> bool:
+        """True when the transform changed nothing about the config."""
+        return not (
+            self.flex_to_varlen
+            or self.attention_override
+            or self.rope_override
+            or self.rms_norm_override
+            or self.gdn_fused_override
+        )
+
     def summary(self) -> str:
         parts = []
         if self.flex_to_varlen:
@@ -164,7 +175,18 @@ def npu_fused(config: Trainer.Config) -> TransformReport:
         else:
             a.notes.append("gdn fused override skipped: fla_npu not installed (ADR-004)")
 
-    logger.info("[ascend_titan] npu_fused: %s", a.summary())
+    if a.is_noop:
+        # Nothing here targets a node this config has (qwen3_5, for one, carries no
+        # torchtitan.models.common RMSNorm node at all). Running it would measure
+        # exactly what `minimal` measures, so it must never be *reported* as a fused
+        # result -- say so here, and let the matrix skip the case (P7 / P12).
+        a.notes.append(
+            "no fused kernel targets any node of this config: a 'fused' run of it "
+            "measures exactly what 'minimal' does"
+        )
+        logger.warning("[ascend_titan] npu_fused: %s", a.notes[-1])
+    else:
+        logger.info("[ascend_titan] npu_fused: %s", a.summary())
     return a
 
 

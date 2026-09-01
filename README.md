@@ -99,6 +99,43 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 `ascend_titan.setup()`（导入 torch_npu → 让 torchtitan 冻结出正确的 `device_type` → 应用 shim）。
 其余全部是上游代码。
 
+### 自己决定用哪些昇腾内核
+
+recipe 是**我们验证过的预设**，不是唯一入口。同一个模型有三条路，都不用改代码：
+
+```bash
+# ① 预设：我们跑过 golden、记过性能的组合
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu NPU=1 ./scripts/run_train.sh
+
+# ② 预设 + 自己挑内核。--override.imports 是**整体替换**，所以既能加也能减：
+#    这里保留昇腾融合注意力、去掉 GDN override、再加上融合 RMSNorm
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu NPU=1 ./scripts/run_train.sh \
+    --override.imports ascend_titan.kernels.attention.npu_fusion_attention \
+                       ascend_titan.kernels.rms_norm.npu_rms_norm
+#    一个 override 都不要（但保留 recipe 的数据/并行/资产设置）：
+#    ... ./scripts/run_train.sh --override.imports
+
+# ③ 完全的上游原生（不加任何我们的东西，用来做对照）
+MODULE=ascend_titan.recipes.matrix NPU=1 ./scripts/run_train.sh \
+    CONFIG=torchtitan.models.qwen3_5.config_registry__qwen35_0_8b__stock
+```
+
+可用的 override 目标就是 `ascend_titan/kernels/__init__.py` 里的 `*_OVERRIDE` 常量；
+`ascend-titan-provenance --module <m> --config <c>` 打印某个组合**实际**生效了哪些昇腾节点。
+
+注意力后端（flex / varlen）是 `model_spec` 的构造参数、不在 CLI 暴露面上，所以另有一条入口：
+`npu_fusion_attention_from_flex` 直接把上游原生的 FlexAttention 节点换成昇腾内核，
+于是"上游原生配置 + 昇腾注意力"也只是一条命令（实测单卡 3 步 loss 7.63 → 6.43，tps 47,383）：
+
+```bash
+MODULE=ascend_titan.recipes.matrix NPU=1 ./scripts/run_train.sh \
+    CONFIG=torchtitan.models.qwen3.config_registry__qwen3_debugmodel__stock \
+    --override.imports ascend_titan.kernels.attention.npu_fusion_attention_from_flex
+```
+
+它只认领解码器层的注意力节点（`fqns=["*layers.*.attention.inner_attention"]`）——
+多模态模型的视觉塔喂的是 BlockMask，这个内核吃不了，所以那些节点保持 flex 不动。
+
 ---
 
 ## 🧩 模型支持

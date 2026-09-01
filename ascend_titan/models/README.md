@@ -65,6 +65,24 @@ MODULE=ascend_titan.recipes.matrix \
 CONFIG=torchtitan.models.<model>.config_registry__<upstream_fn> NPU=8 ./scripts/run_train.sh
 ```
 
+### recipe 是预设，不是唯一入口
+
+一个 recipe 把四类选择打包成了一个名字：环境必需的增量、内核选择、数据与资产、并行度。
+想要别的组合**不必改代码**——`--override.imports` 是整体替换语义，加、减、清空都行：
+
+```bash
+# 在预设基础上自己挑内核（这里去掉 GDN、加上融合 RMSNorm）
+... ./scripts/run_train.sh --override.imports ascend_titan.kernels.attention.npu_fusion_attention \
+                                              ascend_titan.kernels.rms_norm.npu_rms_norm
+# 一个 override 都不要
+... ./scripts/run_train.sh --override.imports
+# 完全的上游原生（对照组）
+MODULE=ascend_titan.recipes.matrix CONFIG=<upstream.module>__<fn>__stock ...
+```
+
+目标常量在 `ascend_titan/kernels/__init__.py`；`ascend-titan-provenance` 打印实际生效了什么。
+唯一还不能从 CLI 换的是注意力后端（flex / varlen）——它是 `model_spec` 的构造参数。
+
 ## 命名约定
 
 | 形式 | 含义 |

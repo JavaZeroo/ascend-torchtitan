@@ -12,6 +12,9 @@ checks each one resolves to a real ``def`` in this package.
 """
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
+# Same kernel, entered from a stock FlexAttention node instead of a varlen one, so
+# an upstream config can be moved onto the Ascend kernel from the CLI alone.
+ATTENTION_FROM_FLEX_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention_from_flex"
 ROPE_OVERRIDE = "ascend_titan.kernels.rope.real_cache_rope"
 ROPE_COSSIN_OVERRIDE = "ascend_titan.kernels.rope.npu_rotary_cossin"
 RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"

@@ -22,6 +22,26 @@ class Case:
     skip: str | None = None  # reason, if not runnable by construction
 
 
+def fused_is_a_no_op(config_name: str) -> bool:
+    """True when no fused kernel targets any node of this config.
+
+    Such a case would run, succeed, and report a number identical to ``minimal`` --
+    a fused measurement of nothing (P7/P12), which is why the caller skips it.
+
+    A config that cannot be built here is *not* reported as a no-op: we simply do
+    not know, so the case runs and the runner attributes whatever it hits.
+    """
+    from ascend_titan.recipes.matrix import SEP, npu_fused, resolve
+
+    suffix = SEP + "fused"
+    base = config_name[: -len(suffix)] if config_name.endswith(suffix) else config_name
+    try:
+        config = resolve(base)()
+    except Exception:  # noqa: BLE001 - undecidable here; let the case run
+        return False
+    return npu_fused(config).is_noop
+
+
 def load_cases(titan_dir: Path, suites: list[str], *, mode: str = "minimal") -> list[Case]:
     sys.path.insert(0, str(titan_dir))
     from ascend_titan.recipes.matrix import encode
@@ -43,6 +63,10 @@ def load_cases(titan_dir: Path, suites: list[str], *, mode: str = "minimal") -> 
                 skip = "legacy override_args-only case (no config fn)"
             elif d.required_cuda_capabilities:
                 skip = f"TT-GATE: requires CUDA capability {list(d.required_cuda_capabilities)}"
+            elif mode == "fused" and all(fused_is_a_no_op(encode(fn)) for fn in d.configs):
+                # ⚪ not 🔴: nothing is broken, the case is simply not a fused
+                # measurement (P2 -- "not applicable" may not look like "failed").
+                skip = "fused 无可融合节点：与 minimal 完全等价，不作为融合结果上报"
             cases.append(
                 Case(
                     suite=suite,

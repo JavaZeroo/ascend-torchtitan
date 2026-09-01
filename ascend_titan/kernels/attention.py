@@ -31,7 +31,11 @@ from dataclasses import dataclass
 
 import torch
 from torchtitan.config import derive, override
-from torchtitan.models.common.attention import VarlenAttention, VarlenMetadata
+from torchtitan.models.common.attention import (
+    FlexAttention,
+    VarlenAttention,
+    VarlenMetadata,
+)
 from torchtitan.protocols.module import Module
 
 from ascend_titan.kernels._probe import require_op, torch_npu
@@ -273,4 +277,32 @@ class AscendFusionAttention(VarlenAttention):
     description="Ascend npu_fusion_attention (TND, varlen, GQA) for VarlenAttention",
 )
 def npu_fusion_attention(cfg: VarlenAttention.Config) -> AscendFusionAttention.Config:
+    return derive(cfg, AscendFusionAttention.Config)
+
+
+@override(
+    target=FlexAttention.Config,
+    # Decoder-layer attention only. A vision tower's FlexAttention is fed a BlockMask
+    # built by `create_block_diagonal_mask`, which this kernel cannot consume, and its
+    # nodes sit outside `layers.*.attention` (e.g. `vision_encoder.block.attn`), so an
+    # include-glob states positively what we support instead of listing exclusions.
+    fqns=["*layers.*.attention.inner_attention"],
+    description="Ascend npu_fusion_attention in place of FlexAttention (decoder layers)",
+)
+def npu_fusion_attention_from_flex(cfg: FlexAttention.Config) -> AscendFusionAttention.Config:
+    """Take a stock upstream config from FlexAttention straight to the Ascend kernel.
+
+    Why this exists as a second entry point: the attention backend is chosen when the
+    model spec is *built* (``model_registry(..., attn_backend="varlen")``), and
+    ``model_spec`` is not on the CLI surface -- so without this, "run this upstream
+    config with the Ascend attention kernel" meant editing a recipe. Replacing the
+    node is enough because the mask type is read back off the tree at run time:
+    ``Decoder.get_attention_masks`` dispatches on ``isinstance(inner_attention,
+    FlexAttention.Config | VarlenAttention.Config)`` (``models/common/decoder.py``),
+    and ``AscendFusionAttention.Config`` subclasses ``VarlenAttention.Config``, so
+    varlen metadata is what gets built.
+
+    ``derive`` drops the flex-only fields (``block_size``, ``kernel_options``) and
+    leaves ``window_size`` at its default, which is what converting the node means.
+    """
     return derive(cfg, AscendFusionAttention.Config)

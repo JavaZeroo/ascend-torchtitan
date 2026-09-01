@@ -111,6 +111,54 @@ def test_npu_fused_is_opt_in_and_idempotent():
     assert cfg.override.imports.count(RMSNORM_OVERRIDE) == 1
 
 
+def test_fused_that_fuses_nothing_is_loud_and_not_reportable():
+    """P7/P12: a config no fused kernel targets must not yield a "fused" measurement.
+
+    qwen3_5 is the real case: it carries no ``models.common.nn_modules.RMSNorm``
+    node at all, so ``--mode fused`` used to produce a config byte-identical to
+    ``minimal`` and report the number as if the fused kernels had run.
+    """
+    from ascend_titan.recipes.matrix import TransformReport, npu_fused
+
+    empty = TransformReport()
+    assert empty.is_noop
+    assert not TransformReport(rms_norm_override=True).is_noop
+
+    class _NothingToFuse:
+        """A config tree with no nodes and no active overrides."""
+
+        class _Override:
+            imports: list[str] = []
+
+        override = _Override()
+
+        def traverse(self, _cls):
+            return iter(())
+
+    report = npu_fused(_NothingToFuse())
+    assert report.is_noop
+    assert any("measures exactly what 'minimal' does" in n for n in report.notes)
+
+
+def test_undecidable_is_not_the_same_as_nothing_to_fuse(monkeypatch):
+    """A config that cannot be built here must still run, not be skipped as a no-op.
+
+    Skipping on a build failure would hide a real red cell behind a ⚪.
+    """
+    import ascend_titan.recipes.matrix as matrix_mod
+    from ascend_titan.tools.matrix.cases import fused_is_a_no_op
+
+    def unbuildable(_name):
+        raise RuntimeError("this config needs a package we do not have")
+
+    monkeypatch.setattr(matrix_mod, "resolve", unbuildable)
+    assert fused_is_a_no_op("some.module__some_fn") is False
+
+    monkeypatch.setattr(matrix_mod, "resolve", lambda _n: lambda: object())
+    monkeypatch.setattr(matrix_mod, "npu_fused", lambda _c: matrix_mod.TransformReport())
+    assert fused_is_a_no_op("some.module__some_fn__fused") is True
+
+
 def test_swap_override_replaces_sibling_idempotently():
     """Two overrides claiming one node swap, never stack; re-swap is a no-op."""
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
