@@ -39,6 +39,17 @@ $B --help | grep -i 'triton-ir-compile'        # -> 空；它只有 --enable-tri
 即 `compile_mode="simt_only"`（`compiler.py:1015-1017` 列为受支持的取值之一）
 在 3.2.2 里是**声明了但无法执行**的。
 
+**不是"我们的 CANN 太旧"**：这台机器上三个 `bishengir-compile` 副本全是 1.2.0，
+SIMT 参数都是 0 个——
+
+| 来源 | 版本 | `--help` 里 SIMT 参数 |
+|---|---|--:|
+| triton-ascend 3.2.2 自带 | 1.2.0（AscendNPU-IR `042c923d`，2026-07-31） | 0 |
+| CANN 9.1.0 `/usr/local/Ascend` | 1.2.0（`8796a8ac`，2026-07-31） | 0 |
+| CANN 9.1.0 `/data/ljb/CANN` | 1.2.0（`8796a8ac`，2026-07-29） | 0 |
+
+也就是说 `simt_only` 需要一个比任何已发布组件都新的 bishengir，而它没有随包发出来。
+
 **触发路径**（不是我们主动选的）：torch_npu 的 inductor 对 "indirect load + sum" 模式会选
 `simt_only`（`torch_npu/_inductor/codegen/ir.py:1717 define_npu_kernel_type`，
 取值表在 `torch_npu/_inductor/config.py:319`）。FlexAttention 的 document mask 正是这个模式。
