@@ -12,11 +12,21 @@ flavor upstream has:
     python -m ascend_titan.train --module ascend_titan.models.qwen3_5 \\
         --config qwen35_27b_npu          # never hand-written; resolved here
 
+Each flavor gets **two** entry points, so one module answers every question people
+actually ask about a model:
+
+    --config qwen35_122b_a10b        stock upstream, untouched (the control)
+    --config qwen35_122b_a10b_npu    the same, plus this family's Ascend deltas
+
+Either can be adjusted from the command line (``--override.imports`` replaces the
+override set wholesale, ``--parallelism.*`` sets the layout), so "upstream but with
+just our attention kernel" needs no new config function either.
+
 A hand-written function of the same name always wins: Python looks in the module
 dict before calling ``__getattr__``. Those stay for flavors that need more than the
-family deltas -- real tokenizer/dataset assets, a pipeline-parallel layout, a golden
--frozen smoke config -- and they call the same ``deltas`` callable, so the family
-knowledge still exists in exactly one place.
+family deltas -- a golden-frozen smoke config, a curated fused preset, a
+pipeline-parallel layout with a model-level reason -- and they call the same
+``deltas`` callable, so the family knowledge still exists in exactly one place.
 """
 
 from __future__ import annotations
@@ -62,10 +72,22 @@ def npu_entry_points(upstream: ModuleType, deltas: Callable[[object, str], None]
     """
 
     def __getattr__(name: str):
-        if name.startswith("_") or not name.endswith(SUFFIX):
+        if name.startswith("_"):
             raise AttributeError(name)
-        flavor = name[: -len(SUFFIX)]
         flavors = upstream_flavors(upstream)
+
+        # Bare flavor name: upstream's own function, handed over untouched. This is
+        # the control run -- "what does stock torchtitan do here" -- and it must not
+        # be reachable only through a different module with a longer name.
+        if name in flavors:
+            return flavors[name]
+
+        if not name.endswith(SUFFIX):
+            raise AttributeError(
+                f"{name}: expected an upstream flavor ({sorted(flavors)}) "
+                f"or one of those plus '{SUFFIX}'"
+            )
+        flavor = name[: -len(SUFFIX)]
         fn = flavors.get(flavor)
         if fn is None:
             raise AttributeError(
@@ -84,6 +106,7 @@ def npu_entry_points(upstream: ModuleType, deltas: Callable[[object, str], None]
         return build
 
     def __dir__() -> list[str]:
-        return sorted(f"{flavor}{SUFFIX}" for flavor in upstream_flavors(upstream))
+        flavors = upstream_flavors(upstream)
+        return sorted([*flavors, *(f"{flavor}{SUFFIX}" for flavor in flavors)])
 
     return __getattr__, __dir__

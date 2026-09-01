@@ -104,9 +104,12 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 上游一个模型族有很多尺寸（qwen3.5 就有 11 个，还在加）。我们**不为每个尺寸写函数**：
 每个模型包声明一次"这个族在昇腾上需要什么"，于是上游任何 flavor 都自动有入口：
 
+每个 flavor 有**两个**入口：裸名 = 上游原样（对照组），加 `_npu` = 再叠上我们的增量。
+
 ```bash
 # 这些都没有人手写过，直接可用
-MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_27b_npu       NPU=8 ./scripts/run_train.sh
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_122b_a10b     NPU=8 ./scripts/run_train.sh  # 上游原样
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_122b_a10b_npu NPU=8 ./scripts/run_train.sh  # + 昇腾加速
 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_397b_a17b_npu NPU=8 ./scripts/run_train.sh
 
 python -c "import ascend_titan.models.qwen3_5 as m; print(dir(m))"   # 列出全部可用入口
@@ -135,9 +138,9 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b_npu NPU=1 ./scripts/run_tr
 #    一个 override 都不要（但保留 recipe 的数据/并行/资产设置）：
 #    ... ./scripts/run_train.sh --override.imports
 
-# ③ 完全的上游原生（不加任何我们的东西，用来做对照）
-MODULE=ascend_titan.recipes.matrix NPU=1 ./scripts/run_train.sh \
-    CONFIG=torchtitan.models.qwen3_5.config_registry__qwen35_0_8b__stock
+# ③ 完全的上游原生（不加任何我们的东西，用来做对照）——**同一个模型包**，
+#    去掉 _npu 后缀就是上游自己的配置函数，原样交出
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_0_8b NPU=1 ./scripts/run_train.sh
 ```
 
 可用的 override 目标就是 `ascend_titan/kernels/__init__.py` 里的 `*_OVERRIDE` 常量；

@@ -38,6 +38,32 @@ def test_only_zero_arg_factories_defined_in_the_module_count():
     assert set(_auto.upstream_flavors(mod)) == {"flavor_a"}
 
 
+def test_a_flavor_is_reachable_both_stock_and_with_our_deltas():
+    """One module answers all three questions people ask about a model:
+
+    stock upstream (the control), upstream + our deltas, and either of those with a
+    hand-picked override set from the command line. Stock must not require switching
+    to a different module with a longer name.
+    """
+
+    def flavor_a():
+        return {"name": "a", "touched": False}
+
+    mod = _fake_upstream(flavor_a=flavor_a)
+
+    def deltas(config, flavor):
+        config["touched"] = flavor
+
+    getattr_, dir_ = _auto.npu_entry_points(mod, deltas)
+
+    assert dir_() == ["flavor_a", "flavor_a_npu"]
+    # bare name: upstream's own function, handed over untouched
+    assert getattr_("flavor_a") is flavor_a
+    assert getattr_("flavor_a")()["touched"] is False
+    # _npu: the same config plus this family's deltas
+    assert getattr_("flavor_a_npu")()["touched"] == "flavor_a"
+
+
 def test_entry_point_applies_the_family_deltas():
     applied = []
 
@@ -47,7 +73,6 @@ def test_entry_point_applies_the_family_deltas():
     mod = _fake_upstream(flavor_a=flavor_a)
     getattr_, dir_ = _auto.npu_entry_points(mod, lambda cfg, flavor: applied.append(flavor))
 
-    assert dir_() == ["flavor_a_npu"]
     build = getattr_("flavor_a_npu")
     # the family declaration is handed the flavor name, so per-size data
     # (which HF tokenizer a real size uses) stays a table lookup, not a function
@@ -55,8 +80,8 @@ def test_entry_point_applies_the_family_deltas():
 
     with pytest.raises(AttributeError, match="has no config 'nope'"):
         getattr_("nope_npu")
-    with pytest.raises(AttributeError):
-        getattr_("flavor_a")  # missing the _npu suffix
+    with pytest.raises(AttributeError, match="expected an upstream flavor"):
+        getattr_("not_a_flavor")
 
 
 def test_every_upstream_qwen3_5_flavor_is_reachable_and_gets_the_gdn_override():

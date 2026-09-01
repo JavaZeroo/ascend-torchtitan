@@ -81,7 +81,14 @@ def npu_deltas(config: Trainer.Config) -> None:
 __getattr__, __dir__ = npu_entry_points(_upstream, npu_deltas)
 ```
 
-于是 `--config <上游 flavor>_npu` 对**每个**上游 flavor 都有效（`dir(包)` 列出全部）。
+于是每个上游 flavor 有**两个**入口（`dir(包)` 列出全部）：
+
+| `--config` | 给你什么 |
+|---|---|
+| `<flavor>` | 上游自己的配置函数，**原样**（对照组） |
+| `<flavor>_npu` | 同一个配置 + 这个族的昇腾增量 |
+
+两者都能再用 `--override.imports` 精确挑选生效哪些模块。
 手写 recipe 只在需要额外东西时才写，且必须调用 `npu_deltas`——族增量只存在一处。
 同名时手写的优先（Python 先查模块字典，再走 `__getattr__`）。
 
