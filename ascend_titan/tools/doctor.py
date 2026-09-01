@@ -34,6 +34,8 @@ class Report:
     torchtitan_importable: bool | None = None
     torchtitan_import_error: str | None = None
     cuda_only_packages: list[str] = field(default_factory=list)
+    inductor_backend: str | None = None
+    """triton 的昇腾后端；None = inductor 用不了（torch.compile 会报 0 active drivers）。"""
     shims_registered: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -99,7 +101,6 @@ def probe(*, import_torchtitan: bool = True) -> Report:
 
     cuda_only = (
         "nvidia-cutlass-dsl",
-        "triton",
         "flash-attn-4",
         "nvidia-cudnn-cu12",
         "nvidia-cudnn-cu13",
@@ -107,6 +108,18 @@ def probe(*, import_torchtitan: bool = True) -> Report:
     for pkg in cuda_only:
         if _dist_version(pkg):
             r.cuda_only_packages.append(f"{pkg}=={_dist_version(pkg)}")
+
+    # inductor 的昇腾后端。缺了它 torch.compile 报 "0 active drivers"——这是环境坏了，
+    # 不是已知限制（装法：scripts/install_triton.sh）。
+    try:
+        from triton.runtime import driver
+
+        # driver.active 是个惰性代理：碰一下属性才会真正构造驱动，
+        # 而构造本身就是"这台机器有没有可用后端"的答案。
+        target = driver.active.get_current_target()
+        r.inductor_backend = getattr(target, "backend", None) or str(target)
+    except Exception as e:  # noqa: BLE001 - 报告缺什么正是 doctor 的职责
+        r.notes.append(f"triton has no usable backend ({type(e).__name__}); inductor unavailable")
 
     r.torchtitan = _dist_version("torchtitan")
     if import_torchtitan:
@@ -127,6 +140,11 @@ def probe(*, import_torchtitan: bool = True) -> Report:
 
     if r.torch_npu is None:
         r.notes.append("torch_npu not installed: this is not an NPU environment.")
+    if r.torch_npu is not None and r.inductor_backend is None:
+        r.notes.append(
+            "no Ascend triton backend: torch.compile(backend='inductor') will fail with "
+            "'0 active drivers'. Install it with scripts/install_triton.sh."
+        )
     if r.cuda_only_packages:
         r.notes.append(
             "CUDA-only packages present; torchtitan was probably installed with the "
@@ -146,6 +164,7 @@ def render(r: Report) -> str:
         ("torchtitan", r.torchtitan),
         ("torchtitan sha", r.torchtitan_sha),
         ("torchtitan importable", r.torchtitan_importable),
+        ("inductor backend", r.inductor_backend or "-（缺 Triton-Ascend）"),
         ("cuda-only packages", ", ".join(r.cuda_only_packages) or "-"),
         ("shims registered", ", ".join(r.shims_registered) or "-"),
     ]

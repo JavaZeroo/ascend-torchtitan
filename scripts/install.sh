@@ -46,4 +46,11 @@ else
   pip install -c "$CONSTRAINTS" -r "$HERE/constraints/titan-deps.txt"
 fi
 pip install -e "$HERE[dev]"
+
+# inductor 的昇腾后端。没有它 torch.compile 报 "0 active drivers"，
+# 而它自带完整 triton 发行版，必须在别的包之后单独装（见脚本注释）。
+if [ "${WITH_TRITON:-1}" = 1 ]; then
+  SRC=$(python -c 'import sys; print(sys.prefix)') "$HERE/scripts/install_triton.sh"
+fi
+
 ascend-titan-doctor

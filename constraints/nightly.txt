@@ -11,4 +11,7 @@ torch_npu==2.15.0
 spmd_types==0.2.5
 attn-gym==0.0.5
 grain==0.2.18
-triton==3.7.1
+# inductor 的昇腾后端。它自带完整的 triton 发行版，**替代** PyPI 的 triton
+# （装之前必须先卸干净，否则 backends 里只有 amd/nvidia）。装法见 scripts/install_triton.sh。
+triton-ascend==3.2.2
+pybind11
