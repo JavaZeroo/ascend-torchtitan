@@ -114,6 +114,27 @@ def test_npu_fused_is_opt_in_and_idempotent():
     assert cfg.override.imports.count(RMSNORM_OVERRIDE) == 1
 
 
+def test_swap_override_replaces_sibling_idempotently():
+    """Two overrides claiming one node swap, never stack; re-swap is a no-op."""
+    from torchtitan.models.llama3.config_registry import llama3_debugmodel
+
+    from ascend_titan.recipes.transforms import GDN_FUSED_OVERRIDE, GDN_OVERRIDE, swap_override
+
+    cfg = llama3_debugmodel()
+    cfg.override.imports = ["ascend_titan.kernels.attention.npu_fusion_attention", GDN_OVERRIDE]
+
+    assert swap_override(cfg, remove=GDN_OVERRIDE, add=GDN_FUSED_OVERRIDE)
+    assert GDN_OVERRIDE not in cfg.override.imports
+    assert GDN_FUSED_OVERRIDE in cfg.override.imports
+    # attention override is untouched; sibling relationship is ordered, not positional
+    assert cfg.override.imports[0] == "ascend_titan.kernels.attention.npu_fusion_attention"
+
+    # Idempotent: the target is gone, so a second swap is a no-op that keeps the
+    # existing order and does not append a duplicate.
+    assert not swap_override(cfg, remove=GDN_OVERRIDE, add=GDN_FUSED_OVERRIDE)
+    assert cfg.override.imports.count(GDN_FUSED_OVERRIDE) == 1
+
+
 def test_encode_rejects_unknown_mode():
     from ascend_titan.recipes.matrix import encode
 

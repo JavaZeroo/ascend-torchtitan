@@ -43,6 +43,30 @@ _ATTENTION_BLOCK_OVERRIDES = ("torchtitan.overrides.fused_mla.",)
 # and the surrounding code has no varlen path (kimi_k3 / kimi_k2_7 vision towers).
 _KEEP_FLEX_FQNS = ("vision_encoder",)
 
+# GDN_OVERRIDE (plain-torch chunk recurrence, kernels/gdn.py) and GDN_FUSED_OVERRIDE
+# (fla-npu AscendC, kernels/gdn_fla.py, R5) claim the same InnerGatedDeltaNet.Config
+# node, so torchtitan rejects both being active at once. They live in two modules on
+# purpose: gdn.py is a base dependency, gdn_fla.py registers only when fla_npu
+# imports (ADR-004). Opting into fused is therefore a swap (swap_override), never a
+# stack. Keep this pair the only place that owns the sibling relationship.
+
+
+def swap_override(config: Trainer.Config, *, remove: str, add: str) -> bool:
+    """Replace one override target with a mutually-exclusive sibling, in place.
+
+    Two overrides that claim the same ``Configurable.Config`` node cannot both be
+    active (torchtitan raises a per-node conflict), so activating a drop-in
+    variant means removing the original and appending the variant -- never
+    stacking. Idempotent: an already-swapped list is left untouched. Returns
+    ``True`` when ``remove`` was present (and thus removed).
+    """
+    if remove not in config.override.imports:
+        return False
+    config.override.imports = [imp for imp in config.override.imports if imp != remove]
+    if add not in config.override.imports:
+        config.override.imports = [*config.override.imports, add]
+    return True
+
 
 @dataclass
 class Applied:
@@ -189,12 +213,7 @@ def npu_fused(config: Trainer.Config) -> Applied:
 
         _fla, _err = optional_module("fla_npu")
         if _fla is not None:
-            # Same-override sibling: swap, never stack (both claim InnerGatedDeltaNet.Config).
-            config.override.imports = [
-                imp for imp in config.override.imports if imp != GDN_OVERRIDE
-            ]
-            if GDN_FUSED_OVERRIDE not in config.override.imports:
-                config.override.imports = [*config.override.imports, GDN_FUSED_OVERRIDE]
+            swap_override(config, remove=GDN_OVERRIDE, add=GDN_FUSED_OVERRIDE)
             a.gdn_fused_override = True
         else:
             a.notes.append("gdn fused override skipped: fla_npu not installed (ADR-004)")
