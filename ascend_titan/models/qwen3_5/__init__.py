@@ -3,6 +3,7 @@
 from ascend_titan.models.qwen3_5.recipes import (
     qwen35_0_8b_npu,
     qwen35_0_8b_npu_fsdp2,
+    qwen35_0_8b_npu_fused,
     qwen35_debugmodel_npu,
     qwen35_debugmodel_npu_fsdp2,
     qwen35_debugmodel_npu_text,
@@ -11,6 +12,7 @@ from ascend_titan.models.qwen3_5.recipes import (
 __all__ = [
     "qwen35_0_8b_npu",
     "qwen35_0_8b_npu_fsdp2",
+    "qwen35_0_8b_npu_fused",
     "qwen35_debugmodel_npu",
     "qwen35_debugmodel_npu_fsdp2",
     "qwen35_debugmodel_npu_text",

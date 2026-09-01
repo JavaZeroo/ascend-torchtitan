@@ -192,6 +192,7 @@ GE 运行时还需要 venv 里有 `decorator`、`scipy`。用法是上游自带�
 | kimi_k3 模型接入 | 🔴 | TT-11：`import torchtitan.models.kimi_k3` 需要 `cutlass`（attn_gym cute 后端），无 CUDA 环境不可导入 |
 | ops-transformer `block_attn_res_update`（attn_res） | 🟡 已构建、已注册 | run 包 + `cann_ops_transformer_ascend_titan` 均安装成功，`torch.ops.cann_ops_transformer.block_attn_res_update` 可见。接入推迟：该算子是**前向、原地、流式**的 online-softmax 形式（partial_block/numerator/logit_max/exp_sum 逐块更新），与上游 `_apply_attention_residual` 的一次性拼接形式不同，且无反向算子；训练接入需要重写 block 循环并自写反向。加之 TT-11。M4。 |
 | fla-npu（KDA / causal_conv1d） | 🔴 | OURS-11：需要 `triton-ascend`，无可用 wheel |
+| fla-npu（Gated DeltaNet 融合递推） | 🟢 模型级 | `kernels/gdn_fla.py`：`chunk_gated_delta_rule` 自定义算子（AscendC，R5），`tests/npu/test_kernel_gdn_fla.py` 4 passed；0.8B 单卡模型级真实执行（provenance `AscendFusedGatedDeltaKernel.Config`×18），step-4 tps 1,420 vs 纯 torch 244（≈5.8×），loss 与纯 torch 对拍 bf16 舍入级（step-1 rel 2.2e-5）；golden 逐位待录 |
 
 ## 损失
 

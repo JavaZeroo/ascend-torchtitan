@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ascend-torchtitan · shim 与 override 机制架构审查</title>
+<style>
+  :root {
+    --ink: #10151c;
+    --paper: #f6f8f9;
+    --surface: #ffffff;
+    --sunken: #eef1f4;
+    --hairline: #dbe2e6;
+    --hairline-strong: #c3ced5;
+    --muted: #5a6672;
+    --accent: #0d6e7a;
+    --accent-soft: #e2f1f2;
+    --pass: #2b7a4b;
+    --pass-soft: #e4f2e8;
+    --partial: #a1701a;
+    --partial-soft: #f7eedb;
+    --fail: #b23a2f;
+    --fail-soft: #fae7e4;
+    --sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --display: "Archivo", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+    --col: 1180px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e4eaef; --paper: #0e1319; --surface: #161d25; --sunken: #1b232c;
+      --hairline: #2a343f; --hairline-strong: #3b4855; --muted: #94a2b0;
+      --accent: #56ccd6; --accent-soft: #14313a; --pass: #63c98a; --pass-soft: #16301f;
+      --partial: #d8ab4e; --partial-soft: #322715; --fail: #e8776a; --fail-soft: #34191a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--sans); background: var(--paper); color: var(--ink);
+    line-height: 1.65; font-size: 15px;
+  }
+  a { color: var(--accent); }
+  header.hero { padding: 56px 24px 40px; text-align: center; border-bottom: 1px solid var(--hairline); }
+  header.hero .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+  header.hero h1 { font-family: var(--display); font-size: 34px; margin: 0 0 10px; letter-spacing: -.02em; }
+  header.hero p.sub { color: var(--muted); max-width: 720px; margin: 0 auto; }
+  .wrap { max-width: var(--col); margin: 0 auto; padding: 8px 24px 80px; }
+  section { margin-top: 40px; }
+  h2 { font-family: var(--display); font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; }
+  h2 .tag { font-size: 12px; font-family: var(--mono); color: var(--muted); vertical-align: middle; margin-left: 6px; }
+  section > .lede { color: var(--muted); margin: 0 0 20px; max-width: 860px; }
+  .verdict { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px;
+    padding: 18px 20px; margin-top: 16px; }
+  .verdict b { color: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 10px; font-size: 16px; font-family: var(--display); }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 1px 8px;
+    border-radius: 999px; border: 1px solid var(--hairline-strong); color: var(--muted); margin-right: 6px; }
+  .pill.good { color: var(--pass); border-color: var(--pass); background: var(--pass-soft); }
+  .pill.bad { color: var(--fail); border-color: var(--fail); background: var(--fail-soft); }
+  .pill.warn { color: var(--partial); border-color: var(--partial); background: var(--partial-soft); }
+  ul { margin: 8px 0 0; padding-left: 20px; }
+  li { margin: 6px 0; }
+
+  /* pipeline diagram */
+  .flow { display: flex; flex-direction: column; gap: 0; background: var(--surface);
+    border: 1px solid var(--hairline); border-radius: 12px; padding: 24px 20px; overflow-x: auto; }
+  .lane { display: flex; align-items: stretch; gap: 0; flex-wrap: nowrap; }
+  .node { border: 1px solid var(--hairline-strong); border-radius: 8px; padding: 10px 12px;
+    background: var(--sunken); min-width: 118px; margin: 4px; }
+  .node .t { font-weight: 600; font-size: 13px; }
+  .node .d { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .node.layer0 { border-color: var(--fail); background: var(--fail-soft); }
+  .node.layer1 { border-color: var(--accent); background: var(--accent-soft); }
+  .node.layer3 { border-color: var(--partial); background: var(--partial-soft); }
+  .node.layer4 { border-color: var(--pass); background: var(--pass-soft); }
+  .node.focus { border-width: 2px; box-shadow: 0 0 0 3px var(--fail-soft); }
+  .arrow { align-self: center; color: var(--muted); font-family: var(--mono); font-size: 16px; padding: 0 2px; white-space: nowrap; }
+  .cap { font-family: var(--mono); font-size: 11px; color: var(--muted); writing-mode: vertical-rl;
+    text-orientation: mixed; padding: 0 6px; letter-spacing: .08em; width: 18px; }
+  .lanehead { font-family: var(--mono); font-size: 11px; color: var(--muted); width: 110px;
+    min-width: 110px; display: flex; align-items: center; padding-right: 8px; justify-content: flex-end; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface);
+    border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; margin-top: 12px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { background: var(--sunken); font-family: var(--mono); font-size: 12px; letter-spacing: .02em; }
+  tr:last-child td { border-bottom: none; }
+  .sev { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+  code { font-family: var(--mono); font-size: 12.5px; background: var(--sunken);
+    padding: 1px 5px; border-radius: 4px; }
+  .before, .after { border-radius: 8px; padding: 12px 14px; margin: 0; font-family: var(--mono);
+    font-size: 12.5px; white-space: pre; overflow-x: auto; }
+  .before { background: var(--fail-soft); border: 1px solid var(--fail); }
+  .after { background: var(--pass-soft); border: 1px solid var(--pass); }
+  .note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  footer { border-top: 1px solid var(--hairline); padding: 20px 24px; text-align: center;
+    color: var(--muted); font-size: 12.5px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="kicker">Architecture Review · L0 compat / L1 kernels</div>
+  <h1>shim 与 override 机制架构审查</h1>
+  <p class="sub">对 <code>ascend_titan.compat</code>（受治理 monkeypatch）与 torchtitan <code>@override</code>（配置期节点替换）两条接缝的整体审视——设计是否合理、是否存在可优化点，以及目标形态。</p>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>0 · 结论 <span class="tag">verdict</span></h2>
+  <div class="verdict">
+    设计是<b>合理且克制的</b>：两条接缝分工清晰、各自有治理 teeth，且没有重写上游机制（<b>P10 / P6</b>）。
+    主要问题不是机制本身，而是三处<b>表达层的债</b>——(1) 兄弟 override 靠 recipe 里的 list 手术来规避节点冲突、语义不可见；
+    (2) 融合 GDN 的 inner-net 逐字重复了纯 torch 版 forward（DRY 破坏）；(3) 两张文档表与代码不同步。
+    这些都不影响当前正确性，但会让下一个加 override / shim 的人踩进同一个坑。建议按 §3 的优先级收敛。
+  </div>
+</section>
+
+<section>
+  <h2>1 · 现状架构 <span class="tag">current</span></h2>
+  <p class="lede">两条接缝都在 <code>_bootstrap.setup()</code> 之后、模型 build 之前生效：shim 治"import 期 / 自由函数写死 CUDA、又没有配置开关、override 够不着"的代码（L0）；override 治"存在 <code>Configurable.Config</code> 节点"的可替换计算（L1）。分界线是 <b>P6</b>。</p>
+
+  <div class="flow">
+    <div class="lane">
+      <div class="lanehead">生命周期</div>
+      <div class="node"><div class="t">import ascend_titan</div><div class="d">无副作用</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer4"><div class="t">setup()</div><div class="d">_bootstrap.py</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">torch_npu import</div><div class="d">P14 硬</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">fla_npu import</div><div class="d">ADR-004 可选</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">apply_all() shims</div><div class="d">ASCEND_TITAN_SKIP_SHIMS</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">import torchtitan</div><div class="d">device_type 冻结</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">recipe → apply_overrides()</div><div class="d">override.imports</div></div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="lane">
+      <div class="lanehead">L0 · compat</div>
+      <div class="node layer0"><div class="t">registry.shim()</div><div class="d">import 期校验 reason/upstream/kind</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer0"><div class="t">wrap</div><div class="d">flex_eager_when_deterministic</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer0"><div class="t">replace ×2</div><div class="d">flex_block_mask_eager (lm/vision)</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer0"><div class="t">polyfill</div><div class="d">nightly-only API 补缺时用</div></div>
+    </div>
+    <div class="lane">
+      <div class="lanehead">L1 · kernels</div>
+      <div class="node layer1"><div class="t">attention</div><div class="d">custom_op + @override</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer1"><div class="t">rope / rms_norm / swiglu</div><div class="d">torch_npu 算子</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer1"><div class="t">gdn.py</div><div class="d">纯 torch chunk 递推</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer1 focus"><div class="t">gdn_fla.py</div><div class="d">fla-npu 融合（R5）</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer1"><div class="t">situ_glu.py</div><div class="d">ops-nn 可选</div></div>
+    </div>
+    <div class="lane">
+      <div class="lanehead">L3 · recipes</div>
+      <div class="node layer3"><div class="t">qwen3_5 / qwen3 / …</div><div class="d">config_registry + 增量</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer3"><div class="t">transforms.npu_minimal</div><div class="d">P12 最小基线</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer3"><div class="t">transforms.npu_fused</div><div class="d">opt-in 性能</div></div>
+    </div>
+    <div class="lane">
+      <div class="lanehead">L4 · tools</div>
+      <div class="node layer4"><div class="t">doctor</div><div class="d">环境 + shim 数量</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer4"><div class="t">provenance</div><div class="d">每节点后端</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer4"><div class="t">check_golden.sh</div><div class="d">损失曲线逐位</div></div>
+    </div>
+    <p class="note">红框 <code>gdn_fla.py</code> 是本次 R5 新增：它和 <code>gdn.py</code> 都 <code>target=InnerGatedDeltaNet.Config</code>，是唯一的一对"同节点兄弟 override"。</p>
+  </div>
+</section>
+
+<section>
+  <h2>2 · 设计合理性 <span class="tag">assessment</span></h2>
+  <div class="grid2">
+    <div class="card">
+      <h3><span class="pill good">合理</span>接缝边界清晰</h3>
+      <ul>
+        <li><b>override 优先、shim 兜底</b>：能触及 <code>Configurable.Config</code> 就走 override（P6），只有自由函数/import 期写死才用 shim（ADR-002）。这条分界避免了"能用 override 却退化成 monkeypatch"的慢性腐烂。</li>
+        <li><b>没有 fork 上游机制</b>：override 是 torchtitan 自带能力，我们只作为消费方注册工厂；shim 只是补上游没有扩展点的缺口（P10）。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="pill good">合理</span>治理有 teeth</h3>
+      <ul>
+        <li>shim：import 时强制 <code>reason</code>/<code>upstream</code>，<code>replace</code> 必须写 <code>why_not_wrap</code>（P3/P4）；<code>polyfill</code> 在上游补 API 后自动 no-op。</li>
+        <li>override：继承上游 per-node 冲突检测 + <code>derive()</code> + <code>fqns</code>/<code>exact</code>，版本漂移风险被 <code>derive</code> 吸收。</li>
+        <li>依赖分层：基础依赖硬导入（P14/ADR-007），可选加速包走 <code>optional_module</code> + WARNING（ADR-004），torch_npu 缺陷绝不绕（P1/P9）。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3 · 优化清单 <span class="tag">ranked</span></h2>
+  <p class="lede">按影响排序。①②③ 建议尽快，④⑤⑥ 属于打磨。</p>
+  <table>
+    <tr><th>级</th><th>问题</th><th>建议</th><th>影响</th></tr>
+    <tr>
+      <td class="sev">① 高</td>
+      <td><b>兄弟 override 用 list 手术规避节点冲突</b>：<code>gdn.py</code> 与 <code>gdn_fla.py</code> 同 target <code>InnerGatedDeltaNet.Config</code>，靠 <code>[imp for imp in ... if imp != GDN_OVERRIDE]</code> 换掉。语义藏在 recipe 里，审计不可见、易漏。</td>
+      <td>把 swap 收敛成 <code>transforms.py</code> 的一个显式助手（或数据表驱动），recipe 与 transform 共用，并写清"同一节点、互斥"语义。</td>
+      <td>审计可见、新增第三个 sibling 不再重蹈覆辙。</td>
+    </tr>
+    <tr>
+      <td class="sev">② 高</td>
+      <td><b>融合 inner-net 重复实现</b>：<code>AscendFusedInnerGatedDeltaNet(InnerGatedDeltaNet)</code> 逐字复制 <code>AscendInnerGatedDeltaNet.forward</code>（conv + gate 数学 ~48 行）。</td>
+      <td>改为继承 <code>AscendInnerGatedDeltaNet</code>，只替换 <code>kernel</code> 配置为 <code>AscendFusedGatedDeltaKernel.Config</code>；forward 保持不变。</td>
+      <td>DRY + 单一事实来源；上游 conv/gate 改动自动继承。</td>
+    </tr>
+    <tr>
+      <td class="sev">③ 中</td>
+      <td><b>文档与代码不同步</b>：<code>kernels/__init__.py</code> 仍写 "Nothing lives here yet (M3)"；<code>kernels/README.md</code> 表格缺 <code>gdn.py</code>/<code>gdn_fla.py</code>/<code>kda.py</code> 三行。</td>
+      <td>更正 <code>__init__</code> docstring；补全 README 表格行（含每文件的 target 节点与依赖层级）。</td>
+      <td>P11 单一事实来源，避免"文档里的机制 ≠ 代码里的机制"。</td>
+    </tr>
+    <tr>
+      <td class="sev">④ 中</td>
+      <td><b>"import 无副作用"表述不准</b>：<code>kernels/__init__.py</code> 要求模块 import 无副作用，但 <code>situ_glu.py</code>/<code>gdn_fla.py</code> 都在 import 时打 WARNING（ADR-004 许可的响亮降级）。</td>
+      <td>把措辞改为"import 时不得触发 NPU 算子加载；可选包探测 + WARNING 是唯一允许的 import 期副作用"。</td>
+      <td>消除自相矛盾的契约，防止有人把 WARNING 当违规删掉。</td>
+    </tr>
+    <tr>
+      <td class="sev">⑤ 低</td>
+      <td><b>shim 无显式 apply 顺序</b>：dict 插入序隐式决定；现有 3 条 shim 无依赖所以没事，但 wrap 叠加是脆的。</td>
+      <td>在 <code>doctor</code> 输出 shim 清单 + apply 顺序；若无依赖则显式声明"无顺序依赖"。</td>
+      <td>为未来 shim 增长留一个可诊断的护栏。</td>
+    </tr>
+    <tr>
+      <td class="sev">⑥ 低</td>
+      <td><b>override 无静态审计表</b>：冲突只靠运行时 <code>_check_node_conflicts</code> 兜底，写 recipe 时不可见。</td>
+      <td>引一张纯数据表（同 <code>registry.py</code>/<code>triage.toml</code> 风格）：override 工厂 → 目标节点 → kind(minimal/fused) → golden → 依赖包，供 doctor/provenance 消费。</td>
+      <td>把"哪些 override 活跃、claim 了谁、是否互斥"从隐式逻辑变成显式数据（P11）。</td>
+    </tr>
+  </table>
+</section>
+
+<section>
+  <h2>4 · 目标形态 <span class="tag">target</span></h2>
+  <p class="lede">② 的一个示意（改动最小、收益最大）：融合 inner-net 不再重写 forward，而是继承纯 torch 版、只换 kernel。</p>
+
+  <p class="before">class AscendFusedInnerGatedDeltaNet(InnerGatedDeltaNet):
+    # 逐字复制 AscendInnerGatedDeltaNet.forward(conv + gate math)  ← 重复</p>
+  <p class="after">from ascend_titan.kernels.gdn import AscendInnerGatedDeltaNet
+
+class AscendFusedInnerGatedDeltaNet(AscendInnerGatedDeltaNet):
+    # 只换 kernel 配置；forward 从 AscendInnerGatedDeltaNet 继承</p>
+
+  <div class="flow" style="margin-top:16px">
+    <div class="lane">
+      <div class="lanehead">override 树</div>
+      <div class="node layer1"><div class="t">InnerGatedDeltaNet.Config</div><div class="d">上游节点</div></div>
+      <div class="arrow">◄─ target ─</div>
+      <div class="node layer1"><div class="t">gdn.npu_gated_delta_net</div><div class="d">minimal（参考）</div></div>
+      <div class="arrow">-</div>
+      <div class="node layer1"><div class="t">gdn_fla.npu_gated_delta_net_fused</div><div class="d">fused（opt-in，互斥兄弟）</div></div>
+    </div>
+    <div class="lane">
+      <div class="lanehead">继承关系</div>
+      <div class="node layer0"><div class="t">GatedDeltaKernel</div><div class="d">上游</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer0"><div class="t">AscendGatedDeltaKernel</div><div class="d">纯 torch 递推</div></div>
+      <div class="arrow">→</div>
+      <div class="node layer0"><div class="t">AscendFusedGatedDeltaKernel</div><div class="d">融合递推（只改 recurrence）</div></div>
+    </div>
+    <div class="lane">
+      <div class="lanehead">inner-net</div>
+      <div class="node"><div class="t">AscendInnerGatedDeltaNet</div><div class="d">conv + gate（唯一实现）</div></div>
+      <div class="arrow">→ 继承 ──</div>
+      <div class="node focus"><div class="t">AscendFusedInnerGatedDeltaNet</div><div class="d">只换 kernel Config</div></div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>ascend-torchtitan · docs/shim-override-architecture.html · 与 docs/PRINCIPLES.md P0–P14、ADR-002/004/007 对齐</footer>
+
+</body>
+</html>

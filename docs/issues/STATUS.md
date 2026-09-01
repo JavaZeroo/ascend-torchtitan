@@ -33,9 +33,10 @@
 | OURS-6 | issue 未提交 | 已关闭 | torch_npu / op-plugin 六项已按 P9 提交（见 NPU-* 行）；torchtitan / pytorch 按 P10 不提 | — |
 | OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | HARNESS | — |
 | OURS-10 | gpt_oss × TP | 已确认 | 排查中（NIGHTLY 上复测待做） | 待做 |
-| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 部分关闭（2026-08-31） | **DEP-FLA 证伪**：`fla-core` 有 aarch64 wheel，import 正常；挡住的只是它的 CUDA Triton 内核，gated delta rule 与 causal conv1d 已由 `kernels/gdn.py` 的 override 接管。剩下的仍是 inductor / flex 需要 Triton-Ascend | ✅ `qwen35_debugmodel_npu_text` 10 步 loss 3.54783；`qwen35_0_8b_npu` 真实尺寸可跑 |
+| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 部分关闭（2026-08-31） | **DEP-FLA 证伪**：`fla-core` 有 aarch64 wheel，import 正常；挡住的只是它的 CUDA Triton 内核，gated delta rule 与 causal conv1d 已由 `kernels/gdn.py` 的 override 接管，后者已进一步换成 `kernels/gdn_fla.py` 的 AscendC 融合（R5，NPU 对拍 🟢）。剩下的仍是 inductor / flex 需要 Triton-Ascend | ✅ `qwen35_debugmodel_npu_text` 10 步 loss 3.54783；`qwen35_0_8b_npu` 真实尺寸可跑 |
 | OURS-12 | **`npu_baseline` 违反 P1/P9**：展开 ChunkedLossWrapper（TT-4）、性能 override 混入 baseline | **已关闭（2026-08-30）** | TT-4 展开已删除；`npu_baseline` 拆成 `npu_minimal`（矩阵默认）+ `npu_fused`（opt-in），`npu_rms_norm` 已移出基线 | `tests/unit/test_matrix.py`：minimal 不含 RMSNorm override、fused 含 |
 | OURS-13 | 矩阵工具在 `setup()` 之前导入 torchtitan（F4 顺序），暴露了 NPU-8 | 已确认 | NPU-8 修复后可运行；工具本身也应先 `setup()`（待做） | 第二轮 |
+| OURS-14 | fla-npu 融合 GDN（R5）模型级已跑通，但 **run-to-run 非确定性**（单卡 0.8B step-1 loss 三次 12.93595 / 12.93635 / 12.93662，纯 torch 稳定 12.93624），无法按 `check_golden.sh` 冻结逐位 golden | 已确认 | AscendC `chunk_*` 内核的归约/原子序不定；对拍改走「纯 torch 参考 ± bf16 容差」断言（`tests/npu/test_kernel_gdn_fla.py`），模型级 golden 状态记为「无逐位 golden，用文档容差」 | 三次 0.8B 训练 + 算子级对拍 4 passed |
 
 ## NIGHTLY 修复验证（含六个补丁的 torch_npu 构建，2026-08-30）
 

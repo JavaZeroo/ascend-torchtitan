@@ -25,6 +25,7 @@ from torchtitan.trainer import Trainer
 
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
 GDN_OVERRIDE = "ascend_titan.kernels.gdn.npu_gated_delta_net"
+FUSED_GDN_OVERRIDE = "ascend_titan.kernels.gdn_fla.npu_gated_delta_net_fused"
 
 
 def qwen35_debugmodel_npu() -> Trainer.Config:
@@ -116,4 +117,22 @@ def qwen35_0_8b_npu_fsdp2() -> Trainer.Config:
     """0.8B × FSDP2 8 卡。"""
     config = qwen35_0_8b_npu()
     config.parallelism.data_parallel_shard_degree = 8
+    return config
+
+
+def qwen35_0_8b_npu_fused() -> Trainer.Config:
+    """Qwen3.5-0.8B 语言侧 + fla-npu 融合 GDN（R5 性能路径，opt-in）。
+
+    0.8B 的 gated delta net 是 K=V=128、Hk=Hv=16，落在融合 shape gate 内
+    （V∈{128,256}、K≤128、chunk_size∈{64,128}）；GDN 换到 ``gdn_fla`` 的
+    ``chunk_gated_delta_rule`` 自定义算子（6 核前向 / 7 核反向），conv1d 与
+    门控数学不变。数值与 ``qwen35_0_8b_npu`` 在 bf16 舍入级不同，所以带自己的
+    golden。未安装 fla_npu 时 override 不注册，等价退化为普通 recipe。
+    """
+    config = qwen35_0_8b_npu()
+    # The fused override is a SIBLING of the plain-torch GDN override: both claim
+    # InnerGatedDeltaNet.Config, and torchtitan rejects two overrides on one node,
+    # so the fused variant replaces the plain one instead of stacking with it.
+    config.override.imports = [imp for imp in config.override.imports if imp != GDN_OVERRIDE]
+    config.override.imports = [*config.override.imports, FUSED_GDN_OVERRIDE]
     return config

@@ -31,6 +31,7 @@ class SetupReport:
     torch_version: str = ""
     torch_npu_imported: bool = False
     torch_npu_autoloaded: bool = False
+    fla_npu_imported: bool = False
     device_type: str | None = None
     torchtitan_was_already_imported: bool = False
     shims_applied: list[str] = field(default_factory=list)
@@ -43,6 +44,7 @@ class SetupReport:
                 f"torch_npu: imported={self.torch_npu_imported} "
                 f"autoloaded={self.torch_npu_autoloaded}"
             ),
+            f"fla_npu: imported={self.fla_npu_imported}",
             f"shims applied ({len(self.shims_applied)}): {', '.join(self.shims_applied) or '-'}",
         ]
         lines += [f"WARNING: {w}" for w in self.warnings]
@@ -83,6 +85,23 @@ def _import_torch_npu(report: SetupReport) -> None:
     report.torch_npu_imported = True
 
 
+def _import_fla_npu(report: SetupReport) -> None:
+    """Import fla-npu, the optional R5 fused-GDN add-on (ADR-004).
+
+    fla_npu must be imported after torch_npu and after the CANN environment has
+    been sourced, and before the first NPU op runs (its __init__ sets the op-api
+    library search path; a late import gives aclnnStatus=161001). Unlike torch_npu
+    it is NOT a base dependency: a missing wheel only means the fused GDN kernel
+    stays unavailable and kernels/gdn.py's plain-torch recurrence keeps running.
+    This must therefore WARN and degrade, never raise.
+    """
+    try:
+        importlib.import_module("fla_npu")
+        report.fla_npu_imported = True
+    except Exception as exc:  # noqa: BLE001 - optional add-on probe
+        report.warnings.append(f"fla_npu unavailable ({exc}); fused GDN not available (ADR-004)")
+
+
 def setup(*, apply_shims: bool = True) -> SetupReport:
     """Bootstrap the Ascend environment. Idempotent.
 
@@ -111,6 +130,7 @@ def setup(*, apply_shims: bool = True) -> SetupReport:
 
     report.torch_version = torch.__version__
     _import_torch_npu(report)
+    _import_fla_npu(report)
 
     from torch._utils import _get_available_device_type
 

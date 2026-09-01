@@ -17,7 +17,18 @@ qwen3.5 发散事件的直接对策。两边都对 float64 参考解收敛，bf1
 （C=64），彼此之差就是 bf16 噪声；这独立佐证了当初把 Neumann doubling 换成分块前代的改写
 是对的。速度上它明显更好：C=64 时 0.467 ms vs 我们 1.356 ms，且 C 翻倍它几乎不变而我们线性翻倍。
 
-接下来做 R5（GDN 现在是纯 torch 的 chunk 递推，245 tps vs Qwen3 的 10,186 tps）时，三条实测约束：
+R5 已经落地：`kernels/gdn_fla.py` 的融合 GDN 接入 `_bootstrap.setup()`、走 `qwen35_0_8b_npu_fused` 的 opt-in，
+在 0.8B **模型级真实执行**（provenance `AscendFusedGatedDeltaKernel×18`，step-4 tps 1,420 vs 纯 torch 244 ≈5.8×），
+与纯 torch 对拍 bf16 舍入级（step-1 rel 2.2e-5）。两个结论改变了取证方式：
+
+- **无逐位 golden**：fla-npu 的 AscendC `chunk_*` 内核 run-to-run 非确定（单卡 0.8B step-1 loss 三次
+  12.93595 / 12.93635 / 12.93662，纯 torch 稳定 12.93624）——见 `STATUS.md` OURS-14。逐位 golden 判据不适用于
+  这条路径，改走「纯 torch 参考 ± bf16 容差」断言（`tests/npu/test_kernel_gdn_fla.py`）。
+- **V=64 不可融合**：fla-npu 的反向算子 `recompute_w_u_fwd` 只接受 V∈{128,256}，`V=64`（debugmodel 尺寸）走纯
+  torch 兜底。0.8B 用 V=128 所以吃到了融合；shape gate（`_FUSED_VALUE_DIMS`）已按此收紧。
+
+剩余工作：性能量测的稳定复测（避开与其他作业共享的同卡 HCCL 干扰）与长步数发散监控。
+以下三条实测约束在落地过程中核对过，再往里加装时仍要遵守：
 
 - **导入时机是硬约束**。`fla_npu` 必须在第一个 NPU 算子执行之前 import——它在 `__init__` 里设
   `ASCEND_CUSTOM_OPP_PATH`，而 CANN 的算子注册表一旦初始化就不再重读。晚导入会以

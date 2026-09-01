@@ -94,6 +94,7 @@ attn_gym 的前代回代从不形成这些幂，所以它没事。
 | `qwen35_debugmodel_npu_text` | 1 | 同尺寸但**只跑语言侧**——GDN 的廉价回归探测器。golden 已冻结：10 步 13.03767 → 3.54950，`check_golden.sh` 逐位复现 |
 | `qwen35_0_8b_npu` | 1 | Qwen3.5-0.8B，真实 tokenizer + 真实 C4 + 4096 上下文 |
 | `qwen35_0_8b_npu_fsdp2` | 8 | 上面 × FSDP2 8 路 |
+| `qwen35_0_8b_npu_fused` | 1 | 0.8B 语言侧 + fla-npu 融合 GDN（R5 opt-in，需装 `fla_npu` wheel；未装则退化为 `qwen35_0_8b_npu`）。数值在 bf16 舍入级不同（step-1 rel 2.2e-5），带自己的 golden |
 
 ## 4. 视觉侧：能跑，但确定性模式要一条 shim
 
@@ -116,7 +117,7 @@ attn_gym 的前代回代从不形成这些幂，所以它没事。
 | R2 并行覆盖 | 🟡 | 单卡 🟢（12.88826 → 8.14589）；FSDP2×8 🟢（12.90316 → 8.06005）；TP / PP / EP 未测 |
 | R3 数值可信 | 🟡 | 算子级对拍 🟢：`tests/unit/test_kernel_gdn.py`（CPU）+ `tests/npu/test_kernel_gdn.py`（910B2，fp32/bf16 前向 + 梯度）都对 attn_gym reference 通过；语言侧 golden 已冻结并逐位复现（`qwen35_debugmodel_npu_text`）。缺的是**真实尺寸**下的长步数下降曲线——它卡在下面那条发散上 |
 | R4 checkpoint | 🔴 | HF 导出/导入 🟢（读回 loss 9.91788，随机初始 12.93624）；**DCP 续训 🔴**，归因见下 |
-| R5 性能 | 🔴 | **主要缺口**，见下 |
+| R5 性能 | 🟢 | fla-npu 融合 GDN 已落地并**在模型级真实执行**（provenance：`AscendFusedGatedDeltaKernel.Config`×18 / `AscendFusedInnerGatedDeltaNet.Config`×18）。0.8B 单卡 step-1 12.93595 vs 纯 torch 12.93624（rel 2.2e-5，bf16 舍入级）；step-4 tps **1,420 vs 244（≈5.8×）**。算子级 NPU 对拍 4 passed。AscendC 内核 **run-to-run 非确定**（OURS-14），无逐位 golden，改用「纯 torch 参考 ± bf16 容差」断言 |
 | R6 长稳 | ⚪ | **被 R5 卡住**：0.8B 一步约 2 分钟，500 步要十几个小时。等 GDN 快起来再取；用 debugmodel 跑 500 步不算数（判据要求真实尺寸） |
 | R7 文档 | 🟢 | 本文 |
 | R8 无隐藏降级 | 🟢 | `ascend-titan-provenance --module ascend_titan.models.qwen3_5 --config qwen35_0_8b_npu`：`AscendFusionAttention` ×6、`AscendGatedDeltaKernel` ×18、`AscendInnerGatedDeltaNet` ×18，共 42 个 ascend 节点 |

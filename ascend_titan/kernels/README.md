@@ -16,5 +16,6 @@
 | `rms_norm.py` | `npu_rms_norm` | `RMSNorm.Config` |
 | `swiglu.py` | `npu_swiglu` | `FeedForward.Config`（上游 FusedSwiGLU 布局） |
 | `situ_glu.py` | ops-nn `situ_glu` | `KimiFeedForward.Config`（kimi_k3） |
-
-M3+ 计划：`kda.py`、`causal_conv1d.py`、MoE grouped experts。
+| `gdn.py` | 纯 torch chunk 递推 | `GatedDeltaKernel.Config` + `InnerGatedDeltaNet.Config`（qwen3_5，单一 override 认领两个叠置节点） |
+| `gdn_fla.py` | fla-npu AscendC 融合（R5，opt-in） | 同上节点（兄弟 override，与 `gdn.py` 互斥） |
+| `kda.py` | attn_gym reference + 自研 causal conv1d | `KDAKernel.Config` + `InnerKDA.Config`（kimi_k3） |

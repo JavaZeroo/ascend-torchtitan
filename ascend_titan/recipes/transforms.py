@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
 ROPE_OVERRIDE = "ascend_titan.kernels.rope.real_cache_rope"
 RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
+GDN_FUSED_OVERRIDE = "ascend_titan.kernels.gdn_fla.npu_gated_delta_net_fused"
+GDN_OVERRIDE = "ascend_titan.kernels.gdn.npu_gated_delta_net"
 # Upstream overrides that replace a whole attention block (which owns the RoPE node);
 # adding our RoPE override on top would be a per-node conflict (OURS-9).
 _ATTENTION_BLOCK_OVERRIDES = ("torchtitan.overrides.fused_mla.",)
@@ -48,6 +50,7 @@ class Applied:
     attention_override: bool = False
     rope_override: bool = False
     rms_norm_override: bool = False
+    gdn_fused_override: bool = False
     spmd_backend: str | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -61,6 +64,8 @@ class Applied:
             parts.append("override:real_cache_rope")
         if self.rms_norm_override:
             parts.append("override:npu_rms_norm")
+        if self.gdn_fused_override:
+            parts.append("override:npu_gated_delta_net_fused")
         if self.spmd_backend:
             parts.append(f"spmd_backend:{self.spmd_backend}")
         return ", ".join(parts) or "no-op"
@@ -172,6 +177,27 @@ def npu_fused(config: Trainer.Config) -> Applied:
     if has_rms and RMSNORM_OVERRIDE not in config.override.imports:
         config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
     a.rms_norm_override = has_rms
+
+    # Gated DeltaNet -> fla-npu fused chunk recurrence (R5). Optional add-on: the
+    # override registers only when fla_npu is importable, so adding it here is a
+    # no-op on a baseline without the wheel (ADR-004). Detect the InnerGatedDeltaNet
+    # node by the plain-torch override already being present (the same single-subtree
+    # override that qwen3_5 recipes install), so we never claim the node independently.
+    has_gdn = GDN_OVERRIDE in config.override.imports
+    if has_gdn:
+        from ascend_titan.kernels._probe import optional_module
+
+        _fla, _err = optional_module("fla_npu")
+        if _fla is not None:
+            # Same-override sibling: swap, never stack (both claim InnerGatedDeltaNet.Config).
+            config.override.imports = [
+                imp for imp in config.override.imports if imp != GDN_OVERRIDE
+            ]
+            if GDN_FUSED_OVERRIDE not in config.override.imports:
+                config.override.imports = [*config.override.imports, GDN_FUSED_OVERRIDE]
+            a.gdn_fused_override = True
+        else:
+            a.notes.append("gdn fused override skipped: fla_npu not installed (ADR-004)")
 
     logger.info("[ascend_titan] npu_fused: %s", a.summary())
     return a

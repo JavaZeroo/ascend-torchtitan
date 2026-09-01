@@ -123,6 +123,7 @@ def test_release_recipes_are_deltas_on_the_real_upstream_configs(monkeypatch, tm
     from ascend_titan.models.qwen3_5 import recipes as q35
 
     checked.append((q35.qwen35_0_8b_npu, "qwen35_0_8b()"))
+    checked.append((q35.qwen35_0_8b_npu_fused, "qwen35_0_8b_npu()"))
     for fn, upstream_call in checked:
         src = inspect.getsource(fn)
         assert upstream_call in src

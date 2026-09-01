@@ -134,7 +134,11 @@ MODELS: dict[str, ModelEntry] = {
             "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。"
             "多模态 debugmodel 也能跑，golden 已冻结（确定性模式需要 TT-12 那条 shim）；"
             "DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；"
-            "GDN 没有融合算子，性能是主要缺口。"
+            "fla-npu 融合 GDN（R5）已落地并在模型级真实执行："
+            "0.8B 单卡 step-4 tps 1,420 vs 纯 torch 244（≈5.8×），"
+            "provenance 见 AscendFusedGatedDeltaKernel×18；"
+            "对拍 bf16 舍入级，但 AscendC 内核 run-to-run 非确定（OURS-14），"
+            "无逐位 golden，改用纯 torch ± bf16 容差断言。"
         ),
         recipes="ascend_titan.models.qwen3_5.recipes",
         flavors=(
@@ -143,6 +147,7 @@ MODELS: dict[str, ModelEntry] = {
             "qwen35_debugmodel_npu_text",
             "qwen35_0_8b_npu",
             "qwen35_0_8b_npu_fsdp2",
+            "qwen35_0_8b_npu_fused",
         ),
         golden=("qwen35_debugmodel_npu", "qwen35_debugmodel_npu_text"),
         criteria={
@@ -150,7 +155,8 @@ MODELS: dict[str, ModelEntry] = {
             "R2": "🟡",  # 单卡 / FSDP2×8 🟢；TP/PP/EP 未测
             "R3": "🟡",  # 对拍 🟢 + 语言侧 golden 已冻结；缺真实尺寸的长步数曲线
             "R4": "🔴",  # HF 往返 🟢；DCP 续训缺视觉塔的优化器状态（纯文本增量的代价）
-            "R5": "🔴",  # 纯 torch chunk 递推，无融合算子
+            "R5": "🟢",  # 融合 GDN 模型级真实执行；tps 1,420 vs 244 ≈5.8×
+            # 对拍 bf16 对齐；run-to-run 非确定（OURS-14），无逐位 golden
             "R6": "⚪",  # 被 R5 卡住：一步约 2 分钟，500 步要十几个小时
             "R7": "🟢",  # models/qwen3_5/README.md
             "R8": "🟢",  # provenance：42 个 ascend 节点

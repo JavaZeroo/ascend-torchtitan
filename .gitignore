@@ -13,3 +13,6 @@ outputs/
 
 # inductor 报错时自动落的调试产物
 torch_compile_debug/
+
+# CANN/RNTL crash 落盘（含大体积二进制 core）
+extra-info/
