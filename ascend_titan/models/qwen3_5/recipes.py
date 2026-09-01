@@ -24,7 +24,7 @@ from torchtitan.models.qwen3_5.config_registry import qwen35_0_8b, qwen35_debugm
 from torchtitan.trainer import Trainer
 
 from ascend_titan.kernels import ATTENTION_OVERRIDE, GDN_FUSED_OVERRIDE, GDN_OVERRIDE
-from ascend_titan.recipes.transforms import swap_override
+from ascend_titan.recipes.deltas import swap_override
 
 
 def qwen35_debugmodel_npu() -> Trainer.Config:
@@ -130,6 +130,6 @@ def qwen35_0_8b_npu_fused() -> Trainer.Config:
     """
     config = qwen35_0_8b_npu()
     # The fused override is a SIBLING of the plain-torch GDN override (both claim
-    # InnerGatedDeltaNet.Config); swap, never stack -- see transforms.swap_override.
+    # InnerGatedDeltaNet.Config); swap, never stack -- see deltas.swap_override.
     swap_override(config, remove=GDN_OVERRIDE, add=GDN_FUSED_OVERRIDE)
     return config

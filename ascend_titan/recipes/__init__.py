@@ -4,8 +4,9 @@ Per-model recipes do **not** live here -- they live in
 ``ascend_titan/models/<model>/`` (one package per model, each with its own
 README). This package holds only what is model-independent:
 
-    transforms.py   npu_baseline: the deltas every upstream config needs on NPU
-    matrix.py       dynamic module that runs any upstream config + npu_baseline
+    deltas.py       the primitives a recipe applies (add_override / flex_to_varlen)
+    matrix.py       the capability matrix: dynamic config resolution plus the
+                    generic npu_minimal / npu_fused transforms it applies
 
 Content in ``models/``, machinery in ``recipes/``.
 

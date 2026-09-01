@@ -18,7 +18,7 @@
 | `ascend_titan/kernels/` | L1 | 封装昇腾算子的 `@override` 工厂（attention = custom_op、rope、rms_norm、swiglu、situ_glu）；`_probe.py` = 依赖探测（`require_op` 硬 / `optional_module` 可选，P14） |
 | `ascend_titan/graph/` | L2 | torchair 图模式 |
 | `ascend_titan/models/<model>/` | L3 | **内容**：每个模型一个包 = `recipes.py`（支持的入口）+ `probes.py`（只做测量）+ `README.md`（必需，使用指南）；`registry.py` 是模型状态表（纯数据）；`_template/` 是新模型骨架 |
-| `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`transforms.npu_minimal`（只含"不加就跑不起来"的增量，挂 issue + 特性探测消失条件）与 `transforms.npu_fused`（性能 override，opt-in，P12）、`matrix.py` 动态 recipe（`__stock` / `__fused` 后缀） |
+| `ascend_titan/recipes/` | L3 | **机制**（跨模型）：`deltas.py` = recipe 用的原语（`add_override` / `swap_override` / `flex_to_varlen`）；`matrix.py` = 矩阵的动态 recipe（`__stock` / `__fused` 后缀）**加**它自己施加的 `npu_minimal`（只含"不加就跑不起来"的增量）与 `npu_fused`（性能 override，opt-in，P12）——这两个不许出现在 recipe 里 |
 | `ascend_titan/tools/` | L4 | `doctor`、`matrix/`（`triage`＋`triage.toml` 数据表、`cases`、`runner`、`report`、`cli`）、`provenance` |
 | `constraints/` | — | `nightly.txt` + `torchtitan.sha` + `torch_npu.sha` = 版本三元组（**唯一事实来源**，P11） |
 | `scripts/build_torch_npu.sh` | — | 源码构建 torch_npu（本地盘 `/opt/build/torch_npu`，wheel → `/opt/wheels/` + 元数据 json）；`WITH_PATCHES=1` 叠加在途补丁 |

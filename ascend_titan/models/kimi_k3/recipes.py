@@ -22,7 +22,7 @@ from torchtitan.models.kimi_k3.config_registry import kimi_k3_debugmodel
 from torchtitan.trainer import Trainer
 
 from ascend_titan.kernels import ATTENTION_OVERRIDE, KDA_OVERRIDE, SITU_GLU_OVERRIDE
-from ascend_titan.recipes.transforms import add_override, flex_to_varlen
+from ascend_titan.recipes.deltas import add_override, flex_to_varlen
 
 # 视觉塔的注意力吃的是 `create_block_diagonal_mask` 造的 BlockMask，而 VarlenAttention
 # 断言 `isinstance(attention_masks, VarlenMetadata)`——转过去只会把"flex 需要 inductor"

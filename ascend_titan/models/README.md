@@ -1,6 +1,6 @@
 # models —— 每个模型一个包（L3）
 
-`ascend_titan/models/<model>/` 放一个模型族的全部内容；跨模型的机制（`npu_minimal` / `npu_fused`、矩阵解析器）
+`ascend_titan/models/<model>/` 放一个模型族的全部内容；跨模型的机制（`deltas.py` 原语、矩阵解析器与它的 `npu_minimal` / `npu_fused`）
 留在 `ascend_titan/recipes/`。**内容在 `models/`，机制在 `recipes/`。**
 
 ```

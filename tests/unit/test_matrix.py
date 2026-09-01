@@ -36,11 +36,8 @@ def test_npu_minimal_transform_on_upstream_recipes():
     from torchtitan.models.common.attention import FlexAttention, VarlenAttention
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import (
-        ATTENTION_OVERRIDE,
-        _flex_attention_is_usable,
-        npu_minimal,
-    )
+    from ascend_titan.recipes.deltas import _flex_attention_is_usable
+    from ascend_titan.recipes.matrix import ATTENTION_OVERRIDE, npu_minimal
 
     cfg = llama3_debugmodel()
     assert any(True for _ in cfg.traverse(FlexAttention.Config))
@@ -90,7 +87,7 @@ def test_matrix_module_resolves_upstream_recipe():
 def test_npu_minimal_skips_rope_when_upstream_block_override_present():
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import ROPE_OVERRIDE, npu_minimal
+    from ascend_titan.recipes.matrix import ROPE_OVERRIDE, npu_minimal
 
     cfg = llama3_debugmodel()
     cfg.override.imports = ["torchtitan.overrides.fused_mla.fused_mla"]
@@ -103,7 +100,7 @@ def test_npu_fused_is_opt_in_and_idempotent():
     """The perf transform is separate from the baseline and safe to re-apply."""
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import RMSNORM_OVERRIDE, npu_fused, npu_minimal
+    from ascend_titan.recipes.matrix import RMSNORM_OVERRIDE, npu_fused, npu_minimal
 
     cfg = llama3_debugmodel()
     npu_minimal(cfg)
@@ -118,7 +115,7 @@ def test_swap_override_replaces_sibling_idempotently():
     """Two overrides claiming one node swap, never stack; re-swap is a no-op."""
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import GDN_FUSED_OVERRIDE, GDN_OVERRIDE, swap_override
+    from ascend_titan.recipes.matrix import GDN_FUSED_OVERRIDE, GDN_OVERRIDE, swap_override
 
     cfg = llama3_debugmodel()
     cfg.override.imports = ["ascend_titan.kernels.attention.npu_fusion_attention", GDN_OVERRIDE]
@@ -257,7 +254,7 @@ def test_npu_minimal_skips_both_attention_overrides_under_a_block_override(npu_s
     """
     from torchtitan.models.llama3.config_registry import llama3_debugmodel
 
-    from ascend_titan.recipes.transforms import ATTENTION_OVERRIDE, ROPE_OVERRIDE, npu_minimal
+    from ascend_titan.recipes.matrix import ATTENTION_OVERRIDE, ROPE_OVERRIDE, npu_minimal
 
     cfg = llama3_debugmodel()
     cfg.override.imports = ["torchtitan.overrides.fused_mla.fused_mla"]
