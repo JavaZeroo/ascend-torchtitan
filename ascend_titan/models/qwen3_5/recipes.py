@@ -19,28 +19,50 @@ and the 0.8B recipes are the language-side path, and they do run.
 Full guide: ascend_titan/models/qwen3_5/README.md
 """
 
-from torchtitan.models.qwen3_5 import model_registry
 from torchtitan.models.qwen3_5.config_registry import qwen35_0_8b, qwen35_debugmodel
 from torchtitan.trainer import Trainer
 
-from ascend_titan.kernels import ATTENTION_OVERRIDE, GDN_FUSED_OVERRIDE, GDN_OVERRIDE
-from ascend_titan.recipes.deltas import swap_override
+from ascend_titan.kernels import (
+    ATTENTION_FROM_FLEX_OVERRIDE,
+    ATTENTION_OVERRIDE,
+    GDN_FUSED_OVERRIDE,
+    GDN_OVERRIDE,
+)
+from ascend_titan.recipes.deltas import add_override, swap_override
 
 
-def qwen35_debugmodel_npu() -> Trainer.Config:
-    """Upstream ``qwen35_debugmodel`` + the minimal deltas for an NPU run."""
-    config = qwen35_debugmodel()
+def npu_deltas(config: Trainer.Config) -> None:
+    """What Qwen3.5 needs on Ascend. Flavor-independent: written once, applied to all.
 
-    # DELTA 1: inner attention = varlen node + Ascend fused-attention override
-    # (model-level flex needs inductor/Triton-Ascend). Mirrors qwen3 DELTA 1.
-    config.model_spec = model_registry("debugmodel", attn_backend="varlen")
-    config.override.imports = [ATTENTION_OVERRIDE]
+    ``models/qwen3_5/__init__.py`` hands this to ``_auto.npu_entry_points``, so every
+    upstream flavor -- 0.8B, 2B, 4B, 9B, 27B, 35B-A3B and whatever lands next -- gets
+    a working ``<flavor>_npu`` entry point without another function being written.
+    The hand-written recipes below call it too, so this list is the single place the
+    family's Ascend deltas exist.
+    """
+    # DELTA 1: decoder-layer attention -> the Ascend fused kernel. Two overrides
+    # because upstream flavors differ in their default node: most are FlexAttention
+    # (model-level flex needs inductor/Triton-Ascend, DEP-INDUCTOR), while
+    # ``*_varlen_attn`` is already varlen and stock varlen needs
+    # ``aten::_flash_attention_forward``, which torch_npu lacks (NPU-1). They target
+    # different Config classes, so both may be active. A vision tower's flex node is
+    # outside the ``fqns`` glob of the first one and stays flex (it is fed a BlockMask).
+    add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
+    add_override(config, ATTENTION_OVERRIDE)
 
     # DELTA 2: gated delta net on attn_gym's reference recurrence (fla's Triton
     # kernels do not compile for Ascend). 消失条件：昇腾有了 GDN 融合算子。
-    config.override.imports = [*config.override.imports, GDN_OVERRIDE]
+    add_override(config, GDN_OVERRIDE)
 
-    # DELTA 3: no checkpoint I/O in a smoke run (DCP on NPU is its own cell).
+
+def qwen35_debugmodel_npu() -> Trainer.Config:
+    """Upstream ``qwen35_debugmodel`` + the family deltas. Golden-frozen smoke config."""
+    config = qwen35_debugmodel()
+    npu_deltas(config)
+
+    # DELTA 3 (this recipe only): no checkpoint I/O in a smoke run -- DCP on NPU is
+    # its own matrix cell. Not a family delta: it is a convenience, and it is
+    # CLI-addressable (``--checkpoint.no-enable``).
     config.checkpoint.enable = False
 
     return config
@@ -97,12 +119,8 @@ def qwen35_0_8b_npu() -> Trainer.Config:
 
     config = qwen35_0_8b()
 
-    # DELTA 1: varlen 注意力 + 昇腾融合注意力（同 debugmodel）。
-    config.model_spec = model_registry("0.8B", attn_backend="varlen")
-    config.override.imports = [ATTENTION_OVERRIDE]
-
-    # DELTA 2: GDN 走 attn_gym 的 reference 递推（fla 的 Triton 内核编不出来）。
-    config.override.imports = [*config.override.imports, GDN_OVERRIDE]
+    # DELTA 1+2: 家族增量（注意力 + GDN），与 flavor 无关，见 npu_deltas。
+    npu_deltas(config)
 
     # DELTA 3: 真实 tokenizer + 真实 C4 文本（纯文本，去掉多模态 collator）。
     config.hf_assets_path = hf_assets_path("Qwen3.5-0.8B")

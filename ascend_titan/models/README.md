@@ -65,6 +65,26 @@ MODULE=ascend_titan.recipes.matrix \
 CONFIG=torchtitan.models.<model>.config_registry__<upstream_fn> NPU=8 ./scripts/run_train.sh
 ```
 
+### 族增量声明一次，任何尺寸自动可用
+
+上游 qwen3_5 有 11 个 flavor 且还在增加。为每个 flavor 抄一个 wrapper 是不可持续的，
+所以模型包只声明**一次**族增量：
+
+```python
+# models/<model>/recipes.py
+def npu_deltas(config: Trainer.Config) -> None:
+    """这个族在昇腾上需要什么。与 flavor 无关。"""
+    add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
+    add_override(config, ATTENTION_OVERRIDE)
+
+# models/<model>/__init__.py
+__getattr__, __dir__ = npu_entry_points(_upstream, npu_deltas)
+```
+
+于是 `--config <上游 flavor>_npu` 对**每个**上游 flavor 都有效（`dir(包)` 列出全部）。
+手写 recipe 只在需要额外东西时才写，且必须调用 `npu_deltas`——族增量只存在一处。
+同名时手写的优先（Python 先查模块字典，再走 `__getattr__`）。
+
 ### recipe 是预设，不是唯一入口
 
 一个 recipe 把四类选择打包成了一个名字：环境必需的增量、内核选择、数据与资产、并行度。

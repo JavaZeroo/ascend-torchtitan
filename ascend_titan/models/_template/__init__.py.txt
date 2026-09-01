@@ -1,8 +1,12 @@
 """<Model> on Ascend. Guide: models/<model>/README.md."""
 
-from ascend_titan.models.<model>.recipes import (
-    <model>_debugmodel_npu,
-    <model>_debugmodel_npu_fsdp2,
-)
+from torchtitan.models.<model> import config_registry as _upstream
 
-__all__ = ["<model>_debugmodel_npu", "<model>_debugmodel_npu_fsdp2"]
+from ascend_titan.models._auto import npu_entry_points
+from ascend_titan.models.<model>.recipes import <model>_debugmodel_npu, npu_deltas
+
+__all__ = ["<model>_debugmodel_npu"]
+
+# 任何上游 flavor 都有 `<flavor>_npu` 入口（见 models/_auto.py）；
+# 上面显式导入的手写 recipe 优先。
+__getattr__, __dir__ = npu_entry_points(_upstream, npu_deltas)

@@ -21,43 +21,46 @@ Full guide: ascend_titan/models/kimi_k3/README.md
 from torchtitan.models.kimi_k3.config_registry import kimi_k3_debugmodel
 from torchtitan.trainer import Trainer
 
-from ascend_titan.kernels import ATTENTION_OVERRIDE, KDA_OVERRIDE, SITU_GLU_OVERRIDE
-from ascend_titan.recipes.deltas import add_override, flex_to_varlen
+from ascend_titan.kernels import (
+    ATTENTION_FROM_FLEX_OVERRIDE,
+    ATTENTION_OVERRIDE,
+    KDA_OVERRIDE,
+    SITU_GLU_OVERRIDE,
+)
+from ascend_titan.recipes.deltas import add_override
 
-# 视觉塔的注意力吃的是 `create_block_diagonal_mask` 造的 BlockMask，而 VarlenAttention
-# 断言 `isinstance(attention_masks, VarlenMetadata)`——转过去只会把"flex 需要 inductor"
-# 这个清楚的失败换成视觉塔深处一个更难懂的类型错误。所以它保持 flex（靠
-# `flex_block_mask_eager` shim 走 eager）。
-_VISION_TOWER = "vision_encoder"
+
+def npu_deltas(config: Trainer.Config) -> None:
+    """What Kimi K3 needs on Ascend. Flavor-independent: written once, applied to all.
+
+    ``models/kimi_k3/__init__.py`` hands this to ``_auto.npu_entry_points``, so any
+    upstream flavor gets a ``<flavor>_npu`` entry point with no new function.
+    """
+    # DELTA 1: 语言塔的 flex 注意力节点 -> 昇腾融合注意力（上游 flex 掩码走
+    # `create_block_mask`，是 torch.compile 的，昇腾要 inductor，DEP-INDUCTOR）。
+    # override 的 fqns 只认领 `layers.*.attention`，视觉塔那个节点因此保持 flex——
+    # 它喂的是 BlockMask，这个内核吃不了。
+    # 消失条件：装上 Triton-Ascend 后可换回上游 flex。
+    add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
+    add_override(config, ATTENTION_OVERRIDE)
+
+    # DELTA 2: KDA 走设备无关路径（上游内核要 CUDA/Blackwell，l2norm 是 Triton、
+    # 短卷积是 CuTeDSL）。消失条件：昇腾有了 KDA 融合算子后换实现，override 仍在。
+    add_override(config, KDA_OVERRIDE)
 
 
 def kimi_k3_debugmodel_npu() -> Trainer.Config:
-    """Upstream ``kimi_k3_debugmodel`` + the NPU deltas, one visible call each.
+    """Upstream ``kimi_k3_debugmodel`` + the family deltas + a smoke-run convenience.
 
-    我们**换了什么**（下面四条 DELTA）与**没换什么**，读这个函数就够；每条的理由见
-    README §2。没有动的部分（一并列在这里，因为"没动"同样是结论）：RoPE 走上游实现
-    （kimi_k3 没有 ComplexRoPE 节点，不需要 NPU-3 的实数 cache override）、MoE 路由、
-    `_apply_attention_residual`、loss、并行策略、优化器，全是上游默认。
+    换了什么见 ``npu_deltas``（族增量，任何 flavor 通用）；**没换什么**同样是结论：
+    视觉塔的 FlexAttention 保持原样、RoPE 走上游实现（kimi_k3 没有 ComplexRoPE 节点）、
+    MoE 路由、``_apply_attention_residual``、loss、并行策略、优化器，全是上游默认。
     """
     config = kimi_k3_debugmodel()
+    npu_deltas(config)
 
-    # DELTA 1: 语言塔的 6 个 flex 注意力节点（每 4 层一个 full-attention 层，其余是 KDA）
-    # -> varlen；视觉塔那一个保持 flex。上游的 flex 掩码走 `create_block_mask`，是
-    # torch.compile 的，昇腾上要 inductor（DEP-INDUCTOR）。
-    # 消失条件：装上 Triton-Ascend 后 flex 可用，flex_to_varlen 自动变成空操作。
-    converted = flex_to_varlen(config, keep=(_VISION_TOWER,))
-
-    # DELTA 2: 转出来的 varlen 节点走昇腾融合注意力——stock varlen 要
-    # `aten::_flash_attention_forward`，torch_npu 没有（NPU-1）。
-    if converted:
-        add_override(config, ATTENTION_OVERRIDE)
-
-    # DELTA 3: KDA 走设备无关路径（上游内核要 CUDA/Blackwell，l2norm 是 Triton、
-    # 短卷积是 CuTeDSL）。
-    # 消失条件：昇腾有了 KDA 融合算子（fla-npu / ops-nn）之后换成融合实现，override 仍在。
-    add_override(config, KDA_OVERRIDE)
-
-    # DELTA 4: 冒烟运行不做 checkpoint I/O（DCP on NPU 是独立的矩阵格）。
+    # DELTA 3 (this recipe only): 冒烟运行不做 checkpoint I/O（DCP on NPU 是独立
+    # 的矩阵格），且是 CLI 可调的（``--checkpoint.no-enable``）。
     config.checkpoint.enable = False
 
     return config

@@ -63,6 +63,15 @@ def _make_torch_npu_stub(without: str | None = None) -> types.ModuleType:
 def _forget_kernel_modules(monkeypatch) -> None:
     for name in [m for m in list(sys.modules) if m.startswith("ascend_titan.kernels")]:
         monkeypatch.delitem(sys.modules, name, raising=False)
+    # Re-importing a kernel module re-runs its @override decorator, and torchtitan
+    # rejects registering the same factory twice. Drop *our* registrations with the
+    # modules (upstream's stay: their modules are not being re-imported).
+    try:
+        from torchtitan.config.override import _REGISTRY
+    except ImportError:
+        return
+    for key in [k for k in list(_REGISTRY) if k.startswith("ascend_titan.kernels.")]:
+        monkeypatch.delitem(_REGISTRY, key, raising=False)
 
 
 @pytest.fixture

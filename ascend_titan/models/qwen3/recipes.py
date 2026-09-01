@@ -36,24 +36,38 @@ from torchtitan.models.qwen3.config_registry import (
 from torchtitan.trainer import Trainer
 
 from ascend_titan.kernels import (
+    ATTENTION_FROM_FLEX_OVERRIDE,
     ATTENTION_OVERRIDE,
     RMSNORM_OVERRIDE,
     ROPE_COSSIN_OVERRIDE,
     SWIGLU_OVERRIDE,
 )
+from ascend_titan.recipes.deltas import add_override
+
+
+def npu_deltas(config: Trainer.Config) -> None:
+    """What Qwen3 needs on Ascend. Flavor-independent: written once, applied to all.
+
+    ``models/qwen3/__init__.py`` hands this to ``_auto.npu_entry_points``, so every
+    upstream flavor gets a working ``<flavor>_npu`` entry point with no new function.
+    The hand-written recipes below call it too -- one place, one list.
+    """
+    # DELTA 1: decoder-layer attention -> the Ascend fused kernel (matrix:
+    # attention/ascend_fusion). Two overrides cover both upstream defaults: flex
+    # flavors (model-level flex needs inductor, DEP-INDUCTOR) and varlen flavors
+    # (stock varlen needs aten::_flash_attention_forward, which torch_npu lacks,
+    # NPU-1). Different target classes, so both may be active at once.
+    add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
+    add_override(config, ATTENTION_OVERRIDE)
 
 
 def qwen3_debugmodel_npu() -> Trainer.Config:
-    """Upstream ``qwen3_debugmodel`` + the minimal deltas for an NPU smoke run.
-    Each delta is a matrix cell, tracked in docs/capability-matrix.md."""
+    """Upstream ``qwen3_debugmodel`` + the family deltas. Golden-frozen smoke config."""
     config = qwen3_debugmodel()
+    npu_deltas(config)
 
-    # DELTA 1: inner attention = varlen node + Ascend fused-attention override.
-    # (matrix: attention/ascend_fusion)
-    config.model_spec = model_registry("debugmodel", attn_backend="varlen")
-    config.override.imports = [ATTENTION_OVERRIDE]
-
-    # DELTA 2: no checkpoint I/O in the smoke run (DCP on NPU is its own cell).
+    # DELTA 2 (this recipe only): no checkpoint I/O in the smoke run -- DCP on NPU
+    # is its own cell, and this is CLI-addressable (``--checkpoint.no-enable``).
     config.checkpoint.enable = False
 
     return config
@@ -98,9 +112,8 @@ def qwen3_0_6b_npu() -> Trainer.Config:
 
     config = qwen3_0_6b()
 
-    # DELTA 1: 与 debugmodel 相同的注意力增量（同样的理由，见文件头）。
-    config.model_spec = model_registry("0.6B", attn_backend="varlen")
-    config.override.imports = [ATTENTION_OVERRIDE]
+    # DELTA 1: 家族增量（注意力），与 flavor 无关，见 npu_deltas。
+    npu_deltas(config)
 
     # DELTA 2: 资产落到本地（上游默认路径是 torchtitan 检出里的 ./assets/hf/...，
     # 那是固定上游，我们不往里写东西）。
@@ -140,8 +153,8 @@ def qwen3_8b_npu_pp2() -> Trainer.Config:
 
     # 上游没有裸的 8B Trainer 配置（只有 nvfp4 变体），所以从 14B 的配置起手换模型。
     config = qwen3_14b()
-    config.model_spec = model_registry("8B", attn_backend="varlen")
-    config.override.imports = [ATTENTION_OVERRIDE]
+    config.model_spec = model_registry("8B")
+    npu_deltas(config)
     config.hf_assets_path = hf_assets_path("Qwen3-8B")
     config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
     config.parallelism.pipeline_parallel_degree = 2

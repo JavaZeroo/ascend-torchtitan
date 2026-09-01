@@ -16,19 +16,31 @@ If one of these recipes goes 🔴, an Ascend-side regression landed: the fixes i
 Full guide: ascend_titan/models/llama3/README.md
 """
 
-from torchtitan.models.common.attention import FlexAttention, VarlenAttention
 from torchtitan.models.llama3.config_registry import llama3_debugmodel
 from torchtitan.trainer import Trainer
 
+from ascend_titan.recipes.deltas import flex_to_varlen
+
+
+def npu_deltas(config: Trainer.Config) -> None:
+    """What Llama 3 needs on Ascend: one node conversion and **zero overrides**.
+
+    Flavor-independent, so ``models/llama3/__init__.py`` can hand it to
+    ``_auto.npu_entry_points`` and every upstream flavor gets an entry point.
+    Keeping this list at exactly one line is the point of the model (see the
+    module docstring): everything else is upstream's own implementation.
+    """
+    # DELTA 1: flex -> varlen; model-level flex compiles through inductor, which
+    # needs Triton-Ascend (DEP-INDUCTOR). Feature-detected: once flex is usable
+    # here this becomes a no-op and llama3 is byte-for-byte stock upstream.
+    flex_to_varlen(config)
+
 
 def llama3_debugmodel_stock_npu() -> Trainer.Config:
+    """Stock upstream llama3 on Ascend, zero overrides. Golden-frozen."""
     config = llama3_debugmodel()
-    for _fqn, _cfg, parent, attr in list(config.traverse(FlexAttention.Config)):
-        if isinstance(parent, list):
-            parent[attr] = VarlenAttention.Config()
-        else:
-            setattr(parent, attr, VarlenAttention.Config())
-    config.override.imports = []
+    npu_deltas(config)
+    assert config.override.imports == [], "llama3 is the zero-override reference path"
     config.checkpoint.enable = False
     return config
 

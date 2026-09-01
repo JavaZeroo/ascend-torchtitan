@@ -99,6 +99,22 @@ python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4
 `ascend_titan.setup()`（导入 torch_npu → 让 torchtitan 冻结出正确的 `device_type` → 应用 shim）。
 其余全部是上游代码。
 
+### 换个尺寸不用改代码
+
+上游一个模型族有很多尺寸（qwen3.5 就有 11 个，还在加）。我们**不为每个尺寸写函数**：
+每个模型包声明一次"这个族在昇腾上需要什么"，于是上游任何 flavor 都自动有入口：
+
+```bash
+# 这些都没有人手写过，直接可用
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_27b_npu       NPU=8 ./scripts/run_train.sh
+MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_397b_a17b_npu NPU=8 ./scripts/run_train.sh
+
+python -c "import ascend_titan.models.qwen3_5 as m; print(dir(m))"   # 列出全部可用入口
+```
+
+上游新增一个尺寸，我们这边零改动。手写的 recipe 只在需要**额外**东西时才存在
+（真实 tokenizer/数据、并行布局、golden 冻结的冒烟配置），并且同名时手写的优先。
+
 ### 自己决定用哪些昇腾内核
 
 recipe 是**我们验证过的预设**，不是唯一入口。同一个模型有三条路，都不用改代码：

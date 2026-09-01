@@ -63,7 +63,12 @@ def test_gate_rejects_missing_required_ops(npu_stub, monkeypatch):
     for name in m._REQUIRED_ASCENDC_OPS:
         setattr(ascendc, name, lambda *a, **k: None)
     del ascendc.solve_tri
+    # `_ascendc()` reaches the subpackage with importlib, so the fakes have to be
+    # in sys.modules -- setting attributes on a plain ModuleType is not enough
+    # ("No module named 'fla_npu.ops'; 'fla_npu' is not a package").
     monkeypatch.setitem(sys.modules, "fla_npu", fake)
-    m._fla_npu = fake
+    monkeypatch.setitem(sys.modules, "fla_npu.ops", ops)
+    monkeypatch.setitem(sys.modules, "fla_npu.ops.ascendc", ascendc)
+    monkeypatch.setattr(m, "_fla_npu", fake)
     with pytest.raises(RuntimeError, match="missing entries"):
         m._ascendc()

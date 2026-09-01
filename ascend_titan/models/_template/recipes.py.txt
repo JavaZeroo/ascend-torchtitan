@@ -1,11 +1,8 @@
-"""<Model> recipes.  ← 复制这个目录，然后把 <Model> / <model> / <flavor> 替换掉。
+"""<Model> recipes.
 
-validated: torchtitan=<sha> torch=<v> torch_npu=<v> CANN=<v> date=<YYYY-MM-DD>
-(跑绿之后再写这一行；CI 会重写它。P13：验证先于断言。)
+validated: (CI 在跑绿之后重写这一行)
 
-一句话说明这个模型在昇腾上的状态，以及最关键的那条增量为什么存在。
-如果现在是 🔴，就写清楚阻塞是什么、归因给谁（NPU / TT / TORCH / DEP / CANN / OURS）、
-以及解开它需要做什么——别写"应该可以"。
+一句话说明这个模型在昇腾上的处境：上游哪些实现跑不了、我们换成了什么。
 
 Full guide: ascend_titan/models/<model>/README.md
 """
@@ -13,26 +10,35 @@ Full guide: ascend_titan/models/<model>/README.md
 from torchtitan.models.<model>.config_registry import <model>_debugmodel
 from torchtitan.trainer import Trainer
 
-# override 的完整路径写成常量，方便 probes.py 与测试引用。
-ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
+from ascend_titan.kernels import ATTENTION_FROM_FLEX_OVERRIDE, ATTENTION_OVERRIDE
+from ascend_titan.recipes.deltas import add_override
+
+
+def npu_deltas(config: Trainer.Config) -> None:
+    """这个模型族在昇腾上需要什么。与 flavor 无关：写一次，所有尺寸通用。
+
+    `__init__.py` 把它交给 `_auto.npu_entry_points`，于是上游**每一个** flavor 都自动
+    有 `<flavor>_npu` 入口，不需要为新尺寸再写函数。下面的手写 recipe 也调用它，
+    所以这份清单是族增量唯一存在的地方。
+
+    每条增量一句 `# DELTA n:` 注释，写清：改了哪个上游默认、对应哪个矩阵格、
+    **什么条件下可以删掉**（特性探测，不是版本号）。
+    """
+    # DELTA 1: 解码器层注意力 -> 昇腾融合内核。两条 override 覆盖上游两种默认节点
+    # （flex 与 varlen），target 类不同所以可以同时激活；多模态视觉塔的 flex 节点
+    # 不在第一条的 fqns 内，保持不动。
+    add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
+    add_override(config, ATTENTION_OVERRIDE)
 
 
 def <model>_debugmodel_npu() -> Trainer.Config:
-    """上游 ``<model>_debugmodel`` + 昇腾上跑起来所需的最小增量。"""
-    config = <model>_debugmodel()  # 必须调用上游 registry 函数（P0）
+    """上游 `<model>_debugmodel` + 族增量。手写 recipe 只在需要**额外**东西时才写：
+    真实 tokenizer/数据资产、并行布局、golden 冻结的冒烟配置。"""
+    config = <model>_debugmodel()
+    npu_deltas(config)
 
-    # DELTA 1: <改了什么>。<为什么非改不可>。（矩阵格：<axis>/<cell>）
-    # 消失条件：<什么上游改动 / 什么修复合入之后可以删掉这条>
-    config.override.imports = [ATTENTION_OVERRIDE]
-
-    # DELTA 2: 冒烟不做 checkpoint I/O（DCP 是独立的矩阵格）。
+    # DELTA 2（仅此 recipe）：冒烟运行不做 checkpoint I/O。不是族增量——它只是
+    # 方便，而且命令行可调（`--checkpoint.no-enable`）。
     config.checkpoint.enable = False
 
-    return config
-
-
-def <model>_debugmodel_npu_fsdp2() -> Trainer.Config:
-    """2 路 FSDP2。"""
-    config = <model>_debugmodel_npu()
-    config.parallelism.data_parallel_shard_degree = 2
     return config

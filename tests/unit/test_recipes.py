@@ -14,18 +14,21 @@ pytestmark = pytest.mark.titan
 def test_qwen3_npu_recipes_build():
     from torchtitan.models.qwen3.config_registry import qwen3_debugmodel
 
+    from ascend_titan.kernels import ATTENTION_FROM_FLEX_OVERRIDE, ATTENTION_OVERRIDE
     from ascend_titan.models.qwen3 import (
         qwen3_debugmodel_npu,
         qwen3_debugmodel_npu_fsdp2,
         qwen3_debugmodel_stock_flex,
         qwen3_debugmodel_stock_varlen,
     )
-    from ascend_titan.models.qwen3.recipes import ATTENTION_OVERRIDE
 
     cfg = qwen3_debugmodel_npu()
     assert cfg.training.steps == 10
     assert cfg.checkpoint.enable is False
-    assert cfg.override.imports[0] == ATTENTION_OVERRIDE
+    # Both attention entry points: upstream flavors differ in whether their default
+    # node is flex or varlen, and the family deltas cover both (different target
+    # classes, so they never collide).
+    assert set(cfg.override.imports) == {ATTENTION_FROM_FLEX_OVERRIDE, ATTENTION_OVERRIDE}
     assert cfg.parallelism.spmd_backend == qwen3_debugmodel().parallelism.spmd_backend
     assert type(cfg.loss).__qualname__ == "ChunkedLossWrapper.Config"
     assert type(cfg.loss) is type(qwen3_debugmodel().loss)
