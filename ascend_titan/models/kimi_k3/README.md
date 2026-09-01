@@ -35,9 +35,24 @@ torchtitan 拒绝"祖先已被别的 override 认领"的嵌套 override，所以
 
 ## 3. recipe
 
+`kimi_k3_debugmodel_npu` 的四条增量在 `recipes.py` 里逐条写着（一条 `# DELTA n` 一句理由），
+读那个函数就知道我们换了什么：
+
+| # | 换了什么 | 换成什么 | 为什么 | 什么时候能删 |
+|---|---|---|---|---|
+| 1 | 语言塔 6 个 `FlexAttention` 节点（layers 3/7/11/15/19/23，其余层是 KDA） | `VarlenAttention` | flex 掩码走 `create_block_mask`，是 `torch.compile` 的，昇腾要 inductor（DEP-INDUCTOR） | 装上 Triton-Ascend 后自动失效（特性探测） |
+| 2 | 上面转出来的 varlen 节点 | `kernels/attention.py` 昇腾融合注意力 | stock varlen 要 `aten::_flash_attention_forward`，torch_npu 没有（NPU-1） | NPU-1 合入后可换回 stock |
+| 3 | 整棵 KDA 子树 | `kernels/kda.py`（attn_gym reference + torch 短卷积） | 上游内核要 CUDA/Blackwell | 有昇腾 KDA 融合算子后换实现，override 仍在 |
+| 4 | `checkpoint.enable` | `False` | 冒烟运行不做 DCP I/O | DCP on NPU 是独立矩阵格 |
+
+**没有动的**（同样是结论）：视觉塔的 `FlexAttention` 保持原样（它吃 `BlockMask`，转成
+varlen 只会在塔内部炸一个更难懂的类型错误）、RoPE 走上游实现（kimi_k3 没有 `ComplexRoPE`
+节点，用不上 NPU-3 的实数 cache override）、MoE 路由、`_apply_attention_residual`、loss、
+并行策略、优化器全是上游默认。
+
 | 函数 | 说明 |
 |---|---|
-| `kimi_k3_debugmodel_npu` | 参考路径：`npu_minimal` + KDA override + 关 checkpoint |
+| `kimi_k3_debugmodel_npu` | 参考路径：上表四条增量 |
 | `kimi_k3_debugmodel_npu_fused` | 再叠加 ops-nn SiTU-GLU（需要 ops-nn run 包 + `cann_ops_nn_<vendor>`）。🟢 实测 `step: 10 loss 4.29434`，tps 48。首次调用要 JIT 编译算子（约 1 分钟） |
 
 ## 4. 性能

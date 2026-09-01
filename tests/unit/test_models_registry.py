@@ -49,6 +49,25 @@ def test_registry_entries_are_consistent():
             assert path.is_file(), f"{key}: {e.recipes} does not exist"
 
 
+def test_recipes_spell_out_their_own_deltas():
+    """一个 recipe 必须逐条写出自己改了什么，不能藏在 ``npu_minimal`` 后面。
+
+    ``npu_minimal`` 是**矩阵扫描**的通用变换：把任意上游配置（我们没写 recipe 的那些）
+    generically 搬到 NPU 上测量。放进 recipe 就意味着"我们跟 torchtitan 换了哪些模块"
+    只能靠追那个函数的实现才能知道——而 recipe 的职责正是把这件事写在明面上。
+    机制照常共用（``flex_to_varlen`` / ``add_override``），只是要一条一条显式调用。
+    """
+    offenders = [
+        str(p.relative_to(MODELS_DIR))
+        for p in MODELS_DIR.rglob("recipes.py")
+        if "npu_minimal" in p.read_text()
+    ]
+    assert not offenders, (
+        f"这些 recipe 把增量藏在 npu_minimal 里：{offenders}。"
+        "改成显式调用 flex_to_varlen / add_override，每条配一句 # DELTA n 注释。"
+    )
+
+
 def test_hand_written_status_matches_the_criteria():
     """``status`` is typed by hand, ``graded_status`` is derived from R1-R8. They may
     not disagree: a 🟢 kept after a criterion went 🔴 is exactly the drift P13 forbids."""

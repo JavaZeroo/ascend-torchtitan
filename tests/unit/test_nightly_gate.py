@@ -12,6 +12,8 @@
 import importlib
 import pkgutil
 
+import pytest
+
 from ascend_titan.compat import registry
 
 
@@ -50,9 +52,26 @@ def test_every_shim_targets_torchtitan():
     registry.reset_for_tests()
 
 
-def test_no_polyfills_remain():
-    """polyfill 只用来补旧 torch 缺的 API——nightly-first 之后不该再有。"""
-    shims = _registered()
-    polyfills = [name for name, s in shims.items() if s.kind == "polyfill"]
-    assert not polyfills, f"这些是给旧 torch 补 API 的 polyfill，应当删除：{polyfills}"
+def test_polyfills_are_gone_once_upstream_provides_the_api():
+    """polyfill 是**版本债**，不是禁令。
+
+    作为 plugin 我们必须保留"上游缺这个 API 就补上"的能力（`kind="polyfill"`），
+    但每一条都要随版本演进退场：一旦装好的 torch / torchtitan 自己有了这个属性，
+    这条 polyfill 就只是死重量，运行时会被静默跳过、没人会发现。这里替运行时把它
+    喊出来——目标已存在 ⇒ 删掉它。
+
+    NIGHTLY 基线上通常一条 polyfill 都不该有（P8：我们永远在最新的 torch 上），
+    所以这条测试现在是空过；它是给 polyfill 真的出现那天准备的。
+    """
+    import importlib
+
+    pytest.importorskip("torchtitan")
+    stale = []
+    for name, s in _registered().items():
+        if s.kind != "polyfill":
+            continue
+        owner = s.owner(importlib.import_module(s.module))
+        if hasattr(owner, s.attr):
+            stale.append(f"{name} -> {s.target}")
+    assert not stale, f"这些 polyfill 的目标在当前版本上已经存在，上游补上了，应当删除：{stale}"
     registry.reset_for_tests()

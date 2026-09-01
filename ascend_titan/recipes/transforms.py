@@ -22,6 +22,7 @@ left untouched: those are the matrix axes.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from torchtitan.models.common.attention import FlexAttention, VarlenAttention
@@ -130,8 +131,48 @@ def _flex_attention_is_usable() -> bool:
         return False
 
 
+def flex_to_varlen(config: Trainer.Config, *, keep: Sequence[str] = ()) -> list[str]:
+    """Convert FlexAttention nodes to VarlenAttention, in place. Returns the fqns converted.
+
+    A **no-op once flex is usable on this machine** (feature detection, see
+    :func:`_flex_attention_is_usable`) -- that is this delta's disappearance
+    condition (P12), not a version check. Flex-only fields (block_size,
+    kernel_options) are dropped by the conversion; a model that depends on
+    Flex-only features (sinks, custom mask mods) fails later and gets attributed,
+    which is the point of measuring it.
+
+    ``keep`` holds fqn substrings whose nodes must stay flex. The case that
+    exists is a vision tower: its attention is fed a ``BlockMask`` built by
+    ``create_block_diagonal_mask``, while ``VarlenAttention.forward`` asserts
+    ``isinstance(attention_masks, VarlenMetadata)`` -- so converting that node
+    swaps a clear failure ("flex needs inductor") for a confusing one deep inside
+    the tower ("must be VarlenMetadata but got BlockMask").
+    """
+    if _flex_attention_is_usable():
+        return []
+    converted: list[str] = []
+    for fqn, _cfg, parent, attr in list(config.traverse(FlexAttention.Config)):
+        if any(marker in fqn for marker in keep):
+            continue
+        new = VarlenAttention.Config()
+        if isinstance(parent, list):
+            parent[attr] = new  # type: ignore[index]
+        else:
+            setattr(parent, attr, new)
+        converted.append(fqn)
+    return converted
+
+
 def npu_minimal(config: Trainer.Config) -> TransformReport:
     """Apply, in place, only the deltas an upstream config cannot run without. Idempotent.
+
+    **This is the capability matrix's transform, not a recipe's.** It exists to
+    carry an arbitrary *upstream* config -- one we ship no recipe for -- onto NPU
+    generically, so a red cell means "upstream feature X does not work here".
+    A model package that has its own ``recipes.py`` must instead spell out its
+    deltas one call at a time (``flex_to_varlen`` / ``add_override``), so that
+    reading the recipe tells you exactly which modules we swapped and which we
+    left alone (``tests/unit/test_models_registry.py`` enforces this).
 
     Every step names the issue that makes it necessary and must disappear by
     feature detection once that issue is fixed (P12). Nothing here may exist for
@@ -139,26 +180,15 @@ def npu_minimal(config: Trainer.Config) -> TransformReport:
     """
     a = TransformReport()
 
-    # 1. FlexAttention nodes -> VarlenAttention while flex is not usable here
-    #    (TORCH-1 + DEP-INDUCTOR, see _flex_attention_is_usable). Flex-only fields
-    #    (block_size, kernel_options) are dropped by the conversion; models that
-    #    depend on Flex-only features (sinks, custom mask mods) fail later and get
-    #    attributed, which is the point of measuring them.
-    #    Vision encoders are excluded: their attention is fed a BlockMask built by
-    #    `create_block_diagonal_mask`, and there is no varlen mask on that path, so
-    #    converting the node just swaps one failure for a worse one
-    #    ("attention_masks must be VarlenMetadata, got BlockMask").
-    if not _flex_attention_is_usable():
-        for _fqn, _cfg, parent, attr in list(config.traverse(FlexAttention.Config)):
-            if any(marker in _fqn for marker in _KEEP_FLEX_FQNS):
-                a.notes.append(f"flex kept at {_fqn} (no varlen mask on this path)")
-                continue
-            new = VarlenAttention.Config()
-            if isinstance(parent, list):
-                parent[attr] = new  # type: ignore[index]
-            else:
-                setattr(parent, attr, new)
-            a.flex_to_varlen += 1
+    # 1. FlexAttention -> VarlenAttention while flex is not usable here
+    #    (TORCH-1 + DEP-INDUCTOR), except the vision towers (see flex_to_varlen).
+    kept = [
+        fqn
+        for fqn, *_ in config.traverse(FlexAttention.Config)
+        if any(marker in fqn for marker in _KEEP_FLEX_FQNS)
+    ]
+    a.flex_to_varlen = len(flex_to_varlen(config, keep=_KEEP_FLEX_FQNS))
+    a.notes += [f"flex kept at {fqn} (no varlen mask on this path)" for fqn in kept]
 
     # An upstream override that replaces a whole attention block (fused_mla) owns
     # everything under it -- the inner attention node and the RoPE node. torchtitan
