@@ -26,7 +26,7 @@ ascend_titan/models/
 | **DeepSeek-V3** (`deepseek_v3`) | 🟡 | —（矩阵覆盖） | MoE + EP 在矩阵扫描里通过（fsdp+ep、hsdp+ep）；没有专属 recipe，通过矩阵 runner 跑上游配置。 **阻塞：**fused_mla_swiglu：OURS-9（override 节点冲突）；MTP + helion_rope：DEP-HELION。 |
 | **GPT-OSS** (`gpt_oss`) | 🟡 | —（矩阵覆盖） | pp+fsdp+ep+sacop 在矩阵里 🟢（attention sinks 的 LSE 尾部已实现）。 **阻塞：**fsdp+tp+ep：OURS-10（TP2+EP4 下路由 softmax backward 形状不匹配），待查。 |
 | **Kimi K2.7** (`kimi_k2_7`) | 🟡 | —（矩阵覆盖） | muon / MoE 用例在矩阵里覆盖；无专属 recipe。 **阻塞：**DistMuon 是 CUDA-only（TT-CUDA）。 |
-| **Muse Glimmer** (`muse_glimmer`) | 🟡 | —（矩阵覆盖） | text 变体在矩阵里覆盖；多模态变体依赖 CP。 **阻塞：**mm 变体走 CP，停在 DEP-INDUCTOR（Triton-Ascend 未装）。 |
+| **Muse Glimmer** (`muse_glimmer`) | 🟡 | —（矩阵覆盖） | text 变体在矩阵里覆盖；多模态变体依赖 CP。 **阻塞：**mm 变体走 CP，停在 CANN/硬件（document mask 的间接寻址）。 |
 | **Flux** (`flux`) | ⚪ | —（矩阵覆盖） | 扩散模型，尚未评估。 |
 
 🟢 只给 release 级——`docs/model-release-criteria.md` 的 R1–R8 每一条都有记录下来的命令与输出。

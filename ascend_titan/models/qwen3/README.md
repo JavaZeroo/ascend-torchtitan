@@ -48,14 +48,14 @@ ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 ./scripts/check_golden.sh qwen3_debugmodel_npu
 
 | # | 增量 | 为什么 | 什么时候能删 |
 |---|---|---|---|
-| 1 | `attn_backend="varlen"` + `kernels.attention` override | 上游只剩 `flex` / `varlen`；模型级 flex 走 inductor（DEP-INDUCTOR），stock varlen 需要 `aten::_flash_attention_forward`（NPU-1） | 装上 Triton-Ascend 后 flex 可评估；NPU-1 合入后 stock varlen 也能跑（见 `probes.py`），但融合算子仍是性能路径 |
+| 1 | `attn_backend="varlen"` + `kernels.attention` override | 上游只剩 `flex` / `varlen`；910B2 编不了 flex 的 document mask（硬件门），stock varlen 需要 `aten::_flash_attention_forward`（NPU-1） | 换到 Ascend950 后 flex 可评估；NPU-1 合入后 stock varlen 也能跑（见 `probes.py`），但融合算子仍是性能路径 |
 | 3 | `checkpoint.enable = False` | 冒烟不做 DCP I/O，DCP 是独立的矩阵格 | 有专门的 checkpoint recipe 后 |
 
 ## 4. 探针（`probes.py`，别用来训练）
 
 | 函数 | 测的是 | 现在的预期 |
 |---|---|---|
-| `qwen3_debugmodel_stock_flex` | 上游默认 flex | 🔴 DEP-INDUCTOR（未装 Triton-Ascend） |
+| `qwen3_debugmodel_stock_flex` | 上游默认 flex | 🔴 硬件门：document mask 的间接寻址只有 Ascend950 能 lower |
 | `qwen3_debugmodel_stock_varlen` | 零 override 的上游 varlen | 🟢（带 NPU-1 补丁）/ 🔴（stock torch_npu）——这是判断 NPU-1 有没有合入的格子 |
 | `qwen3_debugmodel_npu_ce_loss` | 非 chunked 的 `CrossEntropyLoss` | 🟢 `5.10304 / 3.3061`——与删除 DELTA 4 之前的旧 golden 逐位相同，即这条探针精确保留了原路径 |
 | `qwen3_debugmodel_npu_fused_norm` | 只叠加 RMSNorm 一个算子 | 🟢 |

@@ -49,6 +49,16 @@ def _make_torch_npu_stub(without: str | None = None) -> types.ModuleType:
     """
     fake = types.ModuleType("torch_npu")
     fake.__version__ = "0.0.0+stub"
+    # torch_npu._inductor.config.inductor_indirect_memory_mode is the gate the flex
+    # shim probes: torch_npu sets it only on Ascend950, so None = "this chip cannot
+    # lower a document mask", which is the 910B2 baseline the tests describe.
+    inductor = types.ModuleType("torch_npu._inductor")
+    inductor_config = types.ModuleType("torch_npu._inductor.config")
+    inductor_config.inductor_indirect_memory_mode = None
+    inductor.config = inductor_config
+    fake._inductor = inductor
+    sys.modules.setdefault("torch_npu._inductor", inductor)
+    sys.modules.setdefault("torch_npu._inductor.config", inductor_config)
     for op in NPU_OPS:
         if op == without:
             continue

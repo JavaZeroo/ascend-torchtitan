@@ -99,7 +99,8 @@ def npu_minimal(config: Trainer.Config) -> TransformReport:
     a = TransformReport()
 
     # 1. FlexAttention -> VarlenAttention while flex is not usable here
-    #    (TORCH-1 + DEP-INDUCTOR), except the vision towers (see flex_to_varlen).
+    #    (TORCH-1 + the Ascend950-only indirect-memory lowering), except the
+    #    vision towers (see flex_to_varlen).
     kept = [
         fqn
         for fqn, *_ in config.traverse(FlexAttention.Config)

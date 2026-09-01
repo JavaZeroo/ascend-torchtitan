@@ -8,7 +8,7 @@ upstream default -- ComplexRoPE (complex cache indexing, needs the NPU-3 fix),
 ChunkedLossWrapper (TT-4), spmd_types backend, and stock ``VarlenAttention`` ->
 ``aten::_flash_attention_forward`` (needs the NPU-1 fix). The only delta is
 inner attention flex -> varlen, because model-level flex compiles through
-inductor and that needs Triton-Ascend (DEP-INDUCTOR).
+inductor, and 910B2 cannot lower the document mask it builds (Ascend950 only).
 
 If one of these recipes goes 🔴, an Ascend-side regression landed: the fixes in
 ``patches/`` are exactly what makes the stock path work.
@@ -30,8 +30,8 @@ def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     Keeping this list at exactly one line is the point of the model (see the
     module docstring): everything else is upstream's own implementation.
     """
-    # DELTA 1: flex -> varlen; model-level flex compiles through inductor, which
-    # needs Triton-Ascend (DEP-INDUCTOR). Feature-detected: once flex is usable
+    # DELTA 1: flex -> varlen; model-level flex needs to compile a document mask,
+    # which 910B2 cannot lower (Ascend950 only). Feature-detected: once that lands
     # here this becomes a no-op and llama3 is byte-for-byte stock upstream.
     flex_to_varlen(config)
 

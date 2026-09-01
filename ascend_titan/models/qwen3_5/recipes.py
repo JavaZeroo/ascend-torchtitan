@@ -63,7 +63,7 @@ def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """
     # DELTA 1: decoder-layer attention -> the Ascend fused kernel. Two overrides
     # because upstream flavors differ in their default node: most are FlexAttention
-    # (model-level flex needs inductor/Triton-Ascend, DEP-INDUCTOR), while
+    # (910B2 cannot compile flex's document mask -- Ascend950-only lowering), while
     # ``*_varlen_attn`` is already varlen and stock varlen needs
     # ``aten::_flash_attention_forward``, which torch_npu lacks (NPU-1). They target
     # different Config classes, so both may be active. A vision tower's flex node is

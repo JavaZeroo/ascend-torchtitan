@@ -44,16 +44,16 @@ recipe 定义变了，旧 golden 随之失效，四条曲线在 NIGHTLY 上重�
 | **stock varlen**（qwen3 `qwen3_debugmodel_stock_varlen`，零 override） | 🟢 step 10 loss 5.10302 / grad_norm 3.3060 |
 | **stock llama3**（`ascend_titan.models.llama3.llama3_debugmodel_stock_npu`：stock VarlenAttention + 复数缓存 ComplexRoPE + ChunkedLossWrapper + spmd_types，零 override） | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
 | `pp_1f1b`（矩阵，无 shim） | 🟢 |
-| `cp`、`fsdp+cp`、`deepseek_v3_fused_mla_swiglu`、stock flex 模型级 | 🔴 DEP-INDUCTOR：Triton-Ascend 未装（NPU-7 修复后 lowering 已通过） |
+| `cp`、`fsdp+cp`、`deepseek_v3_fused_mla_swiglu`、stock flex 模型级 | 🔴 硬件门：Triton-Ascend 已在基线里、inductor 能编，但 document mask 的间接寻址只有 Ascend950 能 lower |
 | `--comm.mode=fake_backend`（NPU-2，最终 wheel） | 🟢 单卡模拟 8 卡干跑 `step: 1  loss: 7.66238` |
 
 ## 生效中的 shim
 3 条，都实测承重（关掉就炸）：
 
-- `flex_block_mask_eager_lm` / `_vision` —— torchtitan 无条件编译 `create_block_mask`，
-  昇腾没有 inductor 后端时抛 `0 active drivers`；换成上游自己的未编译函数。
+- `flex_attention_eager_lm` / `_vision` —— torchtitan 无条件编译 `create_block_mask`，
+  确定性模式下 torch_npu 的 inductor 拒绝未经认证的 autotune；换成上游自己的未编译函数。
   装上 Triton-Ascend 后自动让位。
-- `flex_eager_when_deterministic` —— `set_determinism` 在非 ROCm 分支上重新编译
+- `flex_attention_eager` —— `set_determinism` 在非 ROCm 分支上重新编译
   `_compiled_flex_attn`，这条路在昇腾上不通；上游对 ROCm 的处理就是改用 eager（TT-12）。
 
 ## 复现

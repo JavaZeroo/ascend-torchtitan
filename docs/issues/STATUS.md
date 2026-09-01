@@ -15,7 +15,7 @@
 | NPU-7 | torch_npu inductor `make_reduction` 覆盖缺 torch 2.15 的 `strict_reduction` | 已提交：issue [4440](https://gitcode.com/Ascend/pytorch/issues/4440) · PR [!45528](https://gitcode.com/Ascend/pytorch/merge_requests/45528)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-7-inductor-make-reduction-strict.patch` | 复现 ✅（stock flex：`LoweringException: TypeError: make_reduction() got an unexpected keyword argument 'strict_reduction'`）；修复验证 ✅（见下表） |
 | NPU-8 | torch_npu 自动加载经 `torch.distributed._tensor` 拖入 checkpoint/fsdp → `spmd_types` 循环导入 | 已提交：issue [4441](https://gitcode.com/Ascend/pytorch/issues/4441) · PR [!45529](https://gitcode.com/Ascend/pytorch/merge_requests/45529)（CLA ✅，CI 运行中） | `patches/torch_npu/NPU-8-dtensor-public-imports.patch` | 复现 ✅（`python -c "import spmd_types"` → `Failed to load the backend extension: torch_npu`）；修复验证 ✅（见下表） |
 | NPU-4 | ArgSort int 回退 AiCpu（性能警告） | 无需处理 | 记录 | — |
-| TORCH-1 | FlexAttention 设备白名单 | 已确认（torch 侧仍在）；**torch_npu master 已绕开** | torch_npu master `utils/patch_flexattention.py`；NIGHTLY 上 `flex_attention` eager 前反向 ✅。模型级 stock flex 走 `torch.compile` → inductor：NPU-7 + Triton-Ascend（`DEP-INDUCTOR`） | eager ✅；compile 见第二轮 |
+| TORCH-1 | FlexAttention 设备白名单 | 已确认（torch 侧仍在）；**torch_npu master 已绕开** | torch_npu master `utils/patch_flexattention.py`；NIGHTLY 上 `flex_attention` eager 前反向 ✅。模型级 stock flex 走 `torch.compile` → inductor：NPU-7 + Triton-Ascend（`CANN/硬件（document mask 间接寻址，Ascend950 才有）`） | eager ✅；compile 见第二轮 |
 | TORCH-2 | fake 后端不可扩展 | 无需处理 | torch_npu 侧追加即可（NPU-2） | — |
 | TORCH-7 | `opcheck` autograd 检查不支持 privateuse1 | 已确认（NIGHTLY 仍在） | `patches/evidence/pytorch/0001-TORCH-7-*.patch`；本仓 NPU 测试用数值梯度 | — |
 | TORCH-8 | `varlen.py` rng_state 占位用 uint64 | 已确认（NIGHTLY 仍在）；**昇腾侧由 NPU-6 解决** | `patches/evidence/pytorch/0002-TORCH-8-*.patch` 仅作证据 | — |
@@ -33,7 +33,7 @@
 | OURS-6 | issue 未提交 | 已关闭 | torch_npu / op-plugin 六项已按 P9 提交（见 NPU-* 行）；torchtitan / pytorch 按 P10 不提 | — |
 | OURS-7 | 扫描期间同卡 HCCL 冲突 | 无需处理 | HARNESS | — |
 | OURS-10 | gpt_oss × TP | 已确认 | 排查中（NIGHTLY 上复测待做） | 待做 |
-| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | 部分关闭（2026-08-31） | **DEP-FLA 证伪**：`fla-core` 有 aarch64 wheel，import 正常；挡住的只是它的 CUDA Triton 内核，gated delta rule 与 causal conv1d 已由 `kernels/gdn.py` 的 override 接管，后者已进一步换成 `kernels/gdn_fla.py` 的 AscendC 融合（R5，NPU 对拍 🟢）。剩下的仍是 inductor / flex 需要 Triton-Ascend | ✅ `qwen35_debugmodel_npu_text` 10 步 loss 3.54783；`qwen35_0_8b_npu` 真实尺寸可跑 |
+| OURS-11 | fla-npu / inductor 需要 Triton-Ascend | **已关闭（2026-09-01）** | **DEP-FLA 证伪**：`fla-core` 有 aarch64 wheel，import 正常；挡住的只是它的 CUDA Triton 内核，gated delta rule 与 causal conv1d 已由 `kernels/gdn.py` 的 override 接管，后者已进一步换成 `kernels/gdn_fla.py` 的 AscendC 融合（R5，NPU 对拍 🟢）。**已关闭（2026-09-01）**：Triton-Ascend 3.2.2 已装进基线（`scripts/install_triton.sh`），inductor 能编前反向；模型级 flex 剩下的是硬件门（document mask 的间接寻址只有 Ascend950） | ✅ `qwen35_debugmodel_npu_text` 10 步 loss 3.54783；`qwen35_0_8b_npu` 真实尺寸可跑 |
 | OURS-12 | **`npu_baseline` 违反 P1/P9**：展开 ChunkedLossWrapper（TT-4）、性能 override 混入 baseline | **已关闭（2026-08-30）** | TT-4 展开已删除；`npu_baseline` 拆成 `npu_minimal`（矩阵默认）+ `npu_fused`（opt-in），`npu_rms_norm` 已移出基线 | `tests/unit/test_matrix.py`：minimal 不含 RMSNorm override、fused 含 |
 | OURS-13 | 矩阵工具在 `setup()` 之前导入 torchtitan（F4 顺序），暴露了 NPU-8 | 已确认 | NPU-8 修复后可运行；工具本身也应先 `setup()`（待做） | 第二轮 |
 | OURS-14 | fla-npu 融合 GDN（R5）模型级已跑通，但 **run-to-run 非确定性**（单卡 0.8B step-1 loss 三次 12.93595 / 12.93635 / 12.93662，纯 torch 稳定 12.93624），无法按 `check_golden.sh` 冻结逐位 golden | 已确认 | AscendC `chunk_*` 内核的归约/原子序不定；对拍改走「纯 torch 参考 ± bf16 容差」断言（`tests/npu/test_kernel_gdn_fla.py`），模型级 golden 状态记为「无逐位 golden，用文档容差」 | 三次 0.8B 训练 + 算子级对拍 4 passed |
@@ -47,8 +47,8 @@
 | stock llama3（`ascend_titan.models.llama3`，零 override：stock ComplexRoPE + ChunkedLoss + spmd_types）10 步 | 🟢 单卡 4.01820 / 1.7382；FSDP2×2 3.97774 / 1.7523 |
 | `import torch` 不再拖入 fsdp/checkpoint；`import spmd_types` 先行 | 🟢（NPU-8） |
 | 矩阵工具可运行；`pp_1f1b` | 🟢（无 shim） |
-| `cp` / `fsdp+cp` / `deepseek_v3_fused_mla_swiglu` | 🔴 DEP-INDUCTOR（Triton-Ascend） |
-| stock flex 模型级 | lowering 通过（NPU-7）→ `0 active drivers`：DEP-INDUCTOR |
+| `cp` / `fsdp+cp` / `deepseek_v3_fused_mla_swiglu` | 🔴 CANN/硬件（document mask 间接寻址，Ascend950 才有）（Triton-Ascend） |
+| stock flex 模型级 | lowering 通过（NPU-7）→ Triton-Ascend 已装、inductor 能编 → 仍红：document mask 的间接寻址只有 Ascend950 能 lower（硬件门） |
 | UT：`test_autoload.py` / op-plugin `test_index_complex.py` / inductor 签名 | 4 OK / 6 OK / 1 passed |
 | UT（最终 wheel）：`test_fake_process_group_npu.py` 1 OK / `test_flash_attention_privateuse1.py` 4 OK / `test_autoload.py` 4 OK / op-plugin `test_index_complex.py` 6 OK / `test_zero_unsigned.py` 3 OK / inductor 签名 1 passed | 🟢 |
 | `--comm.mode=fake_backend`（单卡模拟 8 卡干跑，NPU-2 第三版：包装 `Backend.register_backend`） | 🟢 `step: 1  loss: 7.66238`，exit 0 |

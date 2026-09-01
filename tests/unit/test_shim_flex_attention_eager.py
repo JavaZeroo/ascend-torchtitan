@@ -49,14 +49,14 @@ def _reload_shim(clean_registry):
     首次导入本身会跑一遍 @shim 装饰器，之后 reload 再跑一遍就会撞重名——
     已有的 shim 测试没踩到，只是因为它们的模块早被别的测试导入过。
     """
-    import ascend_titan.compat.shims.flex_eager_when_deterministic as m
+    import ascend_titan.compat.shims.flex_attention_eager as m
 
     clean_registry.reset_for_tests()
     importlib.reload(m)
     return m
 
 
-def test_restores_eager_flex_after_upstream_compiles_it(clean_registry, monkeypatch):
+def test_restores_eager_flex_after_upstream_compiles_it(clean_registry, monkeypatch, npu_stub):
     """包装后仍调用原函数，并把 _compiled_flex_attn 复位成 eager。"""
     torch_flex = pytest.importorskip("torch.nn.attention.flex_attention")
 
@@ -64,9 +64,9 @@ def test_restores_eager_flex_after_upstream_compiles_it(clean_registry, monkeypa
     utils, attention, calls = _fake_upstream(monkeypatch, compiled_marker)
 
     m = _reload_shim(clean_registry)
-    assert m.__name__.endswith("flex_eager_when_deterministic")
+    assert m.__name__.endswith("flex_attention_eager")
     applied = registry.apply_all()
-    assert [a.name for a in applied] == ["flex_eager_when_deterministic"]
+    assert [a.name for a in applied] == ["flex_attention_eager"]
 
     result = utils.set_determinism("debug-config", world="mesh")
 
@@ -77,7 +77,7 @@ def test_restores_eager_flex_after_upstream_compiles_it(clean_registry, monkeypa
     assert attention.FlexAttention._compiled_flex_attn is torch_flex.flex_attention
 
 
-def test_leaves_an_already_eager_attribute_alone(clean_registry, monkeypatch):
+def test_leaves_an_already_eager_attribute_alone(clean_registry, monkeypatch, npu_stub):
     """上游若已经走了 eager 分支（ROCm），shim 不该再动它，也不该重复打日志。"""
     torch_flex = pytest.importorskip("torch.nn.attention.flex_attention")
 
@@ -88,3 +88,24 @@ def test_leaves_an_already_eager_attribute_alone(clean_registry, monkeypatch):
     utils.set_determinism("debug-config")
 
     assert attention.FlexAttention._compiled_flex_attn is torch_flex.flex_attention
+
+
+def test_stands_down_on_hardware_that_can_lower_a_document_mask(
+    clean_registry, monkeypatch, npu_stub
+):
+    """消失条件是硬件：芯片能 lower 间接寻址时，这条 shim 不该再动 flex。"""
+    torch_flex = pytest.importorskip("torch.nn.attention.flex_attention")
+
+    compiled_marker = object()
+    utils, attention, _ = _fake_upstream(monkeypatch, compiled_marker)
+
+    _reload_shim(clean_registry)
+    # Ascend950 的行为：torch_npu 给这个开关赋了值
+    monkeypatch.setattr(
+        sys.modules["torch_npu._inductor"].config, "inductor_indirect_memory_mode", "enabled"
+    )
+    registry.apply_all()
+    utils.set_determinism("debug-config")
+
+    assert attention.FlexAttention._compiled_flex_attn is compiled_marker
+    assert attention.FlexAttention._compiled_flex_attn is not torch_flex.flex_attention

@@ -30,7 +30,7 @@ MODULE=ascend_titan.models.llama3 CONFIG=llama3_debugmodel_stock_npu_fsdp2 ./scr
 ## 3. 唯一的增量
 
 `FlexAttention` → `VarlenAttention`。原因：模型级 flex 要经 inductor 编译，昇腾上需要
-Triton-Ascend（DEP-INDUCTOR，未装）。其余**全部**是上游默认：
+910B2 编不了 flex 的 document mask（硬件门）。其余**全部**是上游默认：
 
 | 上游默认 | 在昇腾上曾经/仍然依赖什么 |
 |---|---|
@@ -50,7 +50,7 @@ Triton-Ascend（DEP-INDUCTOR，未装）。其余**全部**是上游默认：
 python -m ascend_titan.tools.matrix --cards 0-7 --jobs 4 --suite features
 ```
 
-结果见 `docs/capability-matrix.md`（FSDP2 / DDP / HSDP / TP+SP / PP 全绿；CP 停在 DEP-INDUCTOR）。
+结果见 `docs/capability-matrix.md`（FSDP2 / DDP / HSDP / TP+SP / PP 全绿；CP 停在硬件门）。
 
 ## 5. 真实尺寸（⚪）
 

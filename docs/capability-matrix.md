@@ -15,8 +15,8 @@
 - TT-4（ChunkedLossWrapper）🔴 → 🟢：单卡与 FSDP2×2 通过；`npu_baseline` 不再展开 loss。**2026-08-30 起 chunked loss 是 qwen3 参考 recipe 的默认**（删除 DELTA 4，golden 已重录）；非 chunked 路径保留为探针 `qwen3_debugmodel_npu_ce_loss`。
 - torch_npu 侧修复（`patches/torch_npu/`、`patches/op-plugin/`）：NPU-1 stock varlen、NPU-2 fake_backend、NPU-3 stock ComplexRoPE、NPU-6 uint64、NPU-7 inductor 签名、NPU-8 spmd_types 循环导入——修复前后的格子见 `docs/issues/STATUS.md` 第二轮。
 - `flex` eager 在 torch_npu master 上可用（TORCH-1 被 torch_npu 侧绕开；op 级 fwd+bwd 实测通过），因此 `npu_minimal` 的 flex→varlen 改为特性探测，nightly 上不再转换。
-- **模型级 flex（2026-08-30 更新）**：torchtitan 在三处无条件 `torch.compile`（`common/attention.py` 的 `_compiled_create_block_mask` 与 `FlexAttention._compiled_flex_attn`、`common/vision_encoder.py` 的 `compiled_create_block_mask`），都不看 `config.compile.enable`。shim `flex_block_mask_eager` 在 triton 没有可用后端时把这三处换回上游自己的未编译函数，模型级 flex 因此**可达**。但**可达不等于可用**：eager flex 会把 O(T²) 的分数矩阵实体化，qwen3 stock flex 因此由 `DEP-INDUCTOR` 变成 **OOM**。所以 `npu_minimal` 的 flex→varlen 转换条件是"设备白名单已解除**且** inductor 有可用后端"，两者缺一就仍然转换；视觉塔的 flex 节点例外（它拿到的是 BlockMask，那条路径没有 varlen 掩码）。
-- **CP 的阻塞链（2026-08-30 实测）**：上游明确 `Context Parallel is not supported with ScaledDotProductAttention or VarlenAttention. Use FlexAttention or disable CP.` → CP 必须用 flex → 模型级 flex 需要 inductor → 需要 Triton-Ascend。flex 在昇腾上是通的（见下文 document mask 一节），所以这条链的前提已经不成立——**CP 需要重测**。
+- **模型级 flex（2026-09-01 更新）**：torchtitan 在三处无条件 `torch.compile`（`common/attention.py` 的 `_compiled_create_block_mask` 与 `FlexAttention._compiled_flex_attn`、`common/vision_encoder.py` 的 `compiled_create_block_mask`），都不看 `config.compile.enable`。Triton-Ascend 已在基线里，inductor 能编普通算子；**编不出来的是 document mask** —— 它 index 一个 segment-id 张量，torch_npu 只在 `inductor_indirect_memory_mode` 打开时才 lower 间接寻址，而该开关只在 Ascend950 赋值，910B2 上恒为 `None`，于是在 pointwise 子图里建 buffer，抛 `SubgraphLoweringException`。shim `flex_attention_eager` 因此仍然承重（实测：关掉它 kimi_k3 立刻抛这个异常），门控探测的是这个开关——不是 triton 有没有后端，那个判据在装上 Triton-Ascend 后就错了。掩码构建的两条 shim 已删：编译版构建器本身没问题。**可达不等于可用**：换回 eager 构建器后 flex 会把 O(T²) 的分数矩阵实体化，llama3 debugmodel 实测要 20 GiB 而 OOM。所以 flex→varlen 的转换条件是设备白名单已解除**且**这颗芯片能 lower 间接寻址；视觉塔的 flex 节点例外（它拿到的是 BlockMask）。
+- **CP 的阻塞链（2026-09-01 更新）**：上游明确 `Context Parallel is not supported with ScaledDotProductAttention or VarlenAttention. Use FlexAttention or disable CP.` → CP 必须用 flex → 模型级 flex 要能编 document mask → 910B2 上 `inductor_indirect_memory_mode` 恒为 `None`。装 Triton-Ascend 解决的是有没有后端，解决不了这一层，所以 **CP 在 910B2 上仍然没有路径，归因硬件**。
 
 ## NIGHTLY 全量扫描（2026-08-30，8 卡，61 个上游用例）
 
@@ -29,7 +29,8 @@ NIGHTLY track（torch 2.15.0.dev20260812 + torch_npu master + `patches/` 的八�
 | 归因 | 数量 | 是什么 | 谁来修 |
 |---|:--:|---|---|
 | `CANN` | 13 | CP ×12（见下）+ `float8_emulate_lora`（float8 没有 cast 内核，`aclnnInplaceCopy 561103`） | **硬件**：都要 Ascend950，910B2 上没有路径 |
-| `DEP-INDUCTOR` | 5 | 四个 `*_compile` 用例 + `gpt_oss_fsdp+tp+ep+compile` | 装 Triton-Ascend（已验证可行，见"Triton-Ascend / inductor"一节） |
+| `CANN` | 4 | 四个 `*_compile` 用例 | 2026-09-01 装上 Triton-Ascend 后重跑：inductor 本身能编（脚本验收过前反向），编不出来的是 document mask 的间接寻址（`inductor_indirect_memory_mode` 只在 Ascend950 赋值）。**硬件门** |
+| `COMPILE` | 1 | `gpt_oss_fsdp+tp+ep+compile` | 装 Triton-Ascend 后归因由"缺后端"变为编译路径本身失败，待查 |
 | `DEP` | 5 | ~~`fla`（qwen3_5 ×3）~~ 已证伪（2026-08-31，见语言侧那行）、`helion` ×2 | 昇腾替代属 L1 |
 | `TT-CUDA` | 2 | `DistMuon requires one CUDA device per process` | 上游按设计 CUDA-only |
 | `TT-KERNEL` | 3 | `override_fused_swiglu` / `override_fused_grouped_experts` / `deepseek_v3_fused_mla_swiglu`（上游树内 Triton 内核） | 昇腾替代属 L1（我们已有 `npu_swiglu` 版本） |
@@ -51,7 +52,7 @@ checkpoint（full、optional、seed、HF、bf16-only）/ 梯度累积 / bf16 优
 
 | 根因 | 用例数 | 归因 | 谁来修 |
 |---|---|---|---|
-| `torch.compile`：inductor 后端需要 Triton-Ascend（M3 已解决我们自己的 graph break） | 6 | DEP-INDUCTOR | M5：Triton-Ascend / torchair |
+| `torch.compile` + flex：document mask 的间接寻址在 910B2 上 lower 不了 | 5 | CANN / COMPILE | 硬件（Ascend950）；inductor 本身已可用 |
 | CUDA-only 依赖缺失：`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1 |
 | 上游树内 CUDA-only 组件：`fused_swiglu`/`fused_grouped_experts` Triton 内核、DistMuon | 4 | TT-KERNEL / TT-CUDA | 上游按设计为 CUDA；昇腾替代属 L1 |
 | gpt_oss + TP：路由 softmax backward 形状不匹配（LSE 尾部已实现后新暴露） | 1 | OURS-10 | 本仓，待查 |
@@ -96,7 +97,7 @@ triton-ascend 3.2.2（自带 triton 3.2.0）**可以和 torch 2.15 nightly + tor
 推广成通则**——"910B2 上读张量的 mask_mod 一律编不出来"就是这么推出来的，是错的。
 
 实际会踩到这条的只有一处：torchtitan 的 `set_determinism` 在非 ROCm 分支上正是这么做的（TT-12），
-`shims/flex_eager_when_deterministic.py` 已处理。
+`shims/flex_attention_eager.py` 已处理。
 
 **CP 需要重测**：此前"CP 在 910B2 上不可能"是从那条过宽的结论推出来的，前提不成立了。
 但这不等于 CP 能跑——NIGHTLY 扫描里 CP 的 12 个红格归因是 `CANN`，要实测才算。
@@ -106,10 +107,10 @@ triton-ascend 3.2.2（自带 triton 3.2.0）**可以和 torch 2.15 nightly + tor
 | 模型 / 路径 | NIGHTLY | 说明 |
 |---|:--:|---|
 | kimi_k3 debugmodel（视觉塔 + KDA + MoE） | 🟢 | 单卡 10 步 `loss 4.56418`，golden 已冻结并逐位复现。08-31 一度记成 🔴，那是误判：它只在 `--debug.deterministic` 下失败，而 `check_golden.sh` 正好加了这个开关。见下面 TT-12 那行 |
-| 视觉塔的 BlockMask 构建 | 🟢 | 靠 shim `flex_block_mask_eager`（上游无条件 `torch.compile`，无开关）。注意它只解决**构建掩码**那一步，`flex_attention` 自身的 lowering 不在它管辖内 |
+| 视觉塔的 BlockMask 构建 | 🟢 | 靠 shim `flex_attention_eager`（上游无条件 `torch.compile`，无开关）。注意它只解决**构建掩码**那一步，`flex_attention` 自身的 lowering 不在它管辖内 |
 | 视觉塔的 FlexAttention 节点 | 🟢 | `npu_minimal` 不转换它（那条路径没有 varlen 掩码，转了会撞 `attention_masks must be VarlenMetadata, got BlockMask`，实测过）。torch 的 `flex_attention` 在不处于 dynamo 时会自己 `torch.compile(..., fullgraph=True)`，昇腾上这条路是通的——前向、LSE、反向实测均通过 |
 | 视觉塔的 block-diagonal document mask | 🟢 | `common/vision_encoder.py:57` 的 `mask_mod` 读张量（`segment_ids[q_idx] == segment_ids[kv_idx]`）。**在昇腾上能跑**：前向、LSE、反向都通过（`tests/repro/probe_flex_deterministic.py`）。此前记成硬件限制是误判——真正的触发条件是`--debug.deterministic`，见 TT-12 |
-| **TT-12** flex + 确定性模式 | 🟢（已加 shim） | `set_determinism` 在非 ROCm 分支上把 `_compiled_flex_attn` 重新编译（并覆盖我们的 shim），这条路在昇腾上不通：读张量的掩码 → `SubgraphLoweringException`，causal 掩码 → `InductorError`。上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支。`shims/flex_eager_when_deterministic.py` 补上后两个模型的 golden 都录了 |
+| **TT-12** flex + 确定性模式 | 🟢（已加 shim） | `set_determinism` 在非 ROCm 分支上把 `_compiled_flex_attn` 重新编译（并覆盖我们的 shim），这条路在昇腾上不通：读张量的掩码 → `SubgraphLoweringException`，causal 掩码 → `InductorError`。上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支。`shims/flex_attention_eager.py` 补上后两个模型的 golden 都录了 |
 | KDA（Kimi Delta Attention） | 🟢 | `kernels/kda.py`：上游 kernel 要 CUDA + Blackwell，改走 attn_gym 的 `impl="reference"` + 自写 depthwise causal conv1d |
 | `nvidia-cutlass-dsl` | 🟢 | 有 aarch64 wheel；只 import 不执行（会执行 cute 内核的节点都被 override 掉） |
 | qwen3_5 多模态 collator | 🔴 | 视觉塔的 document mask（上一行）。**不是 DEP-FLA**：`fla-core` 有 aarch64 wheel，装上就能 import，只是它的 Triton 内核编不出来——那条路已由 `kernels/gdn.py` 的 override 接管。qwen3_5 的语言侧真实尺寸可跑，见 `ascend_titan/models/qwen3_5/README.md` |
@@ -139,7 +140,7 @@ GE 运行时还需要 venv 里有 `decorator`、`scipy`。用法是上游自带�
 |---|:--:|---|
 | `compile.components=["loss"]` | 🟢 | qwen3 10 步，`loss 5.11634`（eager 5.10291，编译后归约重排的 bf16 级差异）；recipe 探针 `qwen3_debugmodel_npu_graph` |
 | `compile.components=["model"]` | 🔴 | OURS-13：我们的 varlen 注意力 custom_op 没有 GE converter，torchair 找不到 `FusionAttentionVarlen` |
-| inductor 后端（`compile.backend=inductor`） | 🔴 | DEP-INDUCTOR：需要 Triton-Ascend |
+| inductor 后端（`compile.backend=inductor`） | 🟢 | Triton-Ascend 3.2.2 在基线里（`scripts/install_triton.sh`）；`torch.compile(backend="inductor")` 在 910B2 上编出前反向内核，实测通过 |
 
 ## 运行路径（M1）
 
@@ -155,7 +156,7 @@ GE 运行时还需要 venv 里有 `decorator`、`scipy`。用法是上游自带�
 |---|---|---|
 | ascend_fusion（varlen 节点上的 override） | 🟢 | `ascend_titan.kernels.attention`；GQA、按文档因果；op 级误差 8e-3（bf16）；`fsdp+varlen_attn+per_op_sac` 🟢。NIGHTLY 上不再是必需项（stock varlen 可用），保留为性能/兼容项 |
 | varlen（stock） | 🟢（NIGHTLY + NPU-1/NPU-6 补丁）/ 🔴（原版 torch_npu：NPU-1） | qwen3 零 override 10 步 loss 5.10302 / grad_norm 3.3060 |
-| flex（stock，上游默认） | 🟢 | 前向 / LSE / 反向实测通过（含读张量的 document mask）。mask 构建需要 `flex_block_mask_eager` shim（上游无条件编译它），确定性模式需要 `flex_eager_when_deterministic`（TT-12） |
+| flex（stock，上游默认） | 🟢 | 前向 / LSE / 反向实测通过（含读张量的 document mask）。mask 构建需要 `flex_attention_eager` shim（上游无条件编译它），确定性模式需要 `flex_attention_eager`（TT-12） |
 | flex_flash | 🔴 | TT-by-design：`has_cuda_capability(9,0)` 门控 |
 | sdpa | 🔴 | TT-7：上游已为 LM 移除 |
 | attention sinks（gpt_oss）/ CP 的 LSE 尾部 | 🟢 | M3：LSE = 按文档还原的 `softmax_max + log(softmax_sum)`（统计量为 head-major 布局），与 `logsumexp` 参考对齐；CP 仍被 TT-5 挡 |
@@ -216,7 +217,7 @@ GE 运行时还需要 venv 里有 `decorator`、`scipy`。用法是上游自带�
 |---|---|---|
 | eager | 🟢 | |
 | dynamo + AOTAutograd（`aot_eager`） | 🟢 | M3：注意力 custom_op + `register_fake`，`fullgraph=True` 通过（`tests/npu/test_kernel_attention.py`） |
-| inductor（`1d_compile`、`1d_compile_sac_op`、`2d_compile`、`3d_compile`、gpt_oss compile） | 🔴 | DEP-INDUCTOR：torch_npu 的 inductor 后端要求 Triton-Ascend（`triton.language.extra.ascend`），当前只装了纯 Python 的 `triton`；M5 与 torchair 一起处理 |
+| inductor（`1d_compile`、`1d_compile_sac_op`、`2d_compile`、`3d_compile`、gpt_oss compile） | 🔴 | 2026-09-01 重测：Triton-Ascend 已在基线里、inductor 能编；这些用例改为死在 flex 的 document mask 上（`SubgraphLoweringException`，归因 CANN/硬件），gpt_oss 那条归因 COMPILE 待查 |
 | torchair | ⚪ | M5 |
 | CUDA graphs | 🔴 | TT-by-design：上游在非 CUDA 上自动退回 eager 并警告。不是 bug。 |
 

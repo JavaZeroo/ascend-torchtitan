@@ -57,22 +57,27 @@ def _flex_attention_is_usable() -> bool:
     * torch_npu must have lifted torch's device whitelist (``_validate_device``
       rejects anything outside ``{cuda, cpu, xpu, hpu, mps}``, TORCH-1); master
       patches it and marks the module with ``_npu_device_patched``.
-    * inductor must have a backend. Eager flex attention materialises the full
-      O(T^2) score matrix -- it passes at op scale (fwd + bwd measured on 910B2,
-      tests/repro/probe_npu_gaps.py) and then OOMs at model scale. "Runs" is not
-      the same as "usable", so the conversion below stays until Triton-Ascend is
-      installed (DEP-INDUCTOR).
+    * inductor must be able to lower a **document mask**. That mask indexes a
+      segment-id tensor (``aten.index.Tensor``) inside flex's pointwise subgraph,
+      and torch_npu only lowers indirect memory access when
+      ``inductor_indirect_memory_mode`` is set -- which its config does only on
+      Ascend950. On 910B2 it stays ``None``, the index falls back to an
+      ExternKernel, and building a buffer inside a pointwise subgraph raises
+      ``SubgraphLoweringException``; where it does not raise, flex silently
+      materialises the O(T^2) score matrix and the run OOMs instead (measured:
+      llama3 debugmodel asks for 20 GiB on a 60 GiB card).
+
+    So this is a *hardware* gate, not a missing package: Triton-Ascend is part of
+    the baseline and inductor compiles fine (``scripts/install_triton.sh`` proves
+    fwd+bwd), yet model-level flex still has no path on 910B2.
     """
     from torch.nn.attention import flex_attention
 
     if not getattr(flex_attention, "_npu_device_patched", False):
         return False
-    try:
-        from triton.runtime import driver
+    from torch_npu._inductor import config as npu_inductor_config
 
-        return driver.active is not None
-    except Exception:  # noqa: BLE001 - no usable triton backend
-        return False
+    return getattr(npu_inductor_config, "inductor_indirect_memory_mode", None) is not None
 
 
 def flex_to_varlen(config: Trainer.Config, *, keep: Sequence[str] = ()) -> list[str]:

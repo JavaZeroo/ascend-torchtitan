@@ -103,7 +103,7 @@ attn_gym 的前代回代从不形成这些幂，所以它没事。
 
 唯一的例外是 `--debug.deterministic`：torchtitan 的 `set_determinism` 在非 ROCm 分支上会把
 `FlexAttention._compiled_flex_attn` 重新编译（并覆盖我们装的 eager shim），这条路在昇腾上
-不通。上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支——`shims/flex_eager_when_deterministic.py`
+不通。上游对 ROCm 的处理就是改用 eager，昇腾缺这条分支——`shims/flex_attention_eager.py`
 补上即可。机制见 `tests/repro/probe_flex_deterministic.py` 与能力矩阵的 TT-12。
 
 真实尺寸的证据取在**语言侧**（`qwen35_0_8b_npu` 换成纯文本 C4），因为真实 cc12m 是图文数据集，

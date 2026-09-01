@@ -190,9 +190,9 @@ MODELS: dict[str, ModelEntry] = {
         notes=(
             "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
             "KDA 走 `kernels/kda.py` 的 override；确定性模式下 flex 靠 "
-            "`flex_eager_when_deterministic` shim 走 eager（TT-12）。"
+            "`flex_attention_eager` shim 走 eager（TT-12）。"
             "融合变体（ops-nn SiTU-GLU）实测 loss 4.29434 / tps 48。"
-            "性能极低，Triton-Ascend 到位前不做性能基线。"
+            "性能极低（flex 走 eager，910B2 硬件门），不做性能基线。"
         ),
     ),
     "deepseek_v3": ModelEntry(
@@ -233,7 +233,7 @@ MODELS: dict[str, ModelEntry] = {
         status="🟡",
         summary="text 变体在矩阵里覆盖；多模态变体依赖 CP。",
         recipes=None,
-        blocker="mm 变体走 CP，停在 DEP-INDUCTOR（Triton-Ascend 未装）。",
+        blocker="mm 变体走 CP，停在 CANN/硬件（document mask 的间接寻址）。",
     ),
     "flux": ModelEntry(
         name="flux",

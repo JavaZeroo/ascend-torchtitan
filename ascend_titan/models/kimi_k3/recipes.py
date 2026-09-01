@@ -37,7 +37,7 @@ def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     upstream flavor gets a ``<flavor>_npu`` entry point with no new function.
     """
     # DELTA 1: 语言塔的 flex 注意力节点 -> 昇腾融合注意力（上游 flex 掩码走
-    # `create_block_mask`，是 torch.compile 的，昇腾要 inductor，DEP-INDUCTOR）。
+    # `create_block_mask`，是 torch.compile 的，而 910B2 编不出它的 document mask，硬件门）。
     # override 的 fqns 只认领 `layers.*.attention`，视觉塔那个节点因此保持 flex——
     # 它喂的是 BlockMask，这个内核吃不了。
     # 消失条件：装上 Triton-Ascend 后可换回上游 flex。

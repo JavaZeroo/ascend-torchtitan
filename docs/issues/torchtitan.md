@@ -42,14 +42,21 @@
 
     compiled_create_block_mask = torch.compile(create_block_mask)
 
-三处都在 import 时求值，且都不看 `config.compile.enable`。后果：任何没有可用 inductor
-后端的设备上，只要模型用 FlexAttention（或带视觉塔），第一个 forward 就死在
-`RuntimeError: 0 active drivers`，而 `create_block_mask` 与 `flex_attention` 本身在
-eager 下工作正常（昇腾上实测 fwd + bwd 通过）。
+三处都在 import 时求值，且都不看 `config.compile.enable`。昇腾上有两种后果
+（2026-09-01 装上 Triton-Ascend 之后重新测的）：
+
+* **确定性模式**（`--debug.deterministic`，也就是录 golden 的方式）：torch_npu 的
+  inductor 拒绝未经认证的 autotune benchmark，掩码构建直接抛
+  `RuntimeError: In the deterministic mode of Inductor, ...`。
+* **任何模式下的 flex attention 本体**：它的 document mask 要 index 一个 segment-id
+  张量，而间接寻址的 lowering 只在 Ascend950 上启用，910B2 抛
+  `SubgraphLoweringException`。
+
+两者 eager 下都工作正常（昇腾上实测 fwd + bwd 通过）。
 
 **上游 ask**：让这三处尊重一个开关（`compile.enable`，或一个 `FlexAttention` 上的
 `compile: bool = True` 字段），或者惰性编译并在编译失败时退回 eager。
 
 按 P10，我们不向 github.com/pytorch 提 issue/PR，只在本仓记录，并用 shim
-`ascend_titan/compat/shims/flex_block_mask_eager.py` 在本地绕开（特性探测：
+`ascend_titan/compat/shims/flex_attention_eager.py` 在本地绕开（特性探测：
 triton 一有可用后端就自动让路）。

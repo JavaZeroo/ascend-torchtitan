@@ -175,7 +175,7 @@ MODULE=ascend_titan.recipes.matrix NPU=1 ./scripts/run_train.sh \
 | **DeepSeek-V3** | 🟡 | 矩阵覆盖 | — | MoE + EP（fsdp+ep、hsdp+ep）🟢；`fused_mla_swiglu` = OURS-9，MTP = DEP-HELION |
 | **GPT-OSS** | 🟡 | 矩阵覆盖 | — | `pp+fsdp+ep+sacop` 🟢（attention sinks 的 LSE 尾部已实现）；`fsdp+tp+ep` = OURS-10 |
 | **Kimi K2.7** | 🟡 | 矩阵覆盖 | — | muon / MoE 用例覆盖；DistMuon 是 CUDA-only |
-| **Muse Glimmer** | 🟡 | 矩阵覆盖 | — | text 变体覆盖；mm 变体走 CP，停在 DEP-INDUCTOR |
+| **Muse Glimmer** | 🟡 | 矩阵覆盖 | — | text 变体覆盖；mm 变体走 CP，停在硬件门（flex 的 document mask 只有 Ascend950 能编） |
 | **Flux** | ⚪ | — | — | 扩散模型，尚未评估 |
 
 🟢 **release 级**——[`docs/model-release-criteria.md`](docs/model-release-criteria.md) 的 R1–R8
@@ -193,7 +193,7 @@ MODULE=ascend_titan.recipes.matrix NPU=1 ./scripts/run_train.sh \
 <tr><td>TP + SP（含无 SP）</td><td align="center">🟢</td><td></td></tr>
 <tr><td>PP：1F1B / GPipe / looped / PP+DP+TP</td><td align="center">🟢</td><td></td></tr>
 <tr><td>EP（专家并行，MoE）</td><td align="center">🟢</td><td>deepseek_v3、gpt_oss</td></tr>
-<tr><td>CP（上下文并行）</td><td align="center">🟡</td><td>CP 在 nightly 上消失；现停在 <code>DEP-INDUCTOR</code>（未装 Triton-Ascend）</td></tr>
+<tr><td>CP（上下文并行）</td><td align="center">🔴</td><td>上游强制 CP 配 flex，而 910B2 编不了 flex 的 document mask（间接寻址 lowering 只有 Ascend950）——硬件门</td></tr>
 <tr><td><code>spmd_types</code> 后端（上游默认）</td><td align="center">🟢</td><td>上游默认，直接可用</td></tr>
 </table>
 
@@ -205,7 +205,8 @@ MODULE=ascend_titan.recipes.matrix NPU=1 ./scripts/run_train.sh \
 <tr><td>RMSNorm / SwiGLU（融合）</td><td align="center">🟢</td><td><code>npu_rms_norm</code> / <code>npu_swiglu</code>（性能 recipe，非 baseline）</td></tr>
 <tr><td>ChunkedLossWrapper（上游默认）</td><td align="center">🟢</td><td><b>参考 recipe 的默认</b>，golden 门禁覆盖；TT-4 只在正式版 torch 上出现</td></tr>
 <tr><td>SiTU-GLU（Kimi K3）</td><td align="center">🟡</td><td>ops-nn <code>aclnnSituGlu</code> 已封装；等模型包能 import</td></tr>
-<tr><td><code>torch.compile</code> / flex attention</td><td align="center">🔴</td><td><code>DEP-INDUCTOR</code>：需要 Triton-Ascend（M5）</td></tr>
+<tr><td><code>torch.compile</code>（inductor 后端）</td><td align="center">🟢</td><td>Triton-Ascend 3.2.2 在基线里（<code>scripts/install_triton.sh</code>），前反向内核实测编得出</td></tr>
+<tr><td>模型级 flex attention</td><td align="center">🔴</td><td>document mask 的间接寻址只有 Ascend950 能 lower——硬件门，与装不装包无关</td></tr>
 <tr><td>fake_backend 干跑（单卡模拟多卡）</td><td align="center">🟢</td><td>靠 <b>NPU-2</b> 修复</td></tr>
 </table>
 

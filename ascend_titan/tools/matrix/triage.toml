@@ -90,10 +90,19 @@ code = 'DEP'
 pattern = "No module named 'torchvision'"
 note = 'torchvision missing (installable)'
 
+# Triton-Ascend 在基线里（scripts/install_triton.sh）。命中这条 = **环境坏了**，
+# 不是已知阻塞：inductor 没有昇腾后端，去装。
 [[rule]]
-code = 'DEP-INDUCTOR'
-pattern = "0 active drivers|No module named 'triton\\.backends|triton\\.language\\.extra' has no attribute 'ascend'|torchair"
-note = 'inductor needs Triton-Ascend / torchair on NPU (M5)'
+code = 'HARNESS'
+pattern = "0 active drivers|No module named 'triton\\.backends|triton\\.language\\.extra' has no attribute 'ascend'"
+note = 'Triton-Ascend missing from this env: run scripts/install_triton.sh'
+
+# 910B2 上 document mask 的间接寻址无法 lower（inductor_indirect_memory_mode 只在
+# Ascend950 赋值）。硬件门，不是缺包。
+[[rule]]
+code = 'CANN'
+pattern = "SubgraphLoweringException|Buffers cannot be created while lowering a pointwise subgraph"
+note = 'document-mask flex needs indirect-memory lowering (Ascend950 only)'
 
 [[rule]]
 code = 'OURS-8'

@@ -25,7 +25,7 @@ def qwen3_debugmodel_stock_flex() -> Trainer.Config:
     """Cell attention/flex: upstream default inner attention, no override.
 
     Model-level flex compiles through inductor -> needs Triton-Ascend
-    (DEP-INDUCTOR). Expected 🔴 until M5.
+    (910B2 cannot lower the document mask's indirect memory). Expected 🔴 on this chip.
     """
     config = qwen3_debugmodel_npu()
     config.model_spec = model_registry("debugmodel", attn_backend="flex")

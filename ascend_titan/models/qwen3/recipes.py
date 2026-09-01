@@ -17,7 +17,8 @@ defaults, supported, gated and golden-frozen.
 
 Why the attention delta exists: upstream language models offer only ``flex`` and
 ``varlen`` inner attention (``sdpa`` was removed, ``config_utils.py:97``).
-``flex`` needs inductor (Triton-Ascend, DEP-INDUCTOR) at the model level, and
+``flex`` cannot compile its document mask on 910B2 (indirect-memory lowering
+is Ascend950-only) at the model level, and
 stock ``varlen`` needs ``aten::_flash_attention_forward``, which torch_npu only
 grows with the NPU-1 fix. The ``kernels.attention`` override is therefore the
 supported path, and ``probes.py`` keeps both stock cells measurable.
@@ -65,7 +66,7 @@ def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """
     # DELTA 1: decoder-layer attention -> the Ascend fused kernel (matrix:
     # attention/ascend_fusion). Two overrides cover both upstream defaults: flex
-    # flavors (model-level flex needs inductor, DEP-INDUCTOR) and varlen flavors
+    # flavors (910B2 cannot compile flex's document mask) and varlen flavors
     # (stock varlen needs aten::_flash_attention_forward, which torch_npu lacks,
     # NPU-1). Different target classes, so both may be active at once.
     add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
