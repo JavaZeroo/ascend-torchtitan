@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ascend-torchtitan 设计文档</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ink: #10151c;
+    --paper: #f6f8f9;
+    --surface: #ffffff;
+    --sunken: #eef1f4;
+    --hairline: #dbe2e6;
+    --hairline-strong: #c3ced5;
+    --muted: #5a6672;
+    --accent: #0d6e7a;
+    --accent-soft: #e2f1f2;
+    --pass: #2b7a4b;
+    --pass-soft: #e4f2e8;
+    --partial: #a1701a;
+    --partial-soft: #f7eedb;
+    --fail: #b23a2f;
+    --fail-soft: #fae7e4;
+    --sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    --display: "Archivo", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #dde6ec;
+      --paper: #0d1318;
+      --surface: #141c23;
+      --sunken: #101820;
+      --hairline: #243039;
+      --hairline-strong: #33434f;
+      --muted: #8b98a3;
+      --accent: #55b9c4;
+      --accent-soft: #10333a;
+      --pass: #6fbf8c;
+      --pass-soft: #14291c;
+      --partial: #d9a75a;
+      --partial-soft: #2d2312;
+      --fail: #e08477;
+      --fail-soft: #331a16;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #dde6ec;
+    --paper: #0d1318;
+    --surface: #141c23;
+    --sunken: #101820;
+    --hairline: #243039;
+    --hairline-strong: #33434f;
+    --muted: #8b98a3;
+    --accent: #55b9c4;
+    --accent-soft: #10333a;
+    --pass: #6fbf8c;
+    --pass-soft: #14291c;
+    --partial: #d9a75a;
+    --partial-soft: #2d2312;
+    --fail: #e08477;
+    --fail-soft: #331a16;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 28px 96px; }
+  header.doc {
+    border-bottom: 1px solid var(--hairline);
+    padding: 56px 0 32px;
+    margin-bottom: 8px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(30px, 4.4vw, 44px);
+    line-height: 1.18;
+    letter-spacing: -0.015em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .meta b { color: var(--ink); font-weight: 500; }
+  nav.toc {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 18px 24px;
+    margin: 28px 0 12px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding: 0 0 0 1.4em;
+    columns: 2;
+    column-gap: 42px;
+    font-size: 14px;
+  }
+  @media (max-width: 720px) { nav.toc ol { columns: 1; } }
+  nav.toc li { margin: 3px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); text-decoration: underline; }
+  section { margin-top: 64px; }
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 25px;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    padding-top: 18px;
+    border-top: 2px solid var(--ink);
+    text-wrap: balance;
+  }
+  h2 .no {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 15px;
+    color: var(--accent);
+    margin-right: 12px;
+    vertical-align: 2px;
+  }
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 17.5px;
+    margin: 34px 0 4px;
+  }
+  p, ul, ol { max-width: 76ch; }
+  p { margin: 12px 0; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--sunken);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.8px;
+    line-height: 1.65;
+    max-width: 100%;
+  }
+  pre code { background: none; border: none; padding: 0; white-space: pre; }
+  pre .cm { color: var(--muted); }
+  pre .kw { color: var(--accent); }
+  figure.fig {
+    margin: 28px 0;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 22px 22px 14px;
+    overflow-x: auto;
+  }
+  figure.fig svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    min-width: 640px;
+    font-family: var(--sans);
+    color: var(--ink);
+  }
+  figure.fig figcaption {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--hairline);
+    max-width: none;
+  }
+  figure.fig figcaption b { color: var(--ink); font-weight: 600; }
+  .scroll { overflow-x: auto; margin: 20px 0; }
+  table.tbl {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13.8px;
+    line-height: 1.6;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+  }
+  table.tbl th {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 12.5px;
+    letter-spacing: 0.04em;
+    text-align: left;
+    background: var(--sunken);
+    border-bottom: 1px solid var(--hairline-strong);
+    padding: 9px 14px;
+    white-space: nowrap;
+  }
+  table.tbl td {
+    border-top: 1px solid var(--hairline);
+    padding: 9px 14px;
+    vertical-align: top;
+  }
+  table.tbl td:first-child { white-space: nowrap; }
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    border-radius: 4px;
+    padding: 1px 8px;
+    white-space: nowrap;
+  }
+  .tag.ok   { color: var(--pass);    background: var(--pass-soft); }
+  .tag.warn { color: var(--partial); background: var(--partial-soft); }
+  .tag.bad  { color: var(--fail);    background: var(--fail-soft); }
+  .tag.info { color: var(--accent);  background: var(--accent-soft); }
+  .callout {
+    max-width: 76ch;
+    background: var(--accent-soft);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 18px;
+    margin: 18px 0;
+    font-size: 14.5px;
+  }
+  .callout b { color: var(--accent); }
+  footer.doc {
+    margin-top: 80px;
+    padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  /* SVG 内部约定 */
+  svg text { font-size: 12px; fill: currentColor; }
+  svg .sm { font-size: 10.5px; fill: var(--muted); }
+  svg .mono { font-family: var(--mono); font-size: 11.5px; }
+  svg .ttl { font-family: var(--display); font-weight: 600; font-size: 12.5px; }
+  svg .acc { fill: var(--accent); }
+  svg rect.box { fill: var(--sunken); stroke: currentColor; stroke-width: 1; rx: 6; }
+  svg rect.plain { fill: var(--surface); stroke: var(--hairline-strong); stroke-width: 1; rx: 6; }
+  svg rect.hd { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; rx: 6; }
+  svg line.ll { stroke: var(--hairline-strong); stroke-width: 1; stroke-dasharray: 4 4; }
+  svg line.msg, svg path.msg, svg polyline.msg { stroke: currentColor; stroke-width: 1.3; fill: none; }
+  svg .msgacc { stroke: var(--accent); stroke-width: 1.6; }
+  svg line.ret { stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 5 4; }
+  svg rect.region { fill: none; stroke: var(--hairline-strong); stroke-dasharray: 6 5; rx: 10; }
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: color 120ms ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">Design Document · docs/design.html</p>
+  <h1>ascend-torchtitan 设计文档</h1>
+  <div class="meta">
+    <span>基线 <b>NIGHTLY</b>：torchtitan <b>13da2d77c</b> · torch <b>2.15.0.dev20260812</b> · torch_npu <b>master 源码构建</b> · CANN <b>9.1.0</b></span>
+    <span>硬件 <b>8× Ascend 910B2</b></span>
+    <span>更新 <b>2026-09-01</b></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <ol>
+    <li><a href="#s1">定位与设计目标</a></li>
+    <li><a href="#s2">总体架构：四条干预通道</a></li>
+    <li><a href="#s3">启动序列与副作用治理</a></li>
+    <li><a href="#s4">shim 机制</a></li>
+    <li><a href="#s5">override 机制</a></li>
+    <li><a href="#s6">配置装配：recipe 与 transforms</a></li>
+    <li><a href="#s7">四种手段对比与失败归因</a></li>
+    <li><a href="#s8">支撑系统</a></li>
+    <li><a href="#s9">不变量与强制机制</a></li>
+    <li><a href="#s10">已知薄弱点</a></li>
+  </ol>
+</nav>
+
+<section id="s1">
+  <h2><span class="no">§1</span>定位与设计目标</h2>
+  <p>ascend-torchtitan 是 <a href="https://github.com/pytorch/torchtitan">torchtitan</a> 的<b>树外昇腾 NPU 扩展</b>：torchtitan 按 commit SHA 作为已安装依赖固定，本仓绝不 fork、绝不改上游检出（ADR-001）。项目同时追三个快速移动的上游 —— torch nightly、torch_npu master（源码构建）、torchtitan main —— 因此真正的设计难题不是"写内核"，而是：</p>
+  <ul>
+    <li><b>薄。</b>本仓与上游之间的每一处接触都必须可枚举、可审计、可删除。补丁数量本身是健康度指标，目标趋近于零。</li>
+    <li><b>归因准确。</b>一个用例失败，必须能回答"这是谁的问题"：torchtitan、torch、torch_npu、CANN、三方依赖，还是我们自己。能力矩阵的红格如果分不清责任方，就没有价值（P12）。</li>
+    <li><b>缺陷回流上游。</b>torch_npu 的问题只能修、不能绕（P1/P9，项目红线）；修复以 patch + gitcode issue/PR 的形式送回 <code>gitcode.com/ascend/*</code>，合入即删。</li>
+    <li><b>响亮失败。</b>基础依赖（torch / torch_npu / torchtitan）硬导入、绝不 <code>try</code>（P14/ADR-007）；降级只允许发生在真正可选的加速包上，且必须 WARNING + provenance（ADR-004）。</li>
+  </ul>
+  <p>全部设计决策以编号原则 P0–P14 记录在 <code>docs/PRINCIPLES.md</code>，关键取舍各有一篇 ADR（<code>docs/adr/</code>）。本文按机制展开，重点是 §4 shim 与 §5 override。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="no">§2</span>总体架构：四条干预通道</h2>
+  <p>包内分五层：<code>compat/</code>（L0，受治理的 monkeypatch）、<code>kernels/</code>（L1，昇腾算子的 <code>@override</code> 工厂）、<code>graph/</code>（L2，torchair 图模式）、<code>models/</code>+<code>recipes/</code>（L3，配置装配）、<code>tools/</code>（L4，矩阵/诊断/溯源）。但比分层更重要的是：本仓触碰上游的方式<b>只有四条通道</b>，每条各有自己的治理约束与生命周期。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 940 470" role="img" aria-label="ascend_titan 包通过四条受治理的通道触碰上游：recipe/override 修改 torchtitan 配置树，shim 包装上游属性，kernels 调用 torch_npu 融合算子，patches 以 PR 形式回流 torch_npu">
+      <defs>
+        <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        <marker id="m1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--accent)"/></marker>
+      </defs>
+      <!-- 左：本仓 -->
+      <rect class="plain" x="24" y="36" width="304" height="308"/>
+      <text class="ttl" x="40" y="58">ascend_titan（本仓，薄插件）</text>
+      <rect class="box" x="40" y="68" width="272" height="36"/>
+      <text class="mono" x="52" y="90">入口 train.py · _bootstrap.setup()</text>
+      <rect class="box" x="40" y="112" width="272" height="36" style="stroke:var(--accent)"/>
+      <text class="mono" x="52" y="134">L0 compat/ — shim 注册表</text>
+      <rect class="box" x="40" y="156" width="272" height="36"/>
+      <text class="mono" x="52" y="178">L1 kernels/ — @override 工厂</text>
+      <rect class="box" x="40" y="200" width="272" height="36"/>
+      <text class="mono" x="52" y="222">L2 graph/ — torchair 后端</text>
+      <rect class="box" x="40" y="244" width="272" height="36" style="stroke:var(--accent)"/>
+      <text class="mono" x="52" y="266">L3 models/ · recipes/ — 装配</text>
+      <rect class="box" x="40" y="288" width="272" height="36"/>
+      <text class="mono" x="52" y="310">L4 tools/ — matrix·doctor·溯源</text>
+      <rect class="plain" x="24" y="380" width="304" height="52"/>
+      <text class="mono" x="40" y="402">patches/ — 在途 format-patch</text>
+      <text class="sm" x="40" y="420">torch_npu × 6 · op-plugin × 2（合入即删）</text>
+      <!-- 右：上游 -->
+      <rect class="plain" x="656" y="36" width="260" height="62"/>
+      <text class="ttl" x="672" y="60">torchtitan @ 13da2d77c</text>
+      <text class="sm" x="672" y="80">pip 按 SHA 安装 · 检出绝不修改</text>
+      <rect class="plain" x="656" y="132" width="260" height="62"/>
+      <text class="ttl" x="672" y="156">torch nightly</text>
+      <text class="sm" x="672" y="176">2.15.0.dev20260812（cpu wheel）</text>
+      <rect class="plain" x="656" y="228" width="260" height="62"/>
+      <text class="ttl" x="672" y="252">torch_npu master</text>
+      <text class="sm" x="672" y="272">源码构建 wheel · privateuse1="npu"</text>
+      <rect class="plain" x="656" y="336" width="260" height="62"/>
+      <text class="ttl" x="672" y="360">CANN 9.1.0 / 910B2</text>
+      <text class="sm" x="672" y="380">aclnn 算子库 · HCCL</text>
+      <line class="msg" x1="786" y1="98" x2="786" y2="128" marker-end="url(#m1)" style="stroke:var(--hairline-strong)"/>
+      <line class="msg" x1="786" y1="194" x2="786" y2="224" marker-end="url(#m1)" style="stroke:var(--hairline-strong)"/>
+      <line class="msg" x1="786" y1="290" x2="786" y2="332" marker-end="url(#m1)" style="stroke:var(--hairline-strong)"/>
+      <!-- 通道 -->
+      <line class="msg msgacc" x1="328" y1="130" x2="652" y2="58" marker-end="url(#m1a)"/>
+      <text class="acc" x="476" y="80" text-anchor="middle">② shim：setattr 包装（现存 3 条，目标 0）</text>
+      <line class="msg msgacc" x1="328" y1="262" x2="652" y2="86" marker-end="url(#m1a)"/>
+      <text class="acc" x="500" y="156" text-anchor="middle">① recipe 增量 + override 节点替换</text>
+      <line class="msg" x1="328" y1="174" x2="652" y2="258" marker-end="url(#m1)"/>
+      <text x="492" y="242" text-anchor="middle">③ torch_npu.npu_* 融合算子</text>
+      <line class="msg" x1="328" y1="406" x2="652" y2="284" marker-end="url(#m1)"/>
+      <text x="500" y="336" text-anchor="middle">④ 修复补丁 → gitcode issue + PR（P9）</text>
+      <line class="ret" x1="328" y1="306" x2="652" y2="164"/>
+      <text class="sm" x="336" y="292">constraints/：版本三元组 pin（P5/P11）</text>
+    </svg>
+    <figcaption><b>四条干预通道。</b>① 与 ② 是本文重点：① 在<b>配置层</b>换实现（上游自己提供的扩展点），② 在<b>代码层</b>打受治理的 monkeypatch（上游没留扩展点时的兜底）。③ 是正常的算子调用；④ 把 torch_npu 缺陷修好送回上游。虚线不是干预 —— <code>constraints/</code> 只做版本锁定。设计压力始终是把 ② 里的东西挪到 ① 去，把 ④ 清零。</figcaption>
+  </figure>
+
+  <div class="callout"><b>核心取舍（ADR-001 / ADR-006）：</b>不 fork 的代价是"上游一动我们就可能碎"，用三件事对冲 —— 按 SHA pin（P5）、nightly-first 基线让接口差最小化（P8）、以及下文所有机制在<b>失效时响亮报错</b>而不是静默漂移。</div>
+</section>
+
+<section id="s3">
+  <h2><span class="no">§3</span>启动序列与副作用治理</h2>
+  <p><code>import ascend_titan</code> 本身无任何副作用（硬规则，<code>tests/unit/test_import_purity.py</code> 强制）。全部副作用集中在一个函数 <code>_bootstrap.setup()</code>，而它必须先于第一次 <code>import torchtitan</code> 运行 —— 因为 <code>torchtitan/tools/utils.py</code> 在<b>模块导入时</b>就冻结 <code>device_type</code>，只有 torch_npu 已把自己注册为 privateuse1 后端，冻结的值才是 <code>"npu"</code>。入口 <code>python -m ascend_titan.train</code> 存在的意义就是保证这个顺序。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 950 560" role="img" aria-label="启动时序：train.main 先调 setup 完成 torch_npu 导入、设备校验与 shim 应用，之后才导入 torchtitan 并进入 Trainer">
+      <defs>
+        <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        <marker id="m2m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--muted)"/></marker>
+      </defs>
+      <rect class="hd" x="45" y="14" width="170" height="34"/>
+      <text class="mono" x="130" y="36" text-anchor="middle">train.main()</text>
+      <rect class="hd" x="240" y="14" width="180" height="34"/>
+      <text class="mono" x="330" y="36" text-anchor="middle">_bootstrap.setup()</text>
+      <rect class="hd" x="520" y="14" width="200" height="34"/>
+      <text class="mono" x="620" y="36" text-anchor="middle">compat.registry</text>
+      <rect class="hd" x="780" y="14" width="160" height="34"/>
+      <text class="mono" x="860" y="36" text-anchor="middle">torchtitan</text>
+      <line class="ll" x1="130" y1="48" x2="130" y2="548"/>
+      <line class="ll" x1="330" y1="48" x2="330" y2="548"/>
+      <line class="ll" x1="620" y1="48" x2="620" y2="548"/>
+      <line class="ll" x1="860" y1="48" x2="860" y2="548"/>
+
+      <line class="msg" x1="130" y1="88" x2="326" y2="88" marker-end="url(#m2)"/>
+      <text class="mono" x="228" y="80" text-anchor="middle">setup()</text>
+
+      <path class="msg" d="M330 112 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="376" y="122">import torch_npu（缺失 → ImportError，P14）</text>
+      <path class="msg" d="M330 146 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="376" y="156">探测 fla_npu（可选，失败只 WARNING）</text>
+      <path class="msg" d="M330 180 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="376" y="190">device_type ≠ "npu" → RuntimeError（早失败）</text>
+
+      <line class="msg" x1="330" y1="224" x2="616" y2="224" marker-end="url(#m2)"/>
+      <text class="mono" x="473" y="216" text-anchor="middle">apply_all()</text>
+      <path class="msg" d="M620 246 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="666" y="256">import shims/*，@shim 校验注册</text>
+      <path class="msg" d="M620 280 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="666" y="290">import 目标模块，取 original</text>
+      <path class="msg" d="M620 314 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="666" y="324">fn(original) → setattr 包装</text>
+      <line class="ret" x1="616" y1="348" x2="334" y2="348" marker-end="url(#m2m)"/>
+      <text class="sm" x="475" y="340" text-anchor="middle">list[Applied]</text>
+      <line class="ret" x1="326" y1="376" x2="134" y2="376" marker-end="url(#m2m)"/>
+      <text class="sm" x="230" y="368" text-anchor="middle">SetupReport（汇总日志）</text>
+
+      <line class="msg msgacc" x1="130" y1="412" x2="856" y2="412" marker-end="url(#m2)"/>
+      <text class="mono acc" x="493" y="404" text-anchor="middle">import torchtitan.train</text>
+      <text class="sm" x="493" y="428" text-anchor="middle">此后 torchtitan 各模块导入时读到的 device_type 均为 "npu"</text>
+      <line class="msg" x1="130" y1="448" x2="856" y2="448" marker-end="url(#m2)"/>
+      <text class="mono" x="493" y="440" text-anchor="middle">titan_main()</text>
+
+      <path class="msg" d="M860 470 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="852" y="480" text-anchor="end">Trainer(config) ← recipe 产出的 Trainer.Config</text>
+      <path class="msg msgacc" d="M860 504 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono acc" x="852" y="514" text-anchor="end">apply_overrides(config.override, config)　→ §5</text>
+      <path class="msg" d="M860 532 h38 v14 h-38" marker-end="url(#m2)"/>
+      <text class="mono" x="852" y="542" text-anchor="end">build() → 训练循环</text>
+
+      <line x1="96" y1="100" x2="96" y2="382" style="stroke:var(--accent);stroke-width:2"/>
+      <text class="acc sm" transform="rotate(-90 84 240)" x="84" y="240" text-anchor="middle">setup()：唯一副作用点（幂等）</text>
+    </svg>
+    <figcaption><b>启动时序。</b>shim 的目标模块（多为 <code>torchtitan.*</code> 子模块）在 <code>apply_all()</code> 里被首次导入 —— 这是安全的，因为 torch_npu 已注册。若用户先 import 了 torchtitan 再调 <code>setup()</code>，report 会带 WARNING 指明"shim 可能不生效，请改用 <code>python -m ascend_titan.train</code>"。设备不可用（卡被占、<code>ASCEND_RT_VISIBLE_DEVICES</code> 非法）在 setup 处直接 RuntimeError 并提示查 <code>npu-smi</code>，而不是留给几层之外的 <code>_cuda_setDevice</code> AttributeError。</figcaption>
+  </figure>
+
+  <p>环境开关 <code>ASCEND_TITAN_SKIP_SHIMS=1</code> 关闭全部 shim（golden 门禁用它证明"NIGHTLY 上不靠任何 shim 也能过"），<code>=a,b</code> 跳过指定条目（用于验证某个上游修复是否让 shim 变得多余）。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="no">§4</span>shim 机制（L0 <code>compat/</code>）</h2>
+  <p>shim 是<b>受治理的 monkeypatch</b>：当上游代码没留任何配置开关（P0 先查开关！）、问题又归因为 TT/TORCH 且在 NIGHTLY 上复现（P8）时，才允许用 <code>setattr</code> 包装一个上游属性。治理的关键在于：注册即校验、应用即留痕、上游修好即删。</p>
+
+  <h3>4.1 结构</h3>
+  <figure class="fig">
+    <svg viewBox="0 0 940 480" role="img" aria-label="shim 机制类图：shims 包里的函数经 @shim 装饰器注册为 Shim 记录，registry 模块负责发现、校验、应用并产出 Applied 审计记录">
+      <defs>
+        <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+      </defs>
+      <rect class="plain" x="36" y="48" width="300" height="200"/>
+      <text class="ttl" x="186" y="70" text-anchor="middle">«frozen dataclass» Shim</text>
+      <line x1="36" y1="80" x2="336" y2="80" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="50" y="100">name: str（= 函数名，唯一）</text>
+      <text class="mono" x="50" y="118">target: "module:attr[.attr]"</text>
+      <text class="mono" x="50" y="136">reason: str　—— 必填</text>
+      <text class="mono" x="50" y="154">upstream: URL | "draft:…" —— 必填</text>
+      <text class="mono" x="50" y="172">kind: Kind</text>
+      <text class="mono" x="50" y="190">why_not_wrap: str | None</text>
+      <line x1="36" y1="200" x2="336" y2="200" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="50" y="220">fn(original) → patched</text>
+      <text class="mono" x="50" y="238">owner(mod) · module · attr</text>
+
+      <rect class="plain" x="36" y="292" width="300" height="104"/>
+      <text class="ttl" x="186" y="314" text-anchor="middle">«Literal» Kind</text>
+      <line x1="36" y1="324" x2="336" y2="324" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="50" y="344">wrap　　 调用 original，继承上游改动</text>
+      <text class="mono" x="50" y="362">replace　必须给 why_not_wrap（P3）</text>
+      <text class="mono" x="50" y="380">polyfill　属性已存在则整条跳过</text>
+      <line class="ret" x1="186" y1="248" x2="186" y2="288" marker-end="url(#m3)"/>
+      <text class="sm" x="196" y="272">kind</text>
+
+      <rect class="plain" x="420" y="48" width="270" height="200"/>
+      <text class="ttl" x="555" y="70" text-anchor="middle">«module» compat.registry</text>
+      <line x1="420" y1="80" x2="690" y2="80" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="434" y="100">@shim(...) — import 时校验：</text>
+      <text class="sm" x="434" y="118">　upstream 链接必填（P4）· 重名报错</text>
+      <text class="mono" x="434" y="140">_discover() — 导入 shims/*</text>
+      <text class="mono" x="434" y="162">apply_all(only) — 幂等应用</text>
+      <text class="mono" x="434" y="184">applied() · list_shims()</text>
+      <text class="mono" x="434" y="206">_REGISTRY: dict[str, Shim]</text>
+      <text class="mono" x="434" y="228">_APPLIED: dict[str, Applied]</text>
+
+      <rect class="plain" x="750" y="48" width="160" height="100"/>
+      <text class="ttl" x="830" y="70" text-anchor="middle">«dataclass» Applied</text>
+      <line x1="750" y1="80" x2="910" y2="80" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="764" y="100">name</text>
+      <text class="mono" x="764" y="118">target</text>
+      <text class="mono" x="764" y="136">kind</text>
+
+      <rect class="plain" x="420" y="292" width="270" height="112"/>
+      <text class="ttl" x="555" y="314" text-anchor="middle">«package» compat/shims/</text>
+      <line x1="420" y1="324" x2="690" y2="324" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="434" y="344">flex_eager_when_deterministic</text>
+      <text class="mono" x="434" y="362">flex_block_mask_eager_lm</text>
+      <text class="mono" x="434" y="380">flex_block_mask_eager_vision</text>
+
+      <rect class="plain" x="750" y="292" width="160" height="112"/>
+      <text class="ttl" x="830" y="314" text-anchor="middle">上游目标属性</text>
+      <line x1="750" y1="324" x2="910" y2="324" style="stroke:var(--hairline-strong)"/>
+      <text class="sm" x="764" y="344">set_determinism 等</text>
+      <text class="sm" x="764" y="362">替换后打上</text>
+      <text class="mono" x="764" y="380">__ascend_shim__</text>
+
+      <line class="msg" x1="555" y1="288" x2="555" y2="252" marker-end="url(#m3)"/>
+      <text class="sm" x="565" y="274">@shim 注册</text>
+      <polygon points="420,120 408,114 396,120 408,126" fill="currentColor"/>
+      <line class="msg" x1="396" y1="120" x2="340" y2="120" marker-end="url(#m3)"/>
+      <text class="sm" x="368" y="110" text-anchor="middle">持有</text>
+      <line class="msg" x1="690" y1="96" x2="746" y2="96" marker-end="url(#m3)"/>
+      <text class="sm" x="718" y="86" text-anchor="middle">产出</text>
+      <line class="msg" x1="690" y1="190" x2="748" y2="300" marker-end="url(#m3)"/>
+      <text class="sm" x="704" y="256">setattr 包装</text>
+    </svg>
+    <figcaption><b>shim 机制类图。</b>一条 shim = 一个带 <code>@shim</code> 装饰器的函数（一个文件一条或一组紧密相关的）。装饰器在 <b>import 时</b>完成全部校验 —— 缺 reason、缺 upstream 链接、<code>replace</code> 没写 <code>why_not_wrap</code>、target 格式非法、重名，全都直接抛 <code>ShimError</code>，坏 shim 挂在 CI 而不是训练作业里。应用后在被替换对象上打 <code>__ascend_shim__</code> 标记，运行时可审计"这个函数被谁包过"。</figcaption>
+  </figure>
+
+  <h3>4.2 三种 kind 的语义</h3>
+  <ul>
+    <li><b><code>wrap</code>（默认，P3）：</b><code>fn(original)</code> 拿到当前实现并必须调用它 —— 外层加行为、内层跟着上游走，上游改进自动继承。</li>
+    <li><b><code>replace</code>：</b>整体换掉，会静默丢失上游后续改动，所以必须书面回答"为什么包不了"（<code>why_not_wrap</code>），并在 <code>docs/upstream-tracking.md</code> 写明什么上游改动能让它被删。</li>
+    <li><b><code>polyfill</code>：</b>补一个上游<b>还没有</b>的属性（典型是 nightly-only API），<code>fn(None)</code> 返回实现；属性一旦存在整条自动跳过 —— 升级 torch 后无需改代码，shim 自然失效。</li>
+  </ul>
+  <p>失效检测是双向的：目标属性<b>不存在</b>时（上游移走/改名），<code>apply_all</code> 抛 <code>ShimError</code> 并直接在报错里给出处置指引（"查 upstream 链接，重定向或删除"）—— 绝不静默跳过，那会让 shim 变成暗债。</p>
+
+  <h3>4.3 实例</h3>
+  <pre><code><span class="kw">@shim</span>(
+    target=<span class="cm">"torchtitan.distributed.utils:set_determinism"</span>,
+    reason=<span class="cm">"确定性模式下上游把 flex 编译掉，这条路在昇腾上不通；"
+           "上游对 ROCm 的处理就是改走 eager，昇腾缺这条分支"</span>,
+    upstream=<span class="cm">"draft:docs/issues/torchtitan.md#deterministic-flex-on-npu"</span>,
+    kind=<span class="cm">"wrap"</span>,
+)
+<span class="kw">def</span> flex_eager_when_deterministic(original):
+    <span class="kw">def</span> wrapper(*args, **kwargs):
+        result = original(*args, **kwargs)   <span class="cm"># 先跑上游，再补差异（P3）</span>
+        ...                                  <span class="cm"># 把 eager flex 装回去</span>
+        <span class="kw">return</span> result
+    <span class="kw">return</span> wrapper</code></pre>
+  <p>注意 <code>upstream</code> 用的是 <code>draft:</code> 形式：按 P10，<code>github.com/pytorch/*</code> 只读，不能真提 issue，于是链接指向 <code>docs/issues/</code> 里已起草好的 issue 正文 —— 治理约束（每条 shim 必须挂上游问题）在授权边界内仍然成立。</p>
+
+  <h3>4.4 生命周期</h3>
+  <figure class="fig">
+    <svg viewBox="0 0 950 300" role="img" aria-label="shim 生命周期：失败先归因，NPU 归因走 P9 补丁流程永不 shim；TT/TORCH 归因先在 NIGHTLY 复现、再查配置开关，都不行才写 shim，上游修复后删除">
+      <defs>
+        <marker id="m4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+      </defs>
+      <rect class="box" x="24" y="20" width="132" height="48"/>
+      <text x="90" y="41" text-anchor="middle">失败观测</text>
+      <text class="sm" x="90" y="58" text-anchor="middle">（矩阵红格）</text>
+      <line class="msg" x1="156" y1="60" x2="176" y2="80" marker-end="url(#m4)"/>
+      <polygon points="220,56 292,90 220,124 148,90" fill="var(--sunken)" stroke="currentColor" stroke-width="1"/>
+      <text x="220" y="95" text-anchor="middle">归因？</text>
+      <polyline class="msg" points="148,90 99,90 99,156" marker-end="url(#m4)" fill="none"/>
+      <rect class="box" x="24" y="160" width="150" height="56"/>
+      <text class="sm" x="99" y="182" text-anchor="middle">DEP / CANN / HARNESS</text>
+      <text class="sm" x="99" y="200" text-anchor="middle">只记录归因（🔴）</text>
+      <line class="msg" x1="220" y1="124" x2="220" y2="200" marker-end="url(#m4)"/>
+      <text class="sm" x="228" y="166">NPU / NPU-OP</text>
+      <rect class="box" x="120" y="204" width="310" height="76" style="stroke:var(--fail)"/>
+      <text x="136" y="228" style="fill:var(--fail)">P9 补丁流程（红线：永不 shim）</text>
+      <text class="sm" x="136" y="248">最小复现 → 修 torch_npu/op-plugin → 构建验证</text>
+      <text class="sm" x="136" y="266">→ patches/ → gitcode issue+PR → 合入删补丁</text>
+      <line class="msg" x1="292" y1="90" x2="336" y2="90" marker-end="url(#m4)"/>
+      <text class="sm" x="314" y="80" text-anchor="middle">TT / TORCH</text>
+      <polygon points="430,52 520,90 430,128 340,90" fill="var(--sunken)" stroke="currentColor" stroke-width="1"/>
+      <text x="430" y="86" text-anchor="middle">NIGHTLY</text>
+      <text x="430" y="103" text-anchor="middle">复现？(P8)</text>
+      <polyline class="msg" points="430,52 430,26 540,26" marker-end="url(#m4)" fill="none"/>
+      <text class="sm" x="446" y="20">否</text>
+      <rect class="box" x="544" y="4" width="180" height="44"/>
+      <text class="sm" x="634" y="30" text-anchor="middle">关闭 —— 版本差不是问题</text>
+      <line class="msg" x1="520" y1="90" x2="556" y2="90" marker-end="url(#m4)"/>
+      <text class="sm" x="538" y="80">是</text>
+      <polygon points="650,52 740,90 650,128 560,90" fill="var(--sunken)" stroke="currentColor" stroke-width="1"/>
+      <text x="650" y="86" text-anchor="middle">P0：有配置</text>
+      <text x="650" y="103" text-anchor="middle">开关？</text>
+      <line class="msg" x1="650" y1="128" x2="650" y2="160" marker-end="url(#m4)"/>
+      <text class="sm" x="658" y="150">有</text>
+      <rect class="box" x="560" y="164" width="180" height="48"/>
+      <text class="sm" x="650" y="192" text-anchor="middle">recipe / transforms 增量</text>
+      <line class="msg" x1="740" y1="90" x2="776" y2="90" marker-end="url(#m4)"/>
+      <text class="sm" x="756" y="80">无</text>
+      <rect class="box" x="780" y="60" width="156" height="64"/>
+      <text class="sm" x="858" y="82" text-anchor="middle">写 shim：挂 upstream</text>
+      <text class="sm" x="858" y="100" text-anchor="middle">链接 · 默认 wrap · 配单测</text>
+      <line class="msg" x1="858" y1="124" x2="858" y2="184" marker-end="url(#m4)"/>
+      <text class="sm" x="866" y="158">上游修复合入</text>
+      <rect class="box" x="780" y="188" width="156" height="48" style="stroke:var(--pass)"/>
+      <text class="sm" x="858" y="216" text-anchor="middle" style="fill:var(--pass)">删除 shim（目标：0 条）</text>
+    </svg>
+    <figcaption><b>一条 shim 从生到死。</b>写 shim 前有三道闸：归因不是 NPU（NPU 走 P9 补丁流程，红线）、在 NIGHTLY 基线复现（只在正式版 torch 出现的问题按 P8 直接关闭）、上游确实没有配置开关（P0）。删 shim 是值得庆祝的 PR —— 2026-08-30 迁到 nightly 基线时一次性删掉了 7/11 条补丁类内容。</figcaption>
+  </figure>
+</section>
+
+<section id="s5">
+  <h2><span class="no">§5</span>override 机制（L1 <code>kernels/</code>）</h2>
+  <p>override 是 torchtitan <b>自己提供</b>的扩展点（<code>torchtitan/config/override.py</code>）：在配置树构建之后、<code>build()</code> 之前，把任意 <code>Configurable.Config</code> 节点换成替代实现的 Config —— 不动上游任何代码。本仓的全部昇腾融合算子（attention、rope、rms_norm、swiglu、situ_glu、gdn、gdn_fla、kda）都通过这条通道接入，这也是 P6 的含义：<b>只 override 上游已有的 Config 节点</b>；计算没有节点时，推动上游抽一个出来，而不是替换父块（替换父块 = fork 了那个块）。</p>
+
+  <h3>5.1 结构</h3>
+  <figure class="fig">
+    <svg viewBox="0 0 960 540" role="img" aria-label="override 机制类图：上游 torchtitan 提供 override 装饰器、derive 与 apply_overrides；本仓 kernels 包的工厂注册到上游注册表，产出继承上游 Config 的 Ascend 替代节点">
+      <defs>
+        <marker id="m5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        <marker id="m5t" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M1 1L11 6L1 11z" fill="var(--surface)" stroke="currentColor" stroke-width="1.2"/></marker>
+      </defs>
+      <rect class="region" x="20" y="30" width="572" height="486"/>
+      <text class="ttl" x="36" y="54" style="fill:var(--muted)">torchtitan（固定上游）</text>
+      <rect class="plain" x="40" y="72" width="250" height="64"/>
+      <text class="ttl" x="165" y="94" text-anchor="middle">OverrideConfig</text>
+      <line x1="40" y1="102" x2="290" y2="102" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="54" y="124">imports: [target | (target, kw)]</text>
+      <rect class="plain" x="40" y="168" width="250" height="140"/>
+      <text class="ttl" x="165" y="190" text-anchor="middle">«dataclass» Override</text>
+      <line x1="40" y1="198" x2="290" y2="198" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="54" y="218">target_cls: type[Config]</text>
+      <text class="mono" x="54" y="236">factory(cfg, **kw) → Config</text>
+      <text class="mono" x="54" y="254">fqns: list[glob] | None</text>
+      <text class="mono" x="54" y="272">exact: bool</text>
+      <text class="mono" x="54" y="292">matches(fqn)　— fnmatch</text>
+      <rect class="plain" x="40" y="340" width="250" height="130"/>
+      <text class="ttl" x="165" y="362" text-anchor="middle">«module» config.override</text>
+      <line x1="40" y1="370" x2="290" y2="370" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="54" y="390">@override(target, fqns, exact)</text>
+      <text class="mono" x="54" y="408">derive(src, target_cls, **Δ)</text>
+      <text class="mono" x="54" y="426">apply_overrides(oc, root)</text>
+      <text class="mono" x="54" y="444">_REGISTRY: dict[str, Override]</text>
+
+      <rect class="plain" x="330" y="72" width="236" height="68"/>
+      <text class="ttl" x="448" y="94" text-anchor="middle">Configurable.Config</text>
+      <line x1="330" y1="102" x2="566" y2="102" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="344" y="124">traverse(cls)→(fqn,cfg,par,at)</text>
+      <rect class="plain" x="330" y="190" width="236" height="44"/>
+      <text class="ttl" x="448" y="217" text-anchor="middle">RMSNorm.Config</text>
+      <rect class="plain" x="330" y="270" width="236" height="64"/>
+      <text class="ttl" x="448" y="292" text-anchor="middle">Trainer.Config（树根）</text>
+      <line x1="330" y1="302" x2="566" y2="302" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="344" y="324">override: OverrideConfig · …</text>
+      <line class="msg" x1="400" y1="190" x2="400" y2="144" marker-end="url(#m5t)"/>
+      <line class="msg" x1="500" y1="270" x2="500" y2="144" marker-end="url(#m5t)"/>
+
+      <text class="ttl" x="630" y="54" style="fill:var(--accent)">ascend_titan.kernels（本仓 L1）</text>
+      <rect class="plain" x="630" y="72" width="300" height="104" style="stroke:var(--accent)"/>
+      <text class="ttl" x="780" y="94" text-anchor="middle">«package» kernels/</text>
+      <line x1="630" y1="102" x2="930" y2="102" style="stroke:var(--hairline-strong)"/>
+      <text class="mono" x="644" y="122">attention · rope · rms_norm · swiglu</text>
+      <text class="mono" x="644" y="140">situ_glu · gdn · gdn_fla · kda</text>
+      <text class="sm" x="644" y="160">_probe.require_op：缺算子即抛（P14）</text>
+      <rect class="plain" x="630" y="214" width="300" height="44" style="stroke:var(--accent)"/>
+      <text class="ttl" x="780" y="241" text-anchor="middle">AscendRMSNorm.Config</text>
+      <line class="msg" x1="630" y1="230" x2="570" y2="214" marker-end="url(#m5t)"/>
+      <text class="sm" x="588" y="256">继承</text>
+      <rect class="plain" x="630" y="300" width="300" height="88" style="stroke:var(--accent)"/>
+      <text class="mono acc" x="644" y="324">@override(target=RMSNorm.Config)</text>
+      <text class="mono" x="644" y="344">npu_rms_norm(cfg) →</text>
+      <text class="mono" x="644" y="362">　derive(cfg, AscendRMSNorm.Config)</text>
+      <line class="msg" x1="630" y1="352" x2="294" y2="390" marker-end="url(#m5)"/>
+      <text class="sm" x="452" y="360" text-anchor="middle">import 时注册，键 = module.function</text>
+      <line class="msg" x1="780" y1="300" x2="780" y2="262" marker-end="url(#m5)"/>
+      <text class="sm" x="790" y="284">产出</text>
+      <polyline class="ret" points="165,72 165,46 780,46 780,68" marker-end="url(#m5)" fill="none"/>
+      <text class="sm" x="470" y="40" text-anchor="middle">override.imports 按名激活（触发模块 import）</text>
+      <line class="msg" x1="290" y1="400" x2="396" y2="330" marker-end="url(#m5)"/>
+      <text class="sm" x="298" y="352">traverse + 原地替换</text>
+    </svg>
+    <figcaption><b>override 机制类图。</b>注册表、装饰器、冲突检测全在上游 —— 本仓只提供工厂和替代 Config（一律<b>子类化</b>被替换的上游 Config，配 <code>derive</code> 保证版本鲁棒：上游新增字段会被自动拷贝而不是静默回落默认值）。激活靠配置数据 <code>override.imports</code>，所以"装了哪些昇腾内核"在 recipe 里一处可见，并出现在运行日志 <code>[Override] …</code> 中。</figcaption>
+  </figure>
+
+  <h3>5.2 应用流程与冲突模型</h3>
+  <figure class="fig">
+    <svg viewBox="0 0 950 640" role="img" aria-label="override 应用时序：Trainer 初始化时 apply_overrides 导入工厂模块、精确查表、先遍历收集全部匹配、检查节点冲突，然后逐个调用工厂并原地替换配置节点">
+      <defs>
+        <marker id="m6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        <marker id="m6m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--muted)"/></marker>
+      </defs>
+      <rect class="hd" x="30" y="14" width="160" height="34"/>
+      <text class="mono" x="110" y="36" text-anchor="middle">Trainer.__init__</text>
+      <rect class="hd" x="270" y="14" width="180" height="34"/>
+      <text class="mono" x="360" y="36" text-anchor="middle">apply_overrides</text>
+      <rect class="hd" x="530" y="14" width="180" height="34"/>
+      <text class="mono" x="620" y="36" text-anchor="middle">kernels.rms_norm</text>
+      <rect class="hd" x="820" y="14" width="120" height="34"/>
+      <text class="mono" x="880" y="36" text-anchor="middle">config 树</text>
+      <line class="ll" x1="110" y1="48" x2="110" y2="612"/>
+      <line class="ll" x1="360" y1="48" x2="360" y2="612"/>
+      <line class="ll" x1="620" y1="48" x2="620" y2="612"/>
+      <line class="ll" x1="880" y1="48" x2="880" y2="612"/>
+
+      <line class="msg" x1="110" y1="88" x2="356" y2="88" marker-end="url(#m6)"/>
+      <text class="mono" x="235" y="80" text-anchor="middle">apply_overrides(override, root)</text>
+      <path class="msg" d="M360 112 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono" x="406" y="122">解析 imports → (module, function)</text>
+      <line class="msg" x1="360" y1="152" x2="616" y2="152" marker-end="url(#m6)"/>
+      <text class="mono" x="488" y="144" text-anchor="middle">importlib.import_module</text>
+      <path class="msg" d="M620 176 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono" x="666" y="186">require_op：缺算子 → MissingNpuOpError</text>
+      <path class="msg" d="M620 210 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono" x="666" y="220">factory 注册进 _REGISTRY</text>
+      <line class="ret" x1="616" y1="244" x2="364" y2="244" marker-end="url(#m6m)"/>
+      <path class="msg" d="M360 272 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono" x="406" y="282">_resolve_active：精确查表</text>
+      <text class="sm" x="406" y="298">未注册 / 重复列出 → ValueError</text>
+      <line class="msg" x1="360" y1="326" x2="876" y2="326" marker-end="url(#m6)"/>
+      <text class="mono" x="618" y="318" text-anchor="middle">traverse(RMSNorm.Config)</text>
+      <line class="ret" x1="876" y1="356" x2="364" y2="356" marker-end="url(#m6m)"/>
+      <text class="sm" x="618" y="348" text-anchor="middle">匹配节点 (fqn, cfg, parent, attr)</text>
+      <path class="msg msgacc" d="M360 384 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono acc" x="406" y="394">_collect_claims：先收集全部匹配</text>
+      <text class="sm" x="406" y="410">再变更 —— 应用顺序无关</text>
+      <path class="msg msgacc" d="M360 436 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono acc" x="406" y="446">_check_node_conflicts</text>
+      <text class="sm" x="406" y="462">同节点 / 祖先冲突 → ValueError</text>
+      <line class="msg" x1="360" y1="490" x2="616" y2="490" marker-end="url(#m6)"/>
+      <text class="mono" x="488" y="482" text-anchor="middle">factory(cfg, **kwargs)</text>
+      <path class="msg" d="M620 512 h38 v14 h-38" marker-end="url(#m6)"/>
+      <text class="mono" x="666" y="522">derive(cfg, AscendRMSNorm.Config)</text>
+      <text class="sm" x="666" y="538">同名字段拷贝 + 显式增量（版本鲁棒）</text>
+      <line class="ret" x1="616" y1="558" x2="364" y2="558" marker-end="url(#m6m)"/>
+      <text class="sm" x="488" y="550" text-anchor="middle">new_cfg</text>
+      <line class="msg" x1="360" y1="582" x2="876" y2="582" marker-end="url(#m6)"/>
+      <text class="mono" x="618" y="574" text-anchor="middle">setattr(parent, attr, new_cfg)</text>
+      <line class="ret" x1="356" y1="606" x2="114" y2="606" marker-end="url(#m6m)"/>
+      <text class="sm" x="235" y="598" text-anchor="middle">[Override] 日志；0 替换却有 imports → WARNING</text>
+    </svg>
+    <figcaption><b>override 应用时序</b>（调用点 <code>torchtitan/trainer.py:348</code>，配置构建之后、<code>build()</code> 之前）。两处高亮是机制的关键：<b>先收集后变更</b>让替换互相不可见（一个 override 不会影响另一个的匹配），<b>逐节点冲突检测</b>把"两个 override 抢同一个节点"和"一个 override 认领另一个节点的祖先"都变成启动期 ValueError 而不是运行期未定义行为。</figcaption>
+  </figure>
+
+  <p>冲突模型是<b>按节点</b>而不是按类的：同一个 Config 类的两个 override 只要 <code>fqns</code> glob 不相交就可以共存（比如"只在后半层用融合 MoE"）。祖先规则在本仓有个真实案例（OURS-9）：上游 <code>fused_mla</code> override 认领整个 <code>layers.N.attention</code> 块，是内层 attention 节点和 RoPE 节点的共同祖先 —— 所以 <code>transforms.npu_minimal</code> 检测到这类块级 override 时，会同时跳过我们的 attention 和 rope 两条 override，并在 <code>Applied.notes</code> 里说明原因。</p>
+
+  <h3>5.3 本仓侧的写法约束</h3>
+  <pre><code><span class="cm"># kernels/rms_norm.py —— 最小完整实例</span>
+<span class="kw">from</span> ascend_titan.kernels._probe <span class="kw">import</span> require_op, torch_npu
+
+require_op(<span class="cm">"npu_rms_norm"</span>)          <span class="cm"># P14：缺算子在 import 处抛 MissingNpuOpError</span>
+
+<span class="kw">class</span> AscendRMSNorm(RMSNorm):        <span class="cm"># 子类化上游模块，参数名/形状/权重布局不变</span>
+    <span class="kw">class</span> Config(RMSNorm.Config): ...
+
+    <span class="kw">def</span> forward(self, x):
+        <span class="kw">if</span> self.weight <span class="kw">is</span> None:
+            <span class="kw">return</span> super().forward(x)   <span class="cm"># 内核要 gamma，无仿射时走上游</span>
+        <span class="kw">return</span> torch_npu.npu_rms_norm(x, self.weight, eps)[0]
+
+<span class="kw">@override</span>(target=RMSNorm.Config, description=<span class="cm">"RMSNorm via torch_npu.npu_rms_norm"</span>)
+<span class="kw">def</span> npu_rms_norm(cfg: RMSNorm.Config) -&gt; AscendRMSNorm.Config:
+    <span class="kw">return</span> derive(cfg, AscendRMSNorm.Config)</code></pre>
+  <p>规则集中在 <code>.claude/rules/kernels.md</code>，要点：</p>
+  <ul>
+    <li><b>drop-in 契约。</b>替代实现保持参数名、形状、checkpoint 布局与上游一致；确需改布局时用 state_dict hook 桥接（参照上游 <code>fused_swiglu</code>）。</li>
+    <li><b>自定义计算走 <code>torch.library.custom_op</code></b>，带 <code>register_fake</code> 与 <code>register_autograd</code>，配 <code>opcheck</code> 测试和对上游 eager 实现的对拍测试。典型收益见 <code>kernels/attention.py</code>：<code>npu_fusion_attention</code> 需要 host 端的序列偏移，<code>.tolist()</code> 在编译区里会变成 unbacked SymInt 破坏 tracing（OURS-8）—— 把 D2H 收进 custom_op 内部，对 dynamo 不透明，编译与 eager 同一条代码路径。</li>
+    <li><b>依赖分两级（P14 / ADR-004）。</b>torch_npu 与其算子是基础依赖：<code>require_op</code> 缺失即抛，错误信息直接指向 P9 流程（"这是昇腾侧缺口，去修 torch_npu，不要在这降级"）。只有需要单独构建、不在基线内的加速包（ops-nn、fla-npu、Triton-Ascend）走 <code>optional_module</code> + WARNING 降级，且降级必须被 provenance 记录（P7）。</li>
+  </ul>
+</section>
+
+<section id="s6">
+  <h2><span class="no">§6</span>配置装配：recipe 与 transforms（L3）</h2>
+  <p>override 决定"节点换成什么"，L3 决定"哪些配置带哪些 override 跑"。布局按<b>内容/机制</b>切开：每个模型一个包 <code>models/&lt;model&gt;/</code>（<code>recipes.py</code> 支持入口 + 可选 <code>probes.py</code> 测量探针 + 必需 README），跨模型机制在 <code>recipes/</code>（<code>transforms.py</code>、动态矩阵 recipe）。<code>models/registry.py</code> 是纯数据的模型状态表（R1–R8 判据逐项记录，不 import torch）。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 940 220" role="img" aria-label="配置装配流水线：上游 config_registry 产出配置，recipe 施加增量；矩阵扫描则走 transforms 的 npu_minimal 或 npu_fused；最终 Trainer.Config 带 override.imports 进入 apply_overrides">
+      <defs>
+        <marker id="m7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+      </defs>
+      <rect class="box" x="20" y="98" width="168" height="64"/>
+      <text class="mono" x="104" y="124" text-anchor="middle">上游 config_registry()</text>
+      <text class="sm" x="104" y="144" text-anchor="middle">qwen3_debugmodel() 等</text>
+      <line class="msg" x1="188" y1="130" x2="226" y2="130" marker-end="url(#m7)"/>
+      <rect class="box" x="230" y="98" width="180" height="64" style="stroke:var(--accent)"/>
+      <text class="mono" x="320" y="124" text-anchor="middle">models/&lt;m&gt;/recipes.py</text>
+      <text class="sm" x="320" y="144" text-anchor="middle"># DELTA n: 可审计增量</text>
+      <line class="msg" x1="410" y1="130" x2="596" y2="130" marker-end="url(#m7)"/>
+      <text class="sm" x="503" y="150" text-anchor="middle">支持入口（人跑）</text>
+      <rect class="box" x="330" y="8" width="270" height="52"/>
+      <text class="mono" x="465" y="30" text-anchor="middle">矩阵：transforms.npu_minimal</text>
+      <text class="sm" x="465" y="48" text-anchor="middle">（+ npu_fused，opt-in，P12）</text>
+      <polyline class="msg" points="330,98 358,64" marker-end="url(#m7)" fill="none"/>
+      <text class="sm" x="300" y="76" text-anchor="middle">矩阵扫描</text>
+      <line class="msg" x1="600" y1="46" x2="656" y2="92" marker-end="url(#m7)"/>
+      <rect class="box" x="600" y="98" width="160" height="64"/>
+      <text class="mono" x="680" y="124" text-anchor="middle">Trainer.Config</text>
+      <text class="sm" x="680" y="144" text-anchor="middle">override.imports 就位</text>
+      <line class="msg" x1="760" y1="130" x2="796" y2="130" marker-end="url(#m7)"/>
+      <rect class="box" x="800" y="98" width="120" height="64"/>
+      <text class="mono" x="860" y="124" text-anchor="middle">apply_overrides</text>
+      <text class="sm" x="860" y="144" text-anchor="middle">→ 模型实例</text>
+    </svg>
+    <figcaption><b>配置装配流水线。</b>两条路汇到同一个 <code>Trainer.Config</code>：recipe 是给人跑的支持入口，transforms 是矩阵批量测量上游用例的通用变换 —— 后者按类型遍历配置树原地改写，不重建 model spec，所以任何上游配置（包括上游自己的集成测试用例）都能搬到 NPU 上测。</figcaption>
+  </figure>
+
+  <h3>6.1 recipe：增量，不是拷贝</h3>
+  <pre><code><span class="kw">def</span> qwen3_debugmodel_npu() -&gt; Trainer.Config:
+    config = qwen3_debugmodel()          <span class="cm"># 必须调上游函数起手（test_recipe_is_delta_not_copy）</span>
+
+    <span class="cm"># DELTA 1: varlen 注意力节点 + 昇腾融合注意力 override（矩阵格：attention/ascend_fusion）</span>
+    config.model_spec = model_registry(<span class="cm">"debugmodel"</span>, attn_backend=<span class="cm">"varlen"</span>)
+    config.override.imports = [ATTENTION_OVERRIDE]
+
+    <span class="cm"># DELTA 2: 冒烟运行不做 checkpoint I/O（DCP-on-NPU 是独立矩阵格）</span>
+    config.checkpoint.enable = False
+    <span class="kw">return</span> config</code></pre>
+  <p>每条增量带 <code>DELTA n</code> 注释、对应一个矩阵格。参考路径（qwen3）现在距离 stock 上游只有这两条增量 —— 这是 P12 持续收缩的结果：凡是版本差造成的增量都随 nightly-first 删除，golden 重录后逐位一致。</p>
+
+  <h3>6.2 npu_minimal 与 npu_fused 的分界（P12）</h3>
+  <ul>
+    <li><b><code>npu_minimal</code></b>：只含"不加就跑不起来"的增量，矩阵默认施加。当前两条：flex→varlen 节点转换（按<b>特性探测</b>门控 —— 设备白名单已解除<b>且</b> inductor 有可用后端才保留 flex；探测函数注明 issue ID 和消失条件）、复数 RoPE → 实数 cache（NPU-3）。目标态是恒等变换。</li>
+    <li><b><code>npu_fused</code></b>：性能 override（融合 RMSNorm、融合 GDN 等），永远 opt-in（<code>--mode fused</code>）、永远不进测量基线 —— 否则红格分不清"上游问题"还是"我们的内核问题"。数值与非融合路径差在 bf16 舍入级，融合 recipe 因此各自持有 golden。</li>
+  </ul>
+</section>
+
+<section id="s7">
+  <h2><span class="no">§7</span>四种手段对比与失败归因</h2>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>手段</th><th>作用点</th><th>什么时候用</th><th>治理约束</th><th>生命周期</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="tag info">recipe / transforms</span></td>
+          <td>配置数据</td>
+          <td>上游已有开关或节点可选（P0 首选）</td>
+          <td>增量必须可审计（DELTA 注释 / issue ID / 特性探测消失条件）</td>
+          <td>minimal 目标 = 恒等变换</td>
+        </tr>
+        <tr>
+          <td><span class="tag info">override</span></td>
+          <td>配置树节点</td>
+          <td>用昇腾实现替换某个 <code>Configurable</code> 节点</td>
+          <td>只打已有节点（P6）· drop-in 契约 · 对拍 + opcheck</td>
+          <td>长期存在（这是正当的扩展点）</td>
+        </tr>
+        <tr>
+          <td><span class="tag warn">shim</span></td>
+          <td>上游代码属性</td>
+          <td>TT/TORCH 缺陷，NIGHTLY 复现，且无开关</td>
+          <td>upstream 链接必填 · 默认 wrap · replace 要 why_not_wrap</td>
+          <td>上游修好即删（现存 3，目标 0）</td>
+        </tr>
+        <tr>
+          <td><span class="tag bad">patch</span></td>
+          <td>torch_npu / op-plugin 源码</td>
+          <td>NPU 归因缺陷（<b>唯一</b>合法处置，P1/P9）</td>
+          <td>最小复现 + UT + 构建验证 + gitcode issue/PR + STATUS.md</td>
+          <td>合入即删，升 <code>torch_npu.sha</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>四条通道的入口由统一的归因流程决定（traceback 首个非框架帧定责，规则数据化在 <code>tools/matrix/triage.toml</code>，32 条，首条匹配胜出）：</p>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>信号</th><th>归因</th><th>处置</th></tr></thead>
+      <tbody>
+        <tr><td><code>torch_npu/…</code>、<code>aclnnXxx failed</code></td><td><span class="tag bad">NPU / NPU-OP</span></td><td>P9 补丁全流程，禁止任何绕过</td></tr>
+        <tr><td><code>torch/</code> 自身、<code>torchtitan/…</code>（nightly-only API、cuda 字样）</td><td><span class="tag warn">TORCH / TT</span></td><td>先 NIGHTLY 复现（P8）→ recipe 增量或 shim；修复方案存 <code>patches/evidence/</code>，永不应用（P10）</td></tr>
+        <tr><td>attn_gym / helion / cutlass / fla …</td><td><span class="tag info">DEP</span></td><td>记录；昇腾替代是 L1 任务</td></tr>
+        <tr><td>CANN 错误码（EZ9999、EI0002 …）</td><td><span class="tag info">CANN</span></td><td>记录错误码，停（多为硬件/CANN 版本能力）</td></tr>
+        <tr><td>EI0020 端口已绑定</td><td><span class="tag info">HARNESS</span></td><td>同卡有其它 HCCL 作业，重跑</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="no">§8</span>支撑系统（L4 与仓库层）</h2>
+  <ul>
+    <li><b>能力矩阵</b>（<code>tools/matrix/</code>：triage / cases / runner / report / cli）：把上游 <code>tests/integration_tests</code> 的用例搬到 NPU 批量扫描，产出三态格子（🟢 / 🔴 附归因 / ⚪ 未评估，P2）。2026-08-30 全量：61 用例 28🟢 / 28🔴 / 5⚪，红格归因全部为外因（CANN、DEP），<code>NPU</code>/<code>OURS</code> 类为 0。归因规则是数据（<code>triage.toml</code>），加规则不动 Python。</li>
+    <li><b>golden 曲线</b>（<code>tests/assets/losses/npu/</code>）：确定性模式下逐位冻结的 loss 曲线，文件名带完整版本元组；<code>check_golden.sh</code> 在 <code>ASCEND_TITAN_SKIP_SHIMS=1</code> 下运行 —— 基线正确性不依赖任何 shim。</li>
+    <li><b>provenance</b>（<code>tools/provenance.py</code>）：运行时枚举实际生效的 Ascend 节点与降级情况；没有 provenance 表的 benchmark 不收（P7）。</li>
+    <li><b>版本三元组</b>（<code>constraints/</code>）：<code>nightly.txt</code> + <code>torchtitan.sha</code> + <code>torch_npu.sha</code> 是唯一事实来源（P11）；三者一起升级，走附带全量矩阵结果的 PR（P5）。</li>
+    <li><b>问题状态</b>：唯一事实来源是 <code>docs/issues/STATUS.md</code>，其它文档只引用 ID；<code>tests/unit/test_patches_and_status.py</code> 强制每个在途补丁头部携带 issue/PR 链接且与 STATUS 行一致。</li>
+    <li><b>CI</b>：<code>ci.yml</code>（CPU 单测 + lint）与 <code>npu-nightly.yml</code>；NPU 侧真机验证依赖开发容器 8× 910B2。</li>
+  </ul>
+</section>
+
+<section id="s9">
+  <h2><span class="no">§9</span>不变量与强制机制</h2>
+  <p>原则不靠自觉，靠测试和注册表在结构上强制 —— 这是本仓设计里最值得保留的部分：</p>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>不变量</th><th>原则</th><th>强制机制</th></tr></thead>
+      <tbody>
+        <tr><td><code>import ascend_titan</code> 无副作用</td><td>—</td><td><code>tests/unit/test_import_purity.py</code></td></tr>
+        <tr><td>每条 shim 挂上游链接；replace 必须说明</td><td>P3 / P4</td><td><code>@shim</code> 装饰器 import 时抛 <code>ShimError</code></td></tr>
+        <tr><td>shim 目标失效必须暴露</td><td>P4</td><td><code>apply_all</code> 对缺失属性抛错并给处置指引</td></tr>
+        <tr><td>recipe 是增量不是拷贝</td><td>—</td><td><code>test_recipe_is_delta_not_copy</code>（禁止从零构造 <code>Trainer.Config</code>）</td></tr>
+        <tr><td>参考 recipe 只有两条增量</td><td>P12</td><td><code>test_reference_recipe_keeps_only_two_deltas</code></td></tr>
+        <tr><td>每个模型包必有 README 且已登记</td><td>—</td><td><code>tests/unit/test_models_registry.py</code></td></tr>
+        <tr><td>在途补丁 ↔ issue/PR ↔ STATUS 三方一致</td><td>P9 / P11</td><td><code>tests/unit/test_patches_and_status.py</code></td></tr>
+        <tr><td>基线数值逐位可复现，且不依赖 shim</td><td>P13</td><td>golden 冻结曲线 + <code>SKIP_SHIMS=1</code> 门禁</td></tr>
+        <tr><td>基础依赖绝不 try import</td><td>P14</td><td><code>_probe.require_op</code> / 硬 import + code review 规则</td></tr>
+        <tr><td>override 节点冲突在启动期暴露</td><td>P6</td><td>上游 <code>_check_node_conflicts</code>（同节点 / 祖先）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="no">§10</span>已知薄弱点</h2>
+  <p>2026-09-01 评审结论：架构判断（薄插件、不 fork、响亮降级、nightly-first）无需返工。评审列出的债务已在 <code>2f072d3</code> / <code>1722809</code> 两次简化中清理，下面是清理内容与仍然开放的判断题。</p>
+  <h3>已清理</h3>
+  <ul>
+    <li><b>override 路径常量</b>收敛到 <code>kernels/__init__.py</code> 唯一定义（原先 5 处字面量），<code>test_override_paths</code> 双向防漂移——首跑即抓到 kimi_k3 一个从未使用的死常量。</li>
+    <li><b><code>tests/repro/</code> 生命周期</b>落地：30 个文件删到 4 个，保留的每个都在 README 里写明挂靠的 issue / 文档，挂靠失效即删；一次性探索脚本改进 <code>outputs/</code>（gitignore）。</li>
+    <li><b>判据漂移</b>堵上：<code>ModelEntry.graded_status</code> 原本是死代码，现在是 <code>table()</code> 的取值来源；两条新不变量测试要求手写 <code>status</code> 等于 R1–R8 推导值、且有判据的模型必须指向真实存在的证据文件（首跑即抓到 qwen3_5 漏填 <code>evidence</code>）。</li>
+    <li><b>重名 <code>Applied</code></b>：<code>recipes/transforms</code> 的那个改名 <code>TransformReport</code>。</li>
+    <li><b>重复条件与重复代码块</b>：<code>_bootstrap</code> 里 <code>device_type != "npu"</code> 判两次（前 raise 后 warn）合并为一处，死 warning 与恒为 <code>True</code> 的 <code>torch_npu_imported</code> 字段删除；<code>registry.apply_all</code> 的重复报错文案与 polyfill／wrap 两条重复的记账尾巴合并；<code>transforms</code> 三处"未存在就追加"收敛为 <code>add_override()</code>。</li>
+    <li><b>违规兜底</b>：<code>bench.py</code> 不再吞 provenance 异常（P7：没有 provenance 表的基线不是结果）；<code>_bootstrap</code> 删掉 nightly 基线上不可能触发的旧 torch 兜底（P8）。死函数 <code>registry.applied()</code>、<code>ModelEntry.has_package</code> 删除。</li>
+  </ul>
+  <h3>仍然开放</h3>
+  <ol>
+    <li><b><code>_KEEP_FLEX_FQNS</code> 用 fqn 子串匹配视觉塔。</b>上游改名即静默失效；更稳的是按 mask 类型（BlockMask）探测。矩阵扫描能兜住，优先级低。</li>
+    <li><b><code>kind="polyfill"</code> 在本仓被 CI 禁止</b>（<code>test_no_polyfills_remain</code>：nightly-first 之后不该再有为旧 torch 补 API 的 polyfill），机制却仍保留。这不是疏漏而是刻意：迁移目标 TorchTitanTurbo 的 <code>graph_trainer/_compat.py</code> 正在手写这类补丁，polyfill 是它需要的受治理形式。删与不删取决于迁移后的版本 track。</li>
+    <li><b><code>qwen3_5/probes.py</code> 的 lr 夹逼实验</b>（<code>lr_5e4</code> / <code>lr_1e3</code>）只有 CLI 入口、无文档引用。成对保留，等那个 lr 问题结论落到 docs 后一起删。</li>
+  </ol>
+</section>
+
+<footer class="doc">
+  <p>来源：docs/PRINCIPLES.md（P0–P14）· docs/adr/ADR-001…007 · CLAUDE.md · ascend_titan/ 源码（2026-09-01 检出）。问题状态以 docs/issues/STATUS.md 为准，本文只引用 ID。</p>
+</footer>
+
+</div>
+</body>
+</html>
