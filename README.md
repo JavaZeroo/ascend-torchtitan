@@ -110,6 +110,10 @@ MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_27b_npu       NPU=8 ./scripts/r
 MODULE=ascend_titan.models.qwen3_5 CONFIG=qwen35_397b_a17b_npu NPU=8 ./scripts/run_train.sh
 
 python -c "import ascend_titan.models.qwen3_5 as m; print(dir(m))"   # 列出全部可用入口
+
+# 并行度也不写 recipe，命令行调
+MODULE=ascend_titan.models.qwen3 CONFIG=qwen3_0_6b_npu NPU=8 ./scripts/run_train.sh \
+    --parallelism.data_parallel_shard_degree 4 --parallelism.tensor_parallel_degree 2
 ```
 
 上游新增一个尺寸，我们这边零改动。手写的 recipe 只在需要**额外**东西时才存在

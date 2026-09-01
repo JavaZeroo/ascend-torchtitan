@@ -107,8 +107,8 @@ MODULE=ascend_titan.recipes.matrix CONFIG=<upstream.module>__<fn>__stock ...
 
 | 形式 | 含义 |
 |---|---|
-| `<model>_<flavor>_npu` | 该模型在昇腾上的参考路径。`<flavor>` = 上游 config registry 的名字（`debugmodel`、`0_6b`…） |
-| `..._npu_<variant>` | 并行或算子增量：`fsdp2`、`fused`、`fused_fsdp2` |
+| `<model>_<flavor>_npu` | 该模型在昇腾上的参考路径。**通常是自动生成的**（上游任一 flavor + `npu_deltas`）；真实尺寸的 tokenizer 由 `HF_REPOS` 表提供 |
+| `..._npu_<variant>` | **只用于算子/数据组合**（`fused`、`text`）。并行度**不写 recipe**——用 `--parallelism.*`；golden 用 `GOLDEN=<名字> ./scripts/check_golden.sh <config> --parallelism...` 校验 |
 | `<model>_<flavor>_stock_npu` | 零 override 的上游路径（llama3 用这个形式） |
 | probes.py 里的任何函数 | 只用于测量，**不是** recipe |
 

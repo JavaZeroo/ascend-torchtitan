@@ -12,21 +12,15 @@ from torchtitan.models.qwen3_5 import config_registry as _upstream
 from ascend_titan.models._auto import npu_entry_points
 from ascend_titan.models.qwen3_5.recipes import (
     npu_deltas,
-    qwen35_0_8b_npu,
-    qwen35_0_8b_npu_fsdp2,
     qwen35_0_8b_npu_fused,
     qwen35_debugmodel_npu,
-    qwen35_debugmodel_npu_fsdp2,
     qwen35_debugmodel_npu_text,
 )
 
 __getattr__, __dir__ = npu_entry_points(_upstream, npu_deltas)
 
 __all__ = [
-    "qwen35_0_8b_npu",
-    "qwen35_0_8b_npu_fsdp2",
     "qwen35_0_8b_npu_fused",
     "qwen35_debugmodel_npu",
-    "qwen35_debugmodel_npu_fsdp2",
     "qwen35_debugmodel_npu_text",
 ]

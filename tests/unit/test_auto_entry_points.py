@@ -45,11 +45,13 @@ def test_entry_point_applies_the_family_deltas():
         return {"name": "a"}
 
     mod = _fake_upstream(flavor_a=flavor_a)
-    getattr_, dir_ = _auto.npu_entry_points(mod, lambda cfg: applied.append(cfg["name"]))
+    getattr_, dir_ = _auto.npu_entry_points(mod, lambda cfg, flavor: applied.append(flavor))
 
     assert dir_() == ["flavor_a_npu"]
     build = getattr_("flavor_a_npu")
-    assert build() == {"name": "a"} and applied == ["a"]
+    # the family declaration is handed the flavor name, so per-size data
+    # (which HF tokenizer a real size uses) stays a table lookup, not a function
+    assert build() == {"name": "a"} and applied == ["flavor_a"]
 
     with pytest.raises(AttributeError, match="has no config 'nope'"):
         getattr_("nope_npu")
@@ -71,10 +73,57 @@ def test_every_upstream_qwen3_5_flavor_is_reachable_and_gets_the_gdn_override():
 
 
 def test_a_hand_written_recipe_wins_over_the_generated_one():
-    """Module dict beats __getattr__, so a curated preset is never shadowed."""
+    """Module dict beats __getattr__, so a curated preset is never shadowed.
+
+    Only three qwen3_5 entries are still hand-written; the rest (including the
+    real-size ``qwen35_0_8b_npu``) are generated, which is the point.
+    """
     pytest.importorskip("fla", reason="pip install fla-core (qwen3_5 extra)")
     import ascend_titan.models.qwen3_5 as pkg
 
-    assert pkg.qwen35_0_8b_npu.__module__.endswith("recipes")
-    # the curated one carries deltas the generated entry point does not
-    assert pkg.qwen35_0_8b_npu().dataloader.collator is not None
+    # curated: swaps in the fused GDN sibling, which no generated entry does
+    from ascend_titan.kernels import GDN_FUSED_OVERRIDE
+
+    assert pkg.qwen35_0_8b_npu_fused.__module__.endswith("recipes")
+    assert GDN_FUSED_OVERRIDE in pkg.qwen35_0_8b_npu_fused().override.imports
+
+    # generated: same real assets, without a function existing for it
+    generated = pkg.qwen35_0_8b_npu
+    assert generated.__name__ == "qwen35_0_8b_npu"
+    assert "Qwen3.5-0.8B" in generated().hf_assets_path
+
+
+def test_real_size_assets_are_a_table_lookup_not_a_function():
+    """Adding a real size should be one line in HF_REPOS, not another function."""
+    pytest.importorskip("fla", reason="pip install fla-core (qwen3_5 extra)")
+    import ascend_titan.models.qwen3 as p3
+    import ascend_titan.models.qwen3_5 as p35
+
+    for pkg in (p3, p35):
+        repos = pkg.recipes.HF_REPOS
+        assert repos, "family must declare its real-size tokenizers"
+        for flavor in repos:
+            entry = getattr(pkg, f"{flavor}_npu")
+            assert callable(entry), f"{flavor} is not an upstream flavor: dead HF_REPOS row"
+
+
+def test_no_parallelism_only_recipes_remain():
+    """Parallelism is CLI-addressable, so one function per layout is copy-paste.
+
+    Text-only check: importing the model packages would drag in optional extras.
+    """
+    import re
+    from pathlib import Path
+
+    keep = ("config.parallelism", "config =", "return", "npu_deltas(", "_use_real_assets(")
+    offenders = []
+    for path in sorted(Path(_auto.__file__).parent.rglob("recipes.py")):
+        for match in re.finditer(r"^def (\w+)\(.*?(?=^def |\Z)", path.read_text(), re.M | re.S):
+            name, body = match.group(1), match.group(0)
+            if not name.endswith(("_fsdp2", "_tp2", "_pp2", "_ep2")):
+                continue
+            lines = [ln.strip() for ln in body.splitlines()[1:] if ln.strip()]
+            meat = [ln for ln in lines if not ln.startswith("#") and not ln.startswith('"')]
+            if meat and all(ln.startswith(keep) for ln in meat):
+                offenders.append(f"{path.parent.name}.{name}")
+    assert not offenders, f"parallelism-only recipes; use the CLI instead: {offenders}"

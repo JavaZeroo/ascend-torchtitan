@@ -14,7 +14,7 @@ from ascend_titan.kernels import ATTENTION_FROM_FLEX_OVERRIDE, ATTENTION_OVERRID
 from ascend_titan.recipes.deltas import add_override
 
 
-def npu_deltas(config: Trainer.Config) -> None:
+def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """这个模型族在昇腾上需要什么。与 flavor 无关：写一次，所有尺寸通用。
 
     `__init__.py` 把它交给 `_auto.npu_entry_points`，于是上游**每一个** flavor 都自动
@@ -29,6 +29,11 @@ def npu_deltas(config: Trainer.Config) -> None:
     # 不在第一条的 fqns 内，保持不动。
     add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
     add_override(config, ATTENTION_OVERRIDE)
+
+    # DELTA 2（可选）：真实尺寸用真实 tokenizer。加一个尺寸只需在 HF_REPOS 加一行，
+    # 不需要写函数——`<flavor>_npu` 会自动带上。
+    # if flavor in HF_REPOS:
+    #     _use_real_assets(config, HF_REPOS[flavor])
 
 
 def <model>_debugmodel_npu() -> Trainer.Config:

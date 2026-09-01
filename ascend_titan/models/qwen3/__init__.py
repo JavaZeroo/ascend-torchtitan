@@ -16,26 +16,16 @@ from ascend_titan.models.qwen3.probes import (
 )
 from ascend_titan.models.qwen3.recipes import (
     npu_deltas,
-    qwen3_0_6b_npu,
-    qwen3_0_6b_npu_fsdp2,
-    qwen3_0_6b_npu_tp2,
     qwen3_8b_npu_pp2,
     qwen3_debugmodel_npu,
-    qwen3_debugmodel_npu_fsdp2,
     qwen3_debugmodel_npu_fused,
-    qwen3_debugmodel_npu_fused_fsdp2,
 )
 
 __all__ = [
-    "qwen3_0_6b_npu",
-    "qwen3_0_6b_npu_fsdp2",
-    "qwen3_0_6b_npu_tp2",
     "qwen3_8b_npu_pp2",
     "qwen3_debugmodel_npu",
     "qwen3_debugmodel_npu_ce_loss",
-    "qwen3_debugmodel_npu_fsdp2",
     "qwen3_debugmodel_npu_fused",
-    "qwen3_debugmodel_npu_fused_fsdp2",
     "qwen3_debugmodel_npu_fused_norm",
     "qwen3_debugmodel_npu_graph",
     "qwen3_debugmodel_stock_flex",

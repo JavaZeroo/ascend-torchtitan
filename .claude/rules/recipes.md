@@ -7,6 +7,7 @@ globs: ascend_titan/models/**, ascend_titan/recipes/**
 - **recipe 与探针分开**：`recipes.py` 是给人跑的支持入口，`probes.py` 是只为矩阵测量、预期可能 🔴 的配置。别混。
 - **debug 用的配置不进仓库**：为查一个具体故障临时凑的配置（调 lr 看会不会发散这类）是调试脚手架，不是测量基线——放 `outputs/`（已 gitignore），**结论**写进模型 README 或 `docs/issues/`，配置本身不提交。`probes.py` 只放矩阵长期要测的格子。
 - **族增量声明一次，任何 flavor 自动可用**：模型包在 `recipes.py` 里写一个 `npu_deltas(config)`（这个模型族在昇腾上需要什么，与尺寸无关），`__init__.py` 用 `_auto.npu_entry_points(_upstream, npu_deltas)` 接上——于是上游每个 flavor 都有 `<flavor>_npu` 入口，**上游新增尺寸不需要我们写任何代码**。手写 recipe 只在需要额外东西时才写（真实资产、并行布局、golden 冻结的冒烟配置），并且必须调用 `npu_deltas`，保证族增量只存在一处。
+- **并行度不写 recipe**：`--parallelism.*` 命令行可调，一个函数一种并行组合是不可扩展的复制粘贴（`test_no_parallelism_only_recipes_remain` 强制）。这类 golden 用 `GOLDEN=<曲线名> ./scripts/check_golden.sh <config> --parallelism...` 校验。真实尺寸的 tokenizer 同理：在 `HF_REPOS` 加一行，别写函数。
 - 命名 `<model>_<flavor>_npu[_<variant>]`；`<flavor>` 取上游 config registry 的名字。
 - recipe 调用上游 `config_registry` 函数并修改其结果。绝不从零构造 `Trainer.Config(...)`（`test_recipe_is_delta_not_copy`）。
 - 每个增量加一条 `# DELTA n:` 注释，写明它改变的上游默认值和对应的矩阵格子。

@@ -22,7 +22,7 @@ from torchtitan.trainer import Trainer
 from ascend_titan.recipes.deltas import flex_to_varlen
 
 
-def npu_deltas(config: Trainer.Config) -> None:
+def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """What Llama 3 needs on Ascend: one node conversion and **zero overrides**.
 
     Flavor-independent, so ``models/llama3/__init__.py`` can hand it to
@@ -42,10 +42,4 @@ def llama3_debugmodel_stock_npu() -> Trainer.Config:
     npu_deltas(config)
     assert config.override.imports == [], "llama3 is the zero-override reference path"
     config.checkpoint.enable = False
-    return config
-
-
-def llama3_debugmodel_stock_npu_fsdp2() -> Trainer.Config:
-    config = llama3_debugmodel_stock_npu()
-    config.parallelism.data_parallel_shard_degree = 2
     return config

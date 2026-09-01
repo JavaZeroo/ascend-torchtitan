@@ -17,7 +17,6 @@ def test_qwen3_npu_recipes_build():
     from ascend_titan.kernels import ATTENTION_FROM_FLEX_OVERRIDE, ATTENTION_OVERRIDE
     from ascend_titan.models.qwen3 import (
         qwen3_debugmodel_npu,
-        qwen3_debugmodel_npu_fsdp2,
         qwen3_debugmodel_stock_flex,
         qwen3_debugmodel_stock_varlen,
     )
@@ -33,7 +32,9 @@ def test_qwen3_npu_recipes_build():
     assert type(cfg.loss).__qualname__ == "ChunkedLossWrapper.Config"
     assert type(cfg.loss) is type(qwen3_debugmodel().loss)
 
-    assert qwen3_debugmodel_npu_fsdp2().parallelism.data_parallel_shard_degree == 2
+    # 并行度不再有专属 recipe：它是命令行可调的（--parallelism.*），一个函数一种
+    # 并行组合是不可扩展的复制粘贴。
+    assert not hasattr(qwen3_debugmodel_npu, "fsdp2")
     assert qwen3_debugmodel_stock_flex().override.imports == []
     assert qwen3_debugmodel_stock_varlen().override.imports == []
 
@@ -86,15 +87,11 @@ def test_probes_are_not_recipes():
 
 def test_llama3_stock_recipe_has_no_overrides():
     """The zero-override reference path: any override here defeats its purpose."""
-    from ascend_titan.models.llama3 import (
-        llama3_debugmodel_stock_npu,
-        llama3_debugmodel_stock_npu_fsdp2,
-    )
+    from ascend_titan.models.llama3 import llama3_debugmodel_stock_npu
 
     cfg = llama3_debugmodel_stock_npu()
     assert cfg.override.imports == []
     assert cfg.checkpoint.enable is False
-    assert llama3_debugmodel_stock_npu_fsdp2().parallelism.data_parallel_shard_degree == 2
 
 
 def test_ce_loss_probe_is_the_only_place_that_unchunks_the_loss():
@@ -120,13 +117,14 @@ def test_release_recipes_are_deltas_on_the_real_upstream_configs(monkeypatch, tm
 
     from ascend_titan.models.qwen3 import recipes as q3
 
-    checked = [(q3.qwen3_0_6b_npu, "qwen3_0_6b()"), (q3.qwen3_8b_npu_pp2, "qwen3_14b()")]
+    # 真实尺寸的入口大多是**生成的**（`_auto` 按定义就是"上游 flavor 函数 + 族增量"，
+    # 起点是上游的真实尺寸配置，不可能是手搓的）。这里只查还手写着的那几个。
+    checked = [(q3.qwen3_8b_npu_pp2, "qwen3_14b()")]
     # qwen3_5 needs fla-core, which is an extra (see models/qwen3_5/README.md)
     pytest.importorskip("fla", reason="pip install fla-core (qwen3_5 extra)")
     from ascend_titan.models.qwen3_5 import recipes as q35
 
-    checked.append((q35.qwen35_0_8b_npu, "qwen35_0_8b()"))
-    checked.append((q35.qwen35_0_8b_npu_fused, "qwen35_0_8b_npu()"))
+    checked.append((q35.qwen35_0_8b_npu_fused, "qwen35_0_8b()"))
     for fn, upstream_call in checked:
         src = inspect.getsource(fn)
         assert upstream_call in src

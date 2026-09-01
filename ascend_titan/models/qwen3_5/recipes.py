@@ -30,8 +30,29 @@ from ascend_titan.kernels import (
 )
 from ascend_titan.recipes.deltas import add_override, swap_override
 
+# 有真实 tokenizer 的尺寸：flavor -> HF 仓库名。**加一个真实尺寸只需在这里加一行**，
+# 不需要写函数——`<flavor>_npu` 会自动带上真实资产（见 npu_deltas）。
+# 没列在这里的 flavor 用上游自己的资产设置（debugmodel 的玩具 tokenizer 等）。
+HF_REPOS = {"qwen35_0_8b": "Qwen3.5-0.8B"}
 
-def npu_deltas(config: Trainer.Config) -> None:
+
+def _use_real_assets(config: Trainer.Config, repo: str) -> None:
+    """真实 tokenizer + 真实 C4 文本（纯文本，去掉多模态 collator）。
+
+    上游的真实尺寸配的是多模态 cc12m；真实 cc12m 是图文数据集，不在这台机器的
+    下载预算里，所以测的是**语言侧**的真实尺寸训练。缺口记在 README。
+    """
+    from torchtitan.components.data.collators import TextCollator
+    from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
+
+    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
+
+    config.hf_assets_path = hf_assets_path(repo)
+    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
+    config.dataloader.collator = TextCollator.Config()
+
+
+def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """What Qwen3.5 needs on Ascend. Flavor-independent: written once, applied to all.
 
     ``models/qwen3_5/__init__.py`` hands this to ``_auto.npu_entry_points``, so every
@@ -54,6 +75,11 @@ def npu_deltas(config: Trainer.Config) -> None:
     # kernels do not compile for Ascend). 消失条件：昇腾有了 GDN 融合算子。
     add_override(config, GDN_OVERRIDE)
 
+    # DELTA 3: 该尺寸有真实 tokenizer 就用真实资产（表在 HF_REPOS）。debugmodel 不在
+    # 表里，保留上游的玩具 tokenizer/数据。
+    if flavor in HF_REPOS:
+        _use_real_assets(config, HF_REPOS[flavor])
+
 
 def qwen35_debugmodel_npu() -> Trainer.Config:
     """Upstream ``qwen35_debugmodel`` + the family deltas. Golden-frozen smoke config."""
@@ -65,13 +91,6 @@ def qwen35_debugmodel_npu() -> Trainer.Config:
     # CLI-addressable (``--checkpoint.no-enable``).
     config.checkpoint.enable = False
 
-    return config
-
-
-def qwen35_debugmodel_npu_fsdp2() -> Trainer.Config:
-    """2-way FSDP2."""
-    config = qwen35_debugmodel_npu()
-    config.parallelism.data_parallel_shard_degree = 2
     return config
 
 
@@ -103,38 +122,8 @@ def qwen35_debugmodel_npu_text() -> Trainer.Config:
 
 
 # --- release 级 recipe（docs/model-release-criteria.md R1）---------------------
-
-
-def qwen35_0_8b_npu() -> Trainer.Config:
-    """Qwen3.5-0.8B，真实 tokenizer + 真实 C4 文本。
-
-    上游 0.8B 配的是多模态 cc12m；这里换成真实 C4 文本分片，测的是**语言侧**的
-    真实尺寸训练（GDN + MoE + 注意力）。视觉塔的路径由 debugmodel 的 cc12m-test 覆盖——
-    真实 cc12m 是图文数据集，不在这台机器的下载预算里，这个缺口记在 README 里。
-    """
-    from torchtitan.components.data.collators import TextCollator
-    from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
-
-    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
-
-    config = qwen35_0_8b()
-
-    # DELTA 1+2: 家族增量（注意力 + GDN），与 flavor 无关，见 npu_deltas。
-    npu_deltas(config)
-
-    # DELTA 3: 真实 tokenizer + 真实 C4 文本（纯文本，去掉多模态 collator）。
-    config.hf_assets_path = hf_assets_path("Qwen3.5-0.8B")
-    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
-    config.dataloader.collator = TextCollator.Config()
-
-    return config
-
-
-def qwen35_0_8b_npu_fsdp2() -> Trainer.Config:
-    """0.8B × FSDP2 8 卡。"""
-    config = qwen35_0_8b_npu()
-    config.parallelism.data_parallel_shard_degree = 8
-    return config
+# 真实尺寸的入口 `qwen35_0_8b_npu` **不是手写的**：HF_REPOS 里有它，所以 `_auto` 生成的
+# 入口已经带上真实 tokenizer + 真实 C4。下面只留真正需要额外东西的组合。
 
 
 def qwen35_0_8b_npu_fused() -> Trainer.Config:
@@ -146,7 +135,8 @@ def qwen35_0_8b_npu_fused() -> Trainer.Config:
     门控数学不变。数值与 ``qwen35_0_8b_npu`` 在 bf16 舍入级不同，所以带自己的
     golden。未安装 fla_npu 时 override 不注册，等价退化为普通 recipe。
     """
-    config = qwen35_0_8b_npu()
+    config = qwen35_0_8b()
+    npu_deltas(config, "qwen35_0_8b")
     # The fused override is a SIBLING of the plain-torch GDN override (both claim
     # InnerGatedDeltaNet.Config); swap, never stack -- see deltas.swap_override.
     swap_override(config, remove=GDN_OVERRIDE, add=GDN_FUSED_OVERRIDE)

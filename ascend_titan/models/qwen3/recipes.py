@@ -29,7 +29,6 @@ from torchtitan.components.data.packing import ConcatThenSplitPackingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.models.qwen3 import model_registry
 from torchtitan.models.qwen3.config_registry import (
-    qwen3_0_6b,
     qwen3_14b,
     qwen3_debugmodel,
 )
@@ -44,8 +43,20 @@ from ascend_titan.kernels import (
 )
 from ascend_titan.recipes.deltas import add_override
 
+# 有真实 tokenizer 的尺寸：flavor -> HF 仓库名。**加一个真实尺寸只需在这里加一行**。
+# 没列在这里的 flavor 用上游自己的资产设置（debugmodel 的玩具 tokenizer 等）。
+HF_REPOS = {"qwen3_0_6b": "Qwen3-0.6B", "qwen3_14b": "Qwen3-14B"}
 
-def npu_deltas(config: Trainer.Config) -> None:
+
+def _use_real_assets(config: Trainer.Config, repo: str) -> None:
+    """真实 tokenizer + 真实 C4 分片（上游默认路径在固定检出里，我们不往里写东西）。"""
+    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
+
+    config.hf_assets_path = hf_assets_path(repo)
+    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
+
+
+def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """What Qwen3 needs on Ascend. Flavor-independent: written once, applied to all.
 
     ``models/qwen3/__init__.py`` hands this to ``_auto.npu_entry_points``, so every
@@ -60,6 +71,10 @@ def npu_deltas(config: Trainer.Config) -> None:
     add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
     add_override(config, ATTENTION_OVERRIDE)
 
+    # DELTA 2: 该尺寸有真实 tokenizer 就用真实资产（表在 HF_REPOS）。
+    if flavor in HF_REPOS:
+        _use_real_assets(config, HF_REPOS[flavor])
+
 
 def qwen3_debugmodel_npu() -> Trainer.Config:
     """Upstream ``qwen3_debugmodel`` + the family deltas. Golden-frozen smoke config."""
@@ -70,14 +85,6 @@ def qwen3_debugmodel_npu() -> Trainer.Config:
     # is its own cell, and this is CLI-addressable (``--checkpoint.no-enable``).
     config.checkpoint.enable = False
 
-    return config
-
-
-def qwen3_debugmodel_npu_fsdp2() -> Trainer.Config:
-    """M1 acceptance path (3): real multi-device FSDP2."""
-    config = qwen3_debugmodel_npu()
-    # DELTA 3: 2-way FSDP.
-    config.parallelism.data_parallel_shard_degree = 2
     return config
 
 
@@ -94,48 +101,9 @@ def qwen3_debugmodel_npu_fused() -> Trainer.Config:
     return config
 
 
-def qwen3_debugmodel_npu_fused_fsdp2() -> Trainer.Config:
-    """Fused perf recipe under FSDP2 x2 (golden-tracked)."""
-    config = qwen3_debugmodel_npu_fused()
-    config.parallelism.data_parallel_shard_degree = 2
-    return config
-
-
 # --- release 级 recipe（docs/model-release-criteria.md R1）---------------------
 # debugmodel 是冒烟件：玩具 tokenizer、几百条样本、2048 上下文。下面的 recipe 用真实
 # tokenizer、真实 C4 分片和该尺寸的真实上下文长度，是"这个模型在昇腾上能用"的证据。
-
-
-def qwen3_0_6b_npu() -> Trainer.Config:
-    """Qwen3-0.6B，真实 tokenizer + 真实 C4。单卡或 FSDP2 都跑得动。"""
-    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
-
-    config = qwen3_0_6b()
-
-    # DELTA 1: 家族增量（注意力），与 flavor 无关，见 npu_deltas。
-    npu_deltas(config)
-
-    # DELTA 2: 资产落到本地（上游默认路径是 torchtitan 检出里的 ./assets/hf/...，
-    # 那是固定上游，我们不往里写东西）。
-    config.hf_assets_path = hf_assets_path("Qwen3-0.6B")
-    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
-
-    return config
-
-
-def qwen3_0_6b_npu_fsdp2() -> Trainer.Config:
-    """0.6B × FSDP2 8 卡。"""
-    config = qwen3_0_6b_npu()
-    config.parallelism.data_parallel_shard_degree = 8
-    return config
-
-
-def qwen3_0_6b_npu_tp2() -> Trainer.Config:
-    """0.6B × (FSDP2 4 × TP 2)，8 卡。"""
-    config = qwen3_0_6b_npu()
-    config.parallelism.data_parallel_shard_degree = 4
-    config.parallelism.tensor_parallel_degree = 2
-    return config
 
 
 def qwen3_8b_npu_pp2() -> Trainer.Config:
@@ -149,14 +117,11 @@ def qwen3_8b_npu_pp2() -> Trainer.Config:
     （54.81 GiB 已分配时再要 1.60 GiB 失败）。参数、梯度与 AdamW 状态本身就占掉
     绝大部分，不是激活能省出来的。
     """
-    from ascend_titan.models.assets import hf_assets_path, local_c4_dataset
-
     # 上游没有裸的 8B Trainer 配置（只有 nvfp4 变体），所以从 14B 的配置起手换模型。
     config = qwen3_14b()
     config.model_spec = model_registry("8B")
     npu_deltas(config)
-    config.hf_assets_path = hf_assets_path("Qwen3-8B")
-    config.dataloader.dataset = ConcatThenSplitPackingConfig(dataset=local_c4_dataset())
+    _use_real_assets(config, "Qwen3-8B")
     config.parallelism.pipeline_parallel_degree = 2
     config.parallelism.data_parallel_shard_degree = 4
     # 微批数必须 >= 流水级数，否则流水线排不出来（上游默认 1）。

@@ -91,13 +91,10 @@ MODELS: dict[str, ModelEntry] = {
         ),
         recipes="ascend_titan.models.qwen3.recipes",
         flavors=(
+            # 手写的只剩三个；其余（含 qwen3_0_6b_npu）由 _auto 从上游 flavor 生成，
+            # 并行度组合走命令行（--parallelism.*），不再各写一个函数。
             "qwen3_debugmodel_npu",
-            "qwen3_debugmodel_npu_fsdp2",
             "qwen3_debugmodel_npu_fused",
-            "qwen3_debugmodel_npu_fused_fsdp2",
-            "qwen3_0_6b_npu",
-            "qwen3_0_6b_npu_fsdp2",
-            "qwen3_0_6b_npu_tp2",
             "qwen3_8b_npu_pp2",
         ),
         golden=(
@@ -138,11 +135,9 @@ MODELS: dict[str, ModelEntry] = {
         ),
         recipes="ascend_titan.models.qwen3_5.recipes",
         flavors=(
+            # 手写的只剩三个；qwen35_0_8b_npu 等由 _auto 生成（HF_REPOS 提供真实资产）。
             "qwen35_debugmodel_npu",
-            "qwen35_debugmodel_npu_fsdp2",
             "qwen35_debugmodel_npu_text",
-            "qwen35_0_8b_npu",
-            "qwen35_0_8b_npu_fsdp2",
             "qwen35_0_8b_npu_fused",
         ),
         golden=("qwen35_debugmodel_npu", "qwen35_debugmodel_npu_text"),
@@ -174,7 +169,7 @@ MODELS: dict[str, ModelEntry] = {
             "只有 debugmodel：R1–R8 一条都没取，按新判据是 🟡 而不是 🟢。"
         ),
         recipes="ascend_titan.models.llama3.recipes",
-        flavors=("llama3_debugmodel_stock_npu", "llama3_debugmodel_stock_npu_fsdp2"),
+        flavors=("llama3_debugmodel_stock_npu",),  # 并行度走命令行，不再各写一个函数
         notes=(
             "唯一增量是 flex→varlen（flex 的模型级路径要走 inductor）。"
             "上游 features 套件的并行用例也都跑在 llama3 上。"

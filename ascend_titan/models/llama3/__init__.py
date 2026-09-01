@@ -5,7 +5,6 @@ from torchtitan.models.llama3 import config_registry as _upstream
 from ascend_titan.models._auto import npu_entry_points
 from ascend_titan.models.llama3.recipes import (
     llama3_debugmodel_stock_npu,
-    llama3_debugmodel_stock_npu_fsdp2,
     npu_deltas,
 )
 

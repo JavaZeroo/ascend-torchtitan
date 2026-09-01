@@ -52,11 +52,13 @@ def upstream_flavors(upstream: ModuleType) -> dict[str, Callable[[], object]]:
     }
 
 
-def npu_entry_points(upstream: ModuleType, deltas: Callable[[object], None]):
+def npu_entry_points(upstream: ModuleType, deltas: Callable[[object, str], None]):
     """Return ``(__getattr__, __dir__)`` for a model package's ``__init__``.
 
-    ``deltas(config)`` is the family's declaration: what this model needs on Ascend,
-    applied in place, identically for every flavor.
+    ``deltas(config, flavor)`` is the family's declaration: what this model needs on
+    Ascend, applied in place. It takes the flavor name so per-size *data* (which HF
+    tokenizer a real-size run should use, say) stays a table lookup in the family's
+    declaration rather than another hand-written function per size.
     """
 
     def __getattr__(name: str):
@@ -73,7 +75,7 @@ def npu_entry_points(upstream: ModuleType, deltas: Callable[[object], None]):
 
         def build():
             config = fn()
-            deltas(config)
+            deltas(config, flavor)
             return config
 
         build.__name__ = name

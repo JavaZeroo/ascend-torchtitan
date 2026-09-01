@@ -30,7 +30,7 @@ from ascend_titan.kernels import (
 from ascend_titan.recipes.deltas import add_override
 
 
-def npu_deltas(config: Trainer.Config) -> None:
+def npu_deltas(config: Trainer.Config, flavor: str = "") -> None:
     """What Kimi K3 needs on Ascend. Flavor-independent: written once, applied to all.
 
     ``models/kimi_k3/__init__.py`` hands this to ``_auto.npu_entry_points``, so any
