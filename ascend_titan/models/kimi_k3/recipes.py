@@ -21,11 +21,8 @@ Full guide: ascend_titan/models/kimi_k3/README.md
 from torchtitan.models.kimi_k3.config_registry import kimi_k3_debugmodel
 from torchtitan.trainer import Trainer
 
+from ascend_titan.kernels import KDA_OVERRIDE, SITU_GLU_OVERRIDE
 from ascend_titan.recipes.transforms import npu_minimal
-
-KDA_OVERRIDE = "ascend_titan.kernels.kda.npu_kda"
-SITU_GLU_OVERRIDE = "ascend_titan.kernels.situ_glu.ops_nn_situ_glu"
-ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
 
 
 def kimi_k3_debugmodel_npu() -> Trainer.Config:

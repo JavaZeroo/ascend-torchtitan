@@ -51,13 +51,10 @@ class SetupReport:
         return "\n".join("[ascend_titan] " + line for line in lines)
 
 
-def _privateuse1_name() -> str | None:
+def _privateuse1_name() -> str:
     import torch
 
-    try:
-        return torch._C._get_privateuse1_backend_name()
-    except Exception:  # pragma: no cover - very old torch
-        return None
+    return torch._C._get_privateuse1_backend_name()
 
 
 def _npu_is_available() -> bool:

@@ -150,10 +150,9 @@ def run_one(
     row.ok = True
     row.loss, row.tps, row.tflops = s["loss"], s["tps"], s["tflops"]
     row.mfu, row.memory_gib = s["mfu"], s["memory_gib"]
-    try:
-        row.ascend_nodes = ascend_nodes(module, config)
-    except Exception as e:  # noqa: BLE001 - a missing provenance table is a note, not a crash
-        row.note = f"provenance unavailable: {type(e).__name__}"
+    # P7: a benchmark row without its provenance table is not a result. If the
+    # config cannot re-resolve here, the run above measured something else -- fail.
+    row.ascend_nodes = ascend_nodes(module, config)
     return row
 
 

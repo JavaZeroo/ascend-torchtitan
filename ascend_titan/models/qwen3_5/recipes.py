@@ -23,9 +23,8 @@ from torchtitan.models.qwen3_5 import model_registry
 from torchtitan.models.qwen3_5.config_registry import qwen35_0_8b, qwen35_debugmodel
 from torchtitan.trainer import Trainer
 
-from ascend_titan.recipes.transforms import GDN_FUSED_OVERRIDE, GDN_OVERRIDE, swap_override
-
-ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
+from ascend_titan.kernels import ATTENTION_OVERRIDE, GDN_FUSED_OVERRIDE, GDN_OVERRIDE
+from ascend_titan.recipes.transforms import swap_override
 
 
 def qwen35_debugmodel_npu() -> Trainer.Config:

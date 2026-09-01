@@ -35,10 +35,12 @@ from torchtitan.models.qwen3.config_registry import (
 )
 from torchtitan.trainer import Trainer
 
-ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
-RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
-SWIGLU_OVERRIDE = "ascend_titan.kernels.swiglu.npu_fused_swiglu"
-ROPE_COSSIN_OVERRIDE = "ascend_titan.kernels.rope.npu_rotary_cossin"
+from ascend_titan.kernels import (
+    ATTENTION_OVERRIDE,
+    RMSNORM_OVERRIDE,
+    ROPE_COSSIN_OVERRIDE,
+    SWIGLU_OVERRIDE,
+)
 
 
 def qwen3_debugmodel_npu() -> Trainer.Config:

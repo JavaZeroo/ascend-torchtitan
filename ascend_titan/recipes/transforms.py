@@ -29,13 +29,15 @@ from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.rope import ComplexRoPE
 from torchtitan.trainer import Trainer
 
-logger = logging.getLogger(__name__)
+from ascend_titan.kernels import (
+    ATTENTION_OVERRIDE,
+    GDN_FUSED_OVERRIDE,
+    GDN_OVERRIDE,
+    RMSNORM_OVERRIDE,
+    ROPE_OVERRIDE,
+)
 
-ATTENTION_OVERRIDE = "ascend_titan.kernels.attention.npu_fusion_attention"
-ROPE_OVERRIDE = "ascend_titan.kernels.rope.real_cache_rope"
-RMSNORM_OVERRIDE = "ascend_titan.kernels.rms_norm.npu_rms_norm"
-GDN_FUSED_OVERRIDE = "ascend_titan.kernels.gdn_fla.npu_gated_delta_net_fused"
-GDN_OVERRIDE = "ascend_titan.kernels.gdn.npu_gated_delta_net"
+logger = logging.getLogger(__name__)
 # Upstream overrides that replace a whole attention block (which owns the RoPE node);
 # adding our RoPE override on top would be a per-node conflict (OURS-9).
 _ATTENTION_BLOCK_OVERRIDES = ("torchtitan.overrides.fused_mla.",)
@@ -69,7 +71,7 @@ def swap_override(config: Trainer.Config, *, remove: str, add: str) -> bool:
 
 
 @dataclass
-class Applied:
+class TransformReport:
     flex_to_varlen: int = 0
     attention_override: bool = False
     rope_override: bool = False
@@ -121,14 +123,14 @@ def _flex_attention_is_usable() -> bool:
         return False
 
 
-def npu_minimal(config: Trainer.Config) -> Applied:
+def npu_minimal(config: Trainer.Config) -> TransformReport:
     """Apply, in place, only the deltas an upstream config cannot run without. Idempotent.
 
     Every step names the issue that makes it necessary and must disappear by
     feature detection once that issue is fixed (P12). Nothing here may exist for
     performance, and nothing here may hide a torch_npu defect (P9).
     """
-    a = Applied()
+    a = TransformReport()
 
     # 1. FlexAttention nodes -> VarlenAttention while flex is not usable here
     #    (TORCH-1 + DEP-INDUCTOR, see _flex_attention_is_usable). Flex-only fields
@@ -184,7 +186,7 @@ def npu_minimal(config: Trainer.Config) -> Applied:
     return a
 
 
-def npu_fused(config: Trainer.Config) -> Applied:
+def npu_fused(config: Trainer.Config) -> TransformReport:
     """Apply, in place, the drop-in fused-kernel overrides. Idempotent.
 
     Opt-in only. These change nothing about *whether* a config runs, so they must
@@ -193,7 +195,7 @@ def npu_fused(config: Trainer.Config) -> Applied:
     run at bf16 rounding level, which is why the fused recipes carry their own
     golden curves.
     """
-    a = Applied()
+    a = TransformReport()
 
     # RMSNorm -> npu_rms_norm (pure drop-in: same parameter name, shape and
     # checkpoint layout; Meta + autograd registered in torch_npu).
