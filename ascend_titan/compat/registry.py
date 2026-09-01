@@ -124,6 +124,8 @@ def shim(
 
 
 def list_shims() -> list[Shim]:
+    """Every registered shim, discovering the ``shims/`` package first."""
+    _discover()
     return list(_REGISTRY.values())
 
 
@@ -133,6 +135,13 @@ def _discover() -> None:
 
     for info in pkgutil.iter_modules(pkg.__path__, pkg.__name__ + "."):
         importlib.import_module(info.name)
+
+
+def _target_gone(s: Shim) -> ShimError:
+    return ShimError(
+        f"shim {s.name}: {s.target} does not exist. Upstream probably moved or "
+        f"removed it -- check {s.upstream} and either retarget or delete the shim."
+    )
 
 
 def apply_all(*, only: set[str] | None = None) -> list[Applied]:
@@ -151,30 +160,19 @@ def apply_all(*, only: set[str] | None = None) -> list[Applied]:
         try:
             owner = s.owner(mod)
         except AttributeError as e:
-            raise ShimError(
-                f"shim {s.name}: {s.target} does not exist. Upstream probably moved or "
-                f"removed it -- check {s.upstream} and either retarget or delete the shim."
-            ) from e
-        if s.kind == "polyfill":
-            if hasattr(owner, s.attr):
-                logger.info("[shim] %s: %s already exists, polyfill skipped", s.name, s.target)
-                _APPLIED[s.name] = Applied(name=s.name, target=s.target, kind=s.kind)
-                continue
-            patched = s.fn(None)
-            setattr(owner, s.attr, patched)
-            patched.__ascend_shim__ = s.name  # type: ignore[attr-defined]
-            a = Applied(name=s.name, target=s.target, kind=s.kind)
-            _APPLIED[s.name] = a
-            done.append(a)
-            logger.info("[shim] %s (polyfill) -> %s  [%s]", s.name, s.target, s.upstream)
+            raise _target_gone(s) from e
+
+        is_polyfill = s.kind == "polyfill"
+        exists = hasattr(owner, s.attr)
+        if is_polyfill and exists:
+            # Upstream grew the attribute: the polyfill is a no-op, no code change needed.
+            logger.info("[shim] %s: %s already exists, polyfill skipped", s.name, s.target)
+            _APPLIED[s.name] = Applied(name=s.name, target=s.target, kind=s.kind)
             continue
-        if not hasattr(owner, s.attr):
-            raise ShimError(
-                f"shim {s.name}: {s.target} does not exist. Upstream probably moved or "
-                f"removed it -- check {s.upstream} and either retarget or delete the shim."
-            )
-        original = getattr(owner, s.attr)
-        patched = s.fn(original)
+        if not is_polyfill and not exists:
+            raise _target_gone(s)
+
+        patched = s.fn(None if is_polyfill else getattr(owner, s.attr))
         setattr(owner, s.attr, patched)
         patched.__ascend_shim__ = s.name  # type: ignore[attr-defined]
         a = Applied(name=s.name, target=s.target, kind=s.kind)
@@ -182,10 +180,6 @@ def apply_all(*, only: set[str] | None = None) -> list[Applied]:
         done.append(a)
         logger.info("[shim] %s (%s) -> %s  [%s]", s.name, s.kind, s.target, s.upstream)
     return done
-
-
-def applied() -> list[Applied]:
-    return list(_APPLIED.values())
 
 
 def reset_for_tests() -> None:

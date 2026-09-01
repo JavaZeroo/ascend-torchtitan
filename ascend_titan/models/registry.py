@@ -68,10 +68,6 @@ class ModelEntry:
     """Where the runs are recorded, e.g. ``docs/release/qwen3_<tuple>.md``."""
 
     @property
-    def has_package(self) -> bool:
-        return self.recipes is not None
-
-    @property
     def graded_status(self) -> str:
         """🟢 only when every criterion is 🟢 -- the rule the criteria doc sets."""
         if not self.criteria:
@@ -161,6 +157,7 @@ MODELS: dict[str, ModelEntry] = {
             "R7": "🟢",  # models/qwen3_5/README.md
             "R8": "🟢",  # provenance：42 个 ascend 节点
         },
+        evidence="docs/release/qwen3_5_torch2.15.0.dev20260812_npu2.15.0.md",
         notes=(
             "早先记的 DEP-FLA 阻塞不成立：`fla-core` 有 aarch64 wheel，import 正常，"
             "挡住的只是它的 CUDA Triton 内核。"
@@ -263,7 +260,7 @@ def table() -> str:
     for e in MODELS.values():
         recipe = f"`{e.recipes.rsplit('.', 2)[-2]}`" if e.recipes else "—（矩阵覆盖）"
         detail = e.summary + (f" **阻塞：**{e.blocker}" if e.blocker else "")
-        rows.append(f"| **{e.title}** (`{e.name}`) | {e.status} | {recipe} | {detail} |")
+        rows.append(f"| **{e.title}** (`{e.name}`) | {e.graded_status} | {recipe} | {detail} |")
     return "\n".join(rows)
 
 

@@ -119,9 +119,8 @@ def probe(*, import_torchtitan: bool = True) -> Report:
             r.torchtitan_import_error = f"{type(e).__name__}: {e}"
 
     try:
-        from ascend_titan.compat.registry import _discover, list_shims
+        from ascend_titan.compat import list_shims
 
-        _discover()
         r.shims_registered = [s.name for s in list_shims()]
     except Exception as e:  # noqa: BLE001
         r.notes.append(f"shim discovery failed: {e!r}")

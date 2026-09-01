@@ -53,6 +53,14 @@ _KEEP_FLEX_FQNS = ("vision_encoder",)
 # stack. Keep this pair the only place that owns the sibling relationship.
 
 
+def add_override(config: Trainer.Config, target: str) -> bool:
+    """Activate an override target, in place. Idempotent; ``True`` if it was added."""
+    if target in config.override.imports:
+        return False
+    config.override.imports = [*config.override.imports, target]
+    return True
+
+
 def swap_override(config: Trainer.Config, *, remove: str, add: str) -> bool:
     """Replace one override target with a mutually-exclusive sibling, in place.
 
@@ -65,8 +73,7 @@ def swap_override(config: Trainer.Config, *, remove: str, add: str) -> bool:
     if remove not in config.override.imports:
         return False
     config.override.imports = [imp for imp in config.override.imports if imp != remove]
-    if add not in config.override.imports:
-        config.override.imports = [*config.override.imports, add]
+    add_override(config, add)
     return True
 
 
@@ -170,17 +177,17 @@ def npu_minimal(config: Trainer.Config) -> TransformReport:
 
     # 2. Ascend fused attention on every VarlenAttention node (NPU-1).
     has_varlen = any(True for _ in config.traverse(VarlenAttention.Config))
-    if has_varlen and not block_override and ATTENTION_OVERRIDE not in config.override.imports:
-        config.override.imports = [*config.override.imports, ATTENTION_OVERRIDE]
     a.attention_override = has_varlen and not block_override
+    if a.attention_override:
+        add_override(config, ATTENTION_OVERRIDE)
 
     # 2b. ComplexRoPE nodes -> real-valued cache (torch_npu cannot index complex, NPU-3).
     has_complex_rope = any(
         type(c) is ComplexRoPE.Config for _f, c, _p, _a in config.traverse(ComplexRoPE.Config)
     )
-    if has_complex_rope and not block_override and ROPE_OVERRIDE not in config.override.imports:
-        config.override.imports = [*config.override.imports, ROPE_OVERRIDE]
     a.rope_override = has_complex_rope and not block_override
+    if a.rope_override:
+        add_override(config, ROPE_OVERRIDE)
 
     logger.info("[ascend_titan] npu_minimal: %s", a.summary())
     return a
@@ -199,10 +206,11 @@ def npu_fused(config: Trainer.Config) -> TransformReport:
 
     # RMSNorm -> npu_rms_norm (pure drop-in: same parameter name, shape and
     # checkpoint layout; Meta + autograd registered in torch_npu).
-    has_rms = any(type(c) is RMSNorm.Config for _f, c, _p, _a in config.traverse(RMSNorm.Config))
-    if has_rms and RMSNORM_OVERRIDE not in config.override.imports:
-        config.override.imports = [*config.override.imports, RMSNORM_OVERRIDE]
-    a.rms_norm_override = has_rms
+    a.rms_norm_override = any(
+        type(c) is RMSNorm.Config for _f, c, _p, _a in config.traverse(RMSNorm.Config)
+    )
+    if a.rms_norm_override:
+        add_override(config, RMSNORM_OVERRIDE)
 
     # Gated DeltaNet -> fla-npu fused chunk recurrence (R5). Optional add-on: the
     # override registers only when fla_npu is importable, so adding it here is a

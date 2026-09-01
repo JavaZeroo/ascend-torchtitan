@@ -29,7 +29,6 @@ class SetupReport:
     """What ``setup()`` actually did. Logged once and returned for tests/tools."""
 
     torch_version: str = ""
-    torch_npu_imported: bool = False
     torch_npu_autoloaded: bool = False
     fla_npu_imported: bool = False
     device_type: str | None = None
@@ -40,10 +39,7 @@ class SetupReport:
     def summary(self) -> str:
         lines = [
             f"torch={self.torch_version} device_type={self.device_type}",
-            (
-                f"torch_npu: imported={self.torch_npu_imported} "
-                f"autoloaded={self.torch_npu_autoloaded}"
-            ),
+            f"torch_npu: autoloaded={self.torch_npu_autoloaded}",
             f"fla_npu: imported={self.fla_npu_imported}",
             f"shims applied ({len(self.shims_applied)}): {', '.join(self.shims_applied) or '-'}",
         ]
@@ -57,15 +53,6 @@ def _privateuse1_name() -> str:
     return torch._C._get_privateuse1_backend_name()
 
 
-def _npu_is_available() -> bool:
-    try:
-        import torch
-
-        return bool(torch.npu.is_available())
-    except Exception:  # noqa: BLE001 - only used to enrich an error message
-        return False
-
-
 def _import_torch_npu(report: SetupReport) -> None:
     """Import torch_npu, or raise. ``torch_npu`` is a base dependency (P14).
 
@@ -75,11 +62,9 @@ def _import_torch_npu(report: SetupReport) -> None:
     """
     # sys.modules can hold a None entry (a blocked import), which is not an import.
     if _privateuse1_name() == "npu" and sys.modules.get("torch_npu") is not None:
-        report.torch_npu_imported = True
         report.torch_npu_autoloaded = True
         return
     importlib.import_module("torch_npu")
-    report.torch_npu_imported = True
 
 
 def _import_fla_npu(report: SetupReport) -> None:
@@ -132,18 +117,16 @@ def setup(*, apply_shims: bool = True) -> SetupReport:
     from torch._utils import _get_available_device_type
 
     report.device_type = _get_available_device_type()
-    # `torch.npu` only exists once a real torch_npu has registered its backend; CPU
-    # unit tests install a stub module instead, and there is nothing to check there.
+    # torch_npu imported but torch does not see a usable NPU. torchtitan freezes
+    # `utils.device_type` from this value at import time and falls back to "cuda", so
+    # the next thing the user sees is `AttributeError: module 'torch._C' has no
+    # attribute '_cuda_setDevice'` several layers away. Fail here, where the cause is
+    # still visible. `torch.npu` missing means the CPU test stub (conftest) is
+    # installed rather than a real torch_npu, and there is no device to check.
     if report.device_type != "npu" and hasattr(torch, "npu"):
-        # torch_npu imported but torch does not see a usable NPU. torchtitan freezes
-        # `utils.device_type` from this value at import time and falls back to "cuda",
-        # so the next thing the user sees is
-        # `AttributeError: module 'torch._C' has no attribute '_cuda_setDevice'`
-        # several layers away. Fail here, where the cause is still visible.
         raise RuntimeError(
             f"torch_npu is imported but torch reports device_type={report.device_type!r}, "
-            f"not 'npu' (torch.npu.is_available()={_npu_is_available()}). Usually the "
-            f"selected card is busy or invalid: "
+            "not 'npu'. Usually the selected card is busy or invalid: "
             f"ASCEND_RT_VISIBLE_DEVICES={os.environ.get('ASCEND_RT_VISIBLE_DEVICES', '<unset>')}. "
             "Check `npu-smi info` for another job on that card."
         )
@@ -154,20 +137,10 @@ def setup(*, apply_shims: bool = True) -> SetupReport:
     if apply_shims and skip != "1":
         from ascend_titan.compat import apply_all, list_shims
 
-        only = None
-        if skip:
-            from ascend_titan.compat.registry import _discover
-
-            _discover()
-            only = {s.name for s in list_shims()} - set(skip.split(","))
+        only = {s.name for s in list_shims()} - set(skip.split(",")) if skip else None
         report.shims_applied = [a.name for a in apply_all(only=only)]
     elif apply_shims:
         report.warnings.append("all shims skipped (ASCEND_TITAN_SKIP_SHIMS=1)")
-    if report.device_type != "npu":
-        report.warnings.append(
-            f"device_type={report.device_type!r}: no real Ascend backend registered "
-            "(expected only in CPU unit tests, where torch_npu is a stub)"
-        )
 
     logger.info(report.summary())
     _STATE = report

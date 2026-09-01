@@ -49,6 +49,26 @@ def test_registry_entries_are_consistent():
             assert path.is_file(), f"{key}: {e.recipes} does not exist"
 
 
+def test_hand_written_status_matches_the_criteria():
+    """``status`` is typed by hand, ``graded_status`` is derived from R1-R8. They may
+    not disagree: a 🟢 kept after a criterion went 🔴 is exactly the drift P13 forbids."""
+    for key, e in MODELS.items():
+        assert e.status == e.graded_status, (
+            f"{key}: status={e.status} but the R1-R8 criteria grade it {e.graded_status}. "
+            "Fix whichever is wrong -- the criteria are the evidence."
+        )
+
+
+def test_graded_models_point_at_recorded_evidence():
+    """P13: a graded model must name the file where its runs are written down."""
+    repo = MODELS_DIR.parent.parent
+    for key, e in MODELS.items():
+        if not e.criteria:
+            continue
+        assert e.evidence, f"{key}: graded R1-R8 but names no evidence file"
+        assert (repo / e.evidence).is_file(), f"{key}: evidence {e.evidence} does not exist"
+
+
 def test_template_is_not_importable():
     """The template holds placeholders; .txt keeps it out of import/lint/collection."""
     assert not (MODELS_DIR / "_template" / "recipes.py").exists()
