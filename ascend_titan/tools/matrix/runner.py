@@ -30,6 +30,8 @@ class Result:
     seconds: float = 0.0
     log: str = ""
     runs: list[dict] = field(default_factory=list)
+    retried_after: str = ""
+    """Set when the first attempt was thrown away as a harness flake; what it said."""
 
 
 class CardPool:
@@ -65,7 +67,7 @@ def hccl_base_port(cards: list[int]) -> int:
     return _HCCL_PORT_BASE + min(cards) * _HCCL_PORTS_PER_CARD
 
 
-def run_case(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) -> Result:
+def _run_case_once(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) -> Result:
     r = Result(suite=case.suite, name=case.name, ngpu=case.ngpu, state="red")
     test_out = out / case.name
     test_out.mkdir(parents=True, exist_ok=True)
@@ -121,6 +123,33 @@ def run_case(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) 
         r.state = "green"
     else:
         r.code, r.note = triage(full_log)
+    return r
+
+
+# A HARNESS attribution means "this run measured the box, not the code" -- a bound
+# HCCL port left behind by the previous case, a card another job still holds. The
+# triage notes have always said "rerun" and nothing did, so a flake landed in the
+# report as a red cell. Measured twice on 2026-09-02: a serial CP sweep lost four
+# cases to `port 16666 have already been bound` from the case before it.
+_HARNESS = "HARNESS"
+_SETTLE_SECONDS = 30
+
+
+def run_case(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) -> Result:
+    """Run one case, retrying once if the first attempt only measured the harness.
+
+    One retry, not a loop: if a second attempt 30s later still hits it, the
+    condition is not transient and the report should say so.
+    """
+    r = _run_case_once(case, cards, out, repo, timeout)
+    if r.state == "green" or r.code != _HARNESS:
+        return r
+    first = r
+    time.sleep(_SETTLE_SECONDS)
+    r = _run_case_once(case, cards, out, repo, timeout)
+    r.retried_after = f"{first.code}: {first.note}"
+    if r.code == _HARNESS:
+        r.note = f"{r.note} [still after a {_SETTLE_SECONDS}s retry]"
     return r
 
 

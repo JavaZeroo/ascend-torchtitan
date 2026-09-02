@@ -357,3 +357,48 @@ def test_cases_run_on_the_interpreter_the_tool_runs_on():
             f"bare torchrun resolves through PATH, not PYTHON: {stripped}"
         )
     assert sys.executable  # the value the runner forwards
+
+
+def test_a_harness_flake_is_retried_once_before_it_becomes_a_red_cell(monkeypatch):
+    """HARNESS means the run measured the box, not the code, so it must not stand.
+
+    Measured 2026-09-02: a serial CP sweep lost four cases to
+    "port 16666 have already been bound" left behind by the case before them,
+    and the triage note said "rerun" while nothing reran.
+    """
+    from ascend_titan.tools.matrix import runner
+
+    calls = []
+
+    def fake(case, cards, out, repo, timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            return runner.Result(
+                "features", "cp", 4, "red", code="HARNESS", note="HCCL port conflict"
+            )
+        return runner.Result("features", "cp", 4, "green")
+
+    monkeypatch.setattr(runner, "_run_case_once", fake)
+    monkeypatch.setattr(runner.time, "sleep", lambda _s: None)
+
+    r = runner.run_case(runner.Case("features", "cp", "", 4, [], []), [0], None, None, 1)
+    assert len(calls) == 2, "a HARNESS red must be retried exactly once"
+    assert r.state == "green"
+    assert "HCCL port conflict" in r.retried_after
+
+
+def test_a_real_red_is_never_retried(monkeypatch):
+    """Only HARNESS is a flake. Retrying a genuine failure just doubles the sweep."""
+    from ascend_titan.tools.matrix import runner
+
+    calls = []
+
+    def fake(case, cards, out, repo, timeout):
+        calls.append(1)
+        return runner.Result("features", "cp", 4, "red", code="CANN", note="no kernel")
+
+    monkeypatch.setattr(runner, "_run_case_once", fake)
+    r = runner.run_case(runner.Case("features", "cp", "", 4, [], []), [0], None, None, 1)
+    assert len(calls) == 1
+    assert r.code == "CANN"
+    assert r.retried_after == ""
