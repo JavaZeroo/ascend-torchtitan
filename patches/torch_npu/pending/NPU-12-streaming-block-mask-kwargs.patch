@@ -1,0 +1,105 @@
+From 7eecf6134d4898030d5ba9a75336cc37b5b57269 Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Wed, 2 Sep 2026 11:14:29 +0800
+Subject: [PATCH] fix: accept create_block_mask's new keywords in the NPU
+ streaming builder
+
+torch_npu replaces torch.nn.attention.flex_attention.create_block_mask with
+a wrapper that routes NPU calls to _create_block_mask_streaming, a builder
+that evaluates the mask in Q-block stripes instead of materialising the
+whole dense mask. torch 2.15's create_block_mask grew three keyword
+arguments -- separate_full_blocks, compute_dq_write_order and dq_kv_order --
+and the streaming signature has none of them, so every NPU call raises:
+
+  NPU streaming create_block_mask failed; falling back to the PyTorch
+  implementation: TypeError: _create_block_mask_streaming() got an
+  unexpected keyword argument 'separate_full_blocks'
+
+The wrapper catches it and falls back, so nothing breaks visibly. What is
+lost is the entire point of the code: the memory-saving path never runs, and
+the dense mask is materialised on every call. On 910B2, where compiled flex
+cannot lower a document mask and attention has to run eager, that is the
+wrong direction -- these are exactly the runs that are short of HBM.
+Measured on a torchtitan qwen3_5 debugmodel step, the warning fires once per
+create_block_mask call, every step.
+
+Forward all three:
+
+* separate_full_blocks reaches _convert_mask_to_block_mask instead of a
+  hardcoded True, and the full-block list is left empty (so the assembled
+  tuple carries None, which _create_sparse_block_from_block_mask already
+  handles) when the caller asks not to separate them.
+* compute_dq_write_order / dq_kv_order are applied after assembly with
+  torch's own _compute_dq_write_order_from_block_mask, the same post-step
+  create_block_mask runs, since it derives from the finished BlockMask and
+  does not care how the mask was built.
+
+Same class of defect as the make_reduction signature drift: torch_npu's
+inductor overrides need to track torch nightly, which argues for nightly as
+a CI baseline.
+
+Claude-Session: https://claude.ai/code/session_01WNpsCvjYc85YP4XZkwuAzj
+---
+ torch_npu/_inductor/kernel/flex_attention.py | 26 +++++++++++++++++---
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/torch_npu/_inductor/kernel/flex_attention.py b/torch_npu/_inductor/kernel/flex_attention.py
+index c31977271..a03c7724b 100644
+--- a/torch_npu/_inductor/kernel/flex_attention.py
++++ b/torch_npu/_inductor/kernel/flex_attention.py
+@@ -501,6 +501,9 @@ def _create_block_mask_streaming(
+     device: str = "cuda",
+     BLOCK_SIZE: Union[int, tuple[int, int]] = 128,
+     _compile: bool = False,
++    separate_full_blocks: bool = True,
++    compute_dq_write_order: bool = False,
++    dq_kv_order: bool = True,
+ ):
+     """Create an NPU BlockMask without materializing its full dense mask.
+ 
+@@ -559,16 +562,18 @@ def _create_block_mask_streaming(
+                 stripe_mask,
+                 Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+                 KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+-                separate_full_blocks=True,
++                separate_full_blocks=separate_full_blocks,
+             )
+         )
+         partial_block_masks.append(partial_blocks)
+-        full_block_masks.append(full_blocks)
++        # full_blocks is None when the caller asked not to separate them.
++        if full_blocks is not None:
++            full_block_masks.append(full_blocks)
+         del stripe_mask
+ 
+     partial_block_mask = torch.cat(partial_block_masks, dim=2)
+-    full_block_mask = torch.cat(full_block_masks, dim=2)
+-    return flex_attention_module._create_sparse_block_from_block_mask(
++    full_block_mask = torch.cat(full_block_masks, dim=2) if full_block_masks else None
++    block_mask = flex_attention_module._create_sparse_block_from_block_mask(
+         (partial_block_mask, full_block_mask),
+         mask_mod,
+         (Q_LEN, KV_LEN),
+@@ -576,6 +581,19 @@ def _create_block_mask_streaming(
+         KV_BLOCK_SIZE,
+     )
+ 
++    # Same post-step as create_block_mask: the dq write order is derived from the
++    # finished BlockMask, so it does not care how the mask was built.
++    if compute_dq_write_order:
++        dq_wo, dq_wo_full = flex_attention_module._compute_dq_write_order_from_block_mask(
++            block_mask, dq_kv_order=dq_kv_order
++        )
++        block_mask.dq_write_order = dq_wo
++        block_mask.dq_write_order_full = dq_wo_full
++        block_mask.dq_kv_order = None
++        block_mask.dq_kv_order_spt = dq_kv_order
++
++    return block_mask
++
+ 
+ def _should_use_streaming_block_mask(args, kwargs) -> bool:
+     if (
+-- 
+2.43.0
+

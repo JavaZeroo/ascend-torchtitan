@@ -98,3 +98,35 @@ indirect load + sum 在 910B2 上本来就没有可 lower 的路径。这条补�
 不是解锁功能。P13：不要拿它当"flex 能编了"的证据。
 
 未提交（等 TA-1 一起）。
+
+## NPU-12：`create_block_mask` 的三个新关键字，torch_npu 的 streaming 构建器不接受
+
+torch_npu 把 `torch.nn.attention.flex_attention.create_block_mask` 换成自己的包装器，
+NPU 上路由到 `_create_block_mask_streaming`（`torch_npu/_inductor/kernel/flex_attention.py:495`）
+——按 Q 块分条评估掩码，**不实体化完整 dense mask**。
+
+torch 2.15 给 `create_block_mask` 加了三个关键字参数（`separate_full_blocks`、
+`compute_dq_write_order`、`dq_kv_order`），streaming 的签名一个都没有，于是每次 NPU 调用都抛：
+
+```
+NPU streaming create_block_mask failed; falling back to the PyTorch implementation:
+TypeError: _create_block_mask_streaming() got an unexpected keyword argument 'separate_full_blocks'
+```
+
+包装器 catch 住并退回 PyTorch 实现，所以**表面上什么都没坏**。坏掉的是这段代码的全部意义：
+省显存的路径从来没跑过，每次都实体化 dense mask。910B2 上编译版 flex 编不出 document mask、
+注意力只能走 eager，正是最缺显存的场景——方向反了。
+
+实测：torchtitan `qwen35_debugmodel` 每一步、每次 `create_block_mask` 调用都打这条 WARNING。
+
+修复：`patches/torch_npu/pending/NPU-12-streaming-block-mask-kwargs.patch`
+——三个参数全部转发。`separate_full_blocks` 传给 `_convert_mask_to_block_mask`
+（原来硬编码 True），为 False 时 full-block 列表留空、拼出的 tuple 带 None
+（`_create_sparse_block_from_block_mask` 本来就接受）；`compute_dq_write_order` /
+`dq_kv_order` 在组装完成后用 torch 自己的 `_compute_dq_write_order_from_block_mask`
+补上——和 `create_block_mask` 的后置步骤完全一样，它只依赖成品 BlockMask。
+
+和 NPU-7（`make_reduction` 签名漂移）同一类：torch_npu 的 inductor 覆盖层必须跟着
+torch nightly 走。**诉求还是那一条：以 nightly 为 CI 基线。**
+
+未提交。
