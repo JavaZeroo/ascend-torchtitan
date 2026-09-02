@@ -188,6 +188,15 @@ code = 'DEP'
 pattern = "bishengir-compile: Unknown command line argument"
 note = 'TA-1: triton-ascend 3.2.2 emits SIMT flags its bundled bishengir cannot accept'
 
+# 显存不足是**用例事实**，不是某一方的缺陷：这台机器上 CP 用例的 OOM 都来自
+# eager flex 把 O(T^2) 分数矩阵实体化（编译版 flex 在 910B2 上 lower 不了 document
+# mask 的间接寻址，只能走 eager）。放在 NPU 规则之前，否则 traceback 里的 torch_npu
+# 帧会把它误判成 torch_npu 缺陷。
+[[rule]]
+code = 'OOM'
+pattern = 'OutOfMemoryError: NPU out of memory'
+note = 'ran out of HBM; on CP cases this is eager flex materialising the O(T^2) scores'
+
 [[rule]]
 code = 'NPU'
 pattern = 'File "[^"]*torch_npu/'

@@ -215,6 +215,7 @@ def test_triage_rules_are_data_and_valid():
         "HANG",
         "CLI",
         "COMPILE",
+        "OOM",
         "UNKNOWN",
     )
     assert len(rules()) > 20
@@ -402,3 +403,40 @@ def test_a_real_red_is_never_retried(monkeypatch):
     assert len(calls) == 1
     assert r.code == "CANN"
     assert r.retried_after == ""
+
+
+def test_oom_is_its_own_attribution_and_beats_the_torch_npu_frame_rule():
+    """An OOM is a case fact, not a defect, and its traceback runs through torch_npu.
+
+    Without a rule ahead of the generic `NPU` one, three CP cases came back
+    either UNKNOWN or blamed on torch_npu (measured 2026-09-02).
+    """
+    from ascend_titan.tools.matrix.triage import triage
+
+    log = (
+        '  File "/opt/venv/lib/python3.12/site-packages/torch_npu/npu/memory.py", line 1\n'
+        "[rank2]: torch.OutOfMemoryError: NPU out of memory. Tried to allocate 10.00 GiB\n"
+    )
+    code, note = triage(log)
+    assert code == "OOM", f"got {code}: {note}"
+    assert "eager flex" in note
+
+
+def test_a_recovered_warning_never_wins_the_unknown_fallback():
+    """torch_npu logs a TypeError inside a WARNING it recovered from, every step.
+
+    It was beating the real OutOfMemoryError further up the log and became the
+    reported cause of features/fsdp+cp (measured 2026-09-02).
+    """
+    from ascend_titan.tools.matrix.triage import triage
+
+    log = (
+        "[rank0]: SomethingWeirdError: the actual failure\n"
+        "WARNING - NPU streaming create_block_mask failed; falling back to the PyTorch "
+        "implementation: TypeError: _create_block_mask_streaming() got an unexpected "
+        "keyword argument 'separate_full_blocks'\n"
+    )
+    code, note = triage(log)
+    assert code == "UNKNOWN"
+    assert "SomethingWeirdError" in note
+    assert "separate_full_blocks" not in note

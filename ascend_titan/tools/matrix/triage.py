@@ -19,6 +19,7 @@ from pathlib import Path
 RULES_PATH = Path(__file__).with_name("triage.toml")
 
 _ERR_LINE = re.compile(r"([A-Za-z_.]*(?:Error|Exception)): ([^\n]*)")
+_RECOVERED = re.compile(r"WARNING|falling back|fallback to")
 
 
 @lru_cache(maxsize=1)
@@ -38,7 +39,14 @@ def triage(log: str) -> tuple[str, str]:
             return code, note
     errs = [
         f"{name}: {msg.strip()}"
-        for name, msg in _ERR_LINE.findall(log)
+        for line in log.splitlines()
+        # A line that reports a recovery is not the failure. torch_npu logs
+        # "NPU streaming create_block_mask failed; falling back to the PyTorch
+        # implementation: TypeError: ..." as a WARNING on every step, and it was
+        # winning the fallback over the actual OutOfMemoryError further up
+        # (measured 2026-09-02 on features/fsdp+cp).
+        if not _RECOVERED.search(line)
+        for name, msg in _ERR_LINE.findall(line)
         if "ChildFailedError" not in name and "error_file" not in msg
     ]
     return "UNKNOWN", (errs[-1][:200] if errs else "no error line found")
