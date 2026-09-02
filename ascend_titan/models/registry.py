@@ -124,7 +124,9 @@ MODELS: dict[str, ModelEntry] = {
         summary=(
             "语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 "
             "`kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），"
-            "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。"
+            "0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005；"
+            "TP2 / PP2 / MoE dp2×tp2×pp2×ep4 也已实测通过，且与 stock 逐格一致"
+            "（CP 上游按设计不支持：gated delta net 要整条序列）。"
             "多模态 debugmodel 也能跑，golden 已冻结（确定性模式需要 TT-12 那条 shim）；"
             "DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；"
             "fla-npu 融合 GDN（R5）已落地并在模型级真实执行："
@@ -143,7 +145,10 @@ MODELS: dict[str, ModelEntry] = {
         golden=("qwen35_debugmodel_npu", "qwen35_debugmodel_npu_text"),
         criteria={
             "R1": "🟢",  # 0.8B 20 步 12.88826 → 8.14589
-            "R2": "🟡",  # 单卡 / FSDP2×8 🟢；TP/PP/EP 未测
+            # 单卡 / FSDP2×8 / TP2 / PP2 / MoE dp2×tp2×pp2×ep4 全绿，stock 与融合算子
+            # 逐格一致（docs/matrix/2026-09-02_qwen35_parallel.md）。CP 是上游按设计
+            # 不支持（gated delta net 要整条序列），stock 同样跑不了，不算缺口。
+            "R2": "🟢",
             "R3": "🟡",  # 对拍 🟢 + 语言侧 golden 已冻结；缺真实尺寸的长步数曲线
             "R4": "🔴",  # HF 往返 🟢；DCP 续训缺视觉塔的优化器状态（纯文本增量的代价）
             "R5": "🟢",  # 融合 GDN 模型级真实执行；tps 1,420 vs 244 ≈5.8×

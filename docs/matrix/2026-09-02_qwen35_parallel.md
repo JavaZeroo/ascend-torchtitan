@@ -19,6 +19,7 @@ torchrun --nproc_per_node=8 -m ascend_titan.train \
 | TP2 × FSDP2-4 | 🟢 `loss 12.01387` | 🟢 `loss 12.02401` |
 | PP2 × FSDP2-4 | 🟢 2 步 | 🟢 2 步 |
 | CP4 × FSDP2-2 | 🔴 上游不支持 | 🔴 同一条 |
+| MoE dp2×tp2×pp2×ep4（`qwen35_debugmodel_moe`） | 🟢 `loss 12.55579` | 🟢 `loss 12.31024` |
 
 **两条路径逐格一致。** 差别只在性能，不在能力边界。
 
@@ -53,4 +54,11 @@ qwen3.5 有 75% 的层是 gated delta net，它要整条序列，序列分片本
 `stock_moe_tp2ep2` / `npu_moe_tp2ep2` 第一次红在
 `Invalid parallel dims: dp_shard(4) * tp(2) * pp(2) != WORLD_SIZE(8)`——**是脚本参数写错**，
 不是缺陷：`qwen35_debugmodel_moe` 自带 dp2×tp2×pp2×ep4=8，已经是合法的 8 卡布局，
-不该再覆盖并行度。用自带布局重跑，结果见下（待补）。
+不该再覆盖并行度。用自带布局重跑，两格都绿（`loss 12.55579` / `12.31024`，各 4 个 step 行——
+`--local-ranks-filter 0,7` 同时打了首尾两段 PP stage）。
+
+**这一格顺带否掉一个担心**：9-01 那轮 `qwen3_5_moe_fsdp+tp+ep` 与 `qwen3_5_moe_fsdp+tp+ep+pp`
+红在 TA-1 上，我一度以为 qwen3.5 的 MoE + TP/EP/PP 组合在昇腾上不通。实际是通的——
+上游那两个用例走的是 `npu_minimal` 的通用变换（含 flex→varlen 与 ComplexRoPE 覆盖），
+而 debugmodel_moe 自带布局跑我们的 recipe 是绿的。**TA-1 挡住的是那两个用例的具体组合，
+不是「MoE + 并行」这个能力。** 这两件事之前被我混在一起说了。
