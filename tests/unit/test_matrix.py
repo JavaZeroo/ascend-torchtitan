@@ -327,3 +327,33 @@ def test_bench_normalises_the_card_spec():
     assert ",".join(str(c) for c in cards[:8]) == "0,1,2,3,4,5,6,7"
     assert ",".join(str(c) for c in cards[:1]) == "0"
     assert sorted(parse_cards("4,5,0,1")) == [0, 1, 4, 5]
+
+
+def test_cases_run_on_the_interpreter_the_tool_runs_on():
+    """A sweep must not inherit which python it runs on from the ambient PATH.
+
+    Measured 2026-09-02: launching the tool as
+    ``/opt/venv-nightly/bin/python -m ascend_titan.tools.matrix`` without that
+    venv on PATH made ``run_train.sh`` pick the system ``torchrun``, which has no
+    Triton-Ascend, and all 13 cases came back red with "0 active drivers" --
+    a full sweep of false HARNESS attributions.
+    """
+    import inspect
+    import pathlib
+    import sys
+
+    from ascend_titan.tools.matrix import runner
+
+    source = inspect.getsource(runner)
+    assert '"PYTHON": sys.executable' in source, "the runner must pin the interpreter"
+
+    script = (pathlib.Path(runner.__file__).parents[3] / "scripts" / "run_train.sh").read_text()
+    assert "PYTHON=${PYTHON:-python}" in script
+    for line in script.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert not stripped.startswith("torchrun "), (
+            f"bare torchrun resolves through PATH, not PYTHON: {stripped}"
+        )
+    assert sys.executable  # the value the runner forwards

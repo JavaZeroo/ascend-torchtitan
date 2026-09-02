@@ -13,11 +13,20 @@ COMM_MODE=${COMM_MODE:-""}
 TITAN_DIR=${TITAN_DIR:-"$(cd "$(dirname "$0")/.." && pwd)/../torchtitan"}
 cd "$TITAN_DIR"
 
+# Which interpreter runs the training. `torchrun` is just
+# `python -m torch.distributed.run`, so naming PYTHON once pins the launcher and
+# the ranks to the same environment. Left to PATH they can differ: a caller
+# outside the venv gets the system python, which has no Triton-Ascend, and every
+# run dies with "0 active drivers" (measured 2026-09-02 -- a whole matrix sweep
+# came back red on it). The matrix runner sets PYTHON=sys.executable.
+PYTHON=${PYTHON:-python}
+
 if [ "$COMM_MODE" = "fake_backend" ]; then
-  NGPU="$NPU" LOCAL_RANK=0 python -m ascend_titan.train \
+  NGPU="$NPU" LOCAL_RANK=0 "$PYTHON" -m ascend_titan.train \
     --module "$MODULE" --config "$CONFIG" --comm.mode=fake_backend --training.steps 1 "$@"
 else
-  torchrun --nproc_per_node="$NPU" --rdzv_backend c10d --rdzv_endpoint="localhost:0" \
+  "$PYTHON" -m torch.distributed.run \
+    --nproc_per_node="$NPU" --rdzv_backend c10d --rdzv_endpoint="localhost:0" \
     --local-ranks-filter "$LOG_RANK" --role rank --tee 3 \
     -m ascend_titan.train --module "$MODULE" --config "$CONFIG" "$@"
 fi

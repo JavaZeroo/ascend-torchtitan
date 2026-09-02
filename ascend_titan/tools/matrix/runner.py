@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -88,6 +89,13 @@ def run_case(case: Case, cards: list[int], out: Path, repo: Path, timeout: int) 
                 "ASCEND_RT_VISIBLE_DEVICES": ",".join(map(str, cards)),
                 "LOG_RANK": ",".join(map(str, range(case.ngpu))),
                 "TORCHTITAN_TEST_OUTPUT_DIR": str(test_out),
+                # The cases must run on the interpreter this tool runs on. Left to
+                # PATH, ``run_train.sh`` picks up whatever ``torchrun`` the ambient
+                # shell has, which on this box is the system python -- no
+                # Triton-Ascend, and every case comes back red with "0 active
+                # drivers". A whole sweep of false HARNESS reds, measured
+                # 2026-09-02. Name the interpreter instead of hoping for it.
+                "PYTHON": sys.executable,
             }
         )
         env.pop("COMM_MODE", None)
