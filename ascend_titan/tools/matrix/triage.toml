@@ -179,6 +179,15 @@ code = 'CANN'
 pattern = '\b(EZ|EI|EE|EJ)\d{4}\b|ERR(?!99999)\d{5}'
 note = 'CANN error code'
 
+# TA-1：triton-ascend 3.2.2 的 Python 前端在 SIMT 路径发 --enable-triton-ir-compile /
+# --pure-simt，而它自带的 bishengir-compile（以及 CANN 9.1.0 的那两个副本）全是 1.2.0、
+# 都不支持 SIMT。traceback 里会有 torch_npu 的帧，所以必须排在通用 NPU 规则**之前**，
+# 否则会被误判成 torch_npu 的缺陷。正文见 docs/issues/triton-ascend.md#ta-1。
+[[rule]]
+code = 'DEP'
+pattern = "bishengir-compile: Unknown command line argument"
+note = 'TA-1: triton-ascend 3.2.2 emits SIMT flags its bundled bishengir cannot accept'
+
 [[rule]]
 code = 'NPU'
 pattern = 'File "[^"]*torch_npu/'

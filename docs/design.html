@@ -500,9 +500,9 @@
       <rect class="plain" x="420" y="292" width="270" height="112"/>
       <text class="ttl" x="555" y="314" text-anchor="middle">«package» compat/shims/</text>
       <line x1="420" y1="324" x2="690" y2="324" style="stroke:var(--hairline-strong)"/>
-      <text class="mono" x="434" y="344">flex_eager_when_deterministic</text>
-      <text class="mono" x="434" y="362">flex_block_mask_eager_lm</text>
-      <text class="mono" x="434" y="380">flex_block_mask_eager_vision</text>
+      <text class="mono" x="434" y="344">flex_attention_eager</text>
+      <text class="mono" x="434" y="362">flex_attention_eager_lm</text>
+      <text class="mono" x="434" y="380">flex_attention_eager_vision</text>
 
       <rect class="plain" x="750" y="292" width="160" height="112"/>
       <text class="ttl" x="830" y="314" text-anchor="middle">上游目标属性</text>
@@ -540,7 +540,7 @@
     upstream=<span class="cm">"draft:docs/issues/torchtitan.md#deterministic-flex-on-npu"</span>,
     kind=<span class="cm">"wrap"</span>,
 )
-<span class="kw">def</span> flex_eager_when_deterministic(original):
+<span class="kw">def</span> flex_attention_eager(original):
     <span class="kw">def</span> wrapper(*args, **kwargs):
         result = original(*args, **kwargs)   <span class="cm"># 先跑上游，再补差异（P3）</span>
         ...                                  <span class="cm"># 把 eager flex 装回去</span>

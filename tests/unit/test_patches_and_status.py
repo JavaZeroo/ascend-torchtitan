@@ -22,6 +22,27 @@ def _patches(sub: str) -> list[pathlib.Path]:
 
 
 @pytest.mark.parametrize("sub", FILEABLE)
+def test_pending_patches_are_declared_unfiled(sub):
+    """patches/<repo>/pending/ holds written-but-unsent fixes.
+
+    They are exempt from the Upstream-* headers (there is nothing to link yet),
+    so the guard becomes: STATUS.md must say so, out loud, on that issue's row.
+    """
+    d = ROOT / "patches" / sub / "pending"
+    status = STATUS.read_text()
+    for patch in sorted(d.glob("*.patch")) if d.is_dir() else []:
+        issue_id = "-".join(patch.name.split("-")[:2])
+        row = re.search(rf"^\|\s*{re.escape(issue_id)}\s*\|.*$", status, re.M)
+        assert row, f"{patch.name}: no '{issue_id}' row in docs/issues/STATUS.md"
+        assert "未提交" in row.group(0), (
+            f"{patch.name} sits in pending/, so its STATUS.md row must say 未提交"
+        )
+        assert "Upstream-PR:" not in patch.read_text(), (
+            f"{patch.name}: claims a PR but sits in pending/"
+        )
+
+
+@pytest.mark.parametrize("sub", FILEABLE)
 def test_every_inflight_patch_carries_its_upstream_links(sub):
     for patch in _patches(sub):
         text = patch.read_text()

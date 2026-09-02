@@ -89,7 +89,7 @@ MLIRCompilationError: [ConvertLinalgRToBinary] encounters error
 FlexAttention 的 document mask 正落在这里。抓到的 autotune 候选带
 `--num-warps=64/32/16/8`，坐实来源是 autotune。
 
-修复：`patches/torch_npu/NPU-11-simt-kernel-type-chip-gate.patch`——按 `is_ascend950` 分流，
+修复：`patches/torch_npu/pending/NPU-11-simt-kernel-type-chip-gate.patch`——按 `is_ascend950` 分流，
 非 A5 用 `SIMD`。
 
 **修完不代表能跑**（已实测）：SIMT 参数消失，改走 SIMD，然后停在
