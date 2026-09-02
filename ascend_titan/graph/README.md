@@ -13,8 +13,9 @@ pip install -c constraints/nightly.txt decorator scipy                   # GE �
 
 ```python
 from ascend_titan.graph import npu_graph
-npu_graph(config)                       # 默认只编译 loss
-npu_graph(config, components=["model"]) # 目前会失败，见下
+
+npu_graph(config)  # 默认只编译 loss
+npu_graph(config, components=["model"])  # 目前会失败，见下
 ```
 
 ```bash

@@ -9,6 +9,7 @@ L1 的 5 个内核模块与 `_bootstrap.py` 都写着
 ```python
 try:
     import torch_npu
+
     _AVAILABLE = hasattr(torch_npu, "npu_xxx")
 except ImportError as e:
     _AVAILABLE = False

@@ -77,6 +77,7 @@ def npu_deltas(config: Trainer.Config) -> None:
     add_override(config, ATTENTION_FROM_FLEX_OVERRIDE)
     add_override(config, ATTENTION_OVERRIDE)
 
+
 # models/<model>/__init__.py
 __getattr__, __dir__ = npu_entry_points(_upstream, npu_deltas)
 ```
