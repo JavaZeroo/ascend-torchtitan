@@ -28,7 +28,7 @@ NIGHTLY track（torch 2.15.0.dev20260812 + torch_npu master + `patches/` 的八�
 
 | 归因 | 数量 | 是什么 | 谁来修 |
 |---|:--:|---|---|
-| `CANN` | 13 | CP ×12（见下）+ `float8_emulate_lora`（float8 没有 cast 内核，`aclnnInplaceCopy 561103`） | **硬件**：都要 Ascend950，910B2 上没有路径 |
+| `CANN` | 13 | ~~CP ×12~~ **归因错误，已推翻（见下节）** + `float8_emulate_lora`（float8 没有 cast 内核，`aclnnInplaceCopy 561103`） | float8 是**硬件**（要 Ascend950）；CP 那 12 格的原因是我们自己，2026-09-02 重跑 8 格转绿 |
 | `CANN` | 4 | 四个 `*_compile` 用例 | 2026-09-01 装上 Triton-Ascend 后重跑：inductor 本身能编（脚本验收过前反向），编不出来的是 document mask 的间接寻址（`inductor_indirect_memory_mode` 只在 Ascend950 赋值）。**硬件门** |
 | `COMPILE` | 1 | `gpt_oss_fsdp+tp+ep+compile` | 装 Triton-Ascend 后归因由"缺后端"变为编译路径本身失败，待查 |
 | `DEP` | 5 | ~~`fla`（qwen3_5 ×3）~~ 已证伪（2026-08-31，见语言侧那行）、`helion` ×2 | 昇腾替代属 L1 |
@@ -48,13 +48,59 @@ NIGHTLY track（torch 2.15.0.dev20260812 + torch_npu master + `patches/` 的八�
 checkpoint（full、optional、seed、HF、bf16-only）/ 梯度累积 / bf16 优化器状态 / varlen+SAC / SFT /
 多模态（muse_glimmer text 与 mm）。
 
+## CP：12 格红是我们自己造成的（2026-09-02 推翻）
+
+8-30 与 9-01 两轮都把 12 个 CP 格记成 `CANN`（硬件门），note 写「CP 必须配 FlexAttention，
+而它的 document mask 需要 910B2 没有的间接寻址」。**这个归因是错的。**
+
+真正发生的事：`npu_minimal` 先把 flex 转成 varlen，于是撞上上游
+`models/common/decoder.py:186` 的 `NotImplementedError: Context Parallel is not supported
+with ScaledDotProductAttention or VarlenAttention`。芯片没参与。
+
+torch 只给两种注意力实现了 CP：flex（`_ContextParallel.flex_input_fn` —— 一个
+forward_pre_hook，把 K/V 沿序列维 all-gather，Q 保持分片，反向由
+`_cp_custom_ops.flex_cp_allgather` 的注册反向做 reduce-scatter）和 SDPA（ring attention，
+猴补丁打在 `F.scaled_dot_product_attention` 上）。varlen 与我们的 `npu_fusion_attention`
+两个钩子都挂不上，所以那条 `raise` 是**护栏，不是机制**——删掉它不会让 CP 工作，只会让每张卡
+在自己那段序列上算注意力、**loss 静默算错**（违反 P7）。
+
+修复是不转：`recipes/deltas.py::flex_to_varlen` 在 `context_parallel_degree > 1` 时直接返回。
+重跑结果（`docs/matrix/2026-09-02_cp.md`）：**13 格 🟢 8 / 🔴 5**。
+
+| 剩下的红 | 数量 | 原因 |
+|---|:--:|---|
+| `OOM` | 3 | eager flex 实体化 O(T²) 分数矩阵。三格都是单次要 10.00 GiB、已分配 48.84 GiB。CP 度高的布局装得下，CP 度低（大头给 dp_shard）的装不下 |
+| `CANN` | 1 | `gpt_oss_pp+fsdp+cp+ep+sacop`，CANN error code，**待查**（不再是 CP 护栏那条） |
+| `DEP` | 1 | `helion` 缺失，与 CP 无关 |
+
+### 为什么 CP 走的是 eager flex 而不是我们的融合算子
+
+因为编译版 flex 在 910B2 上编不出 document mask（硬件门），而 CP 只认 flex 和 SDPA。
+两个条件一夹，CP 就只剩 eager flex 一条路。**这是止损，不是终局**：三个 OOM 正是这条路的代价。
+
+终局应该是让 CP 走 `npu_fusion_attention`。读过 torch 的实现后，这件事比看起来小：
+
+- flex 的 CP 钩子实质只有 all-gather K/V，二十来行，没有输出钩子。
+- 我们的 `AscendFusionAttention.forward(q_TNH, k_TNH, v_TNH, ...)` 前三个参数已经是 q/k/v
+  ——上游三个注意力模块的 docstring 都写着「前三个参数必须是 q, k, v 才能配 `_ContextParallel`」。
+- 我们的算子已经把 Q 与 KV 的边界分开传（`cu_seq_q` / `cu_seq_k` 两个参数），
+  「Q 是分片、KV 是全长」在 API 层面本来就能表达。
+- 反向不用自己写：`flex_cp_allgather` 是注册过反向的 custom op。
+
+真正的工作量在**偏移的账**：`sparse_mode=3`（因果、右对齐）在「本 rank 的 Q 恰好是序列尾部」时
+正好正确；中间一段差一个固定偏移，`sparse_mode=4`（带状 + `pre_tockens`/`next_tockens`）能表达；
+而 headtail 负载均衡把 Q 切成头尾两段不连续的块，单个带状掩码表达不了。所以有一条便宜的路：
+`load_balancer_type=None`（连续分片）+ `sparse_mode=4` 配每 rank 的偏移，牺牲负载均衡换
+融合算子与显存。**这是新增能力，不是修复，应该做在 TorchTitanTurbo 上。**
+
 ## 红格按根因归类
 
 | 根因 | 用例数 | 归因 | 谁来修 |
 |---|---|---|---|
-| `torch.compile` + flex：document mask 的间接寻址在 910B2 上 lower 不了 | 5 | CANN / COMPILE | 硬件（Ascend950）；inductor 本身已可用 |
+| `torch.compile` + flex：document mask 的间接寻址在 910B2 上 lower 不了 | 1 | COMPILE | 硬件（Ascend950）；inductor 本身已可用。**注意**：模型级 flex 走 eager 是能跑的（2026-09-02 实测 stock `qwen35_debugmodel` `loss 12.72494 → 12.56159`），此前记成「跑不了」是我们的 shim 门开窄了 |
 | CUDA-only 依赖缺失：`helion`（helion_rope、deepseek MTP）、`torchao`（float8） | 6 | DEP | 昇腾替代属 L1 |
 | 上游树内 CUDA-only 组件：`fused_swiglu`/`fused_grouped_experts` Triton 内核、DistMuon | 4 | TT-KERNEL / TT-CUDA | 上游按设计为 CUDA；昇腾替代属 L1 |
+| CP 用例 eager flex 的 O(T²) 分数矩阵装不下 | 3 | OOM | 显存事实，下游于同一个硬件门；终局是让 CP 走融合算子（见上节） |
 | gpt_oss + TP：路由 softmax backward 形状不匹配（LSE 尾部已实现后新暴露） | 1 | OURS-10 | 本仓，待查 |
 | 上游 `fused_mla` override 与我们的 RoPE override 节点冲突（该用例本身 CUDA-only） | 1 | OURS-9 / TT-9 | `npu_minimal` 检测到上游 override 时跳过 RoPE override |
 
