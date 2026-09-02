@@ -62,3 +62,24 @@ qwen3.5 有 75% 的层是 gated delta net，它要整条序列，序列分片本
 上游那两个用例走的是 `npu_minimal` 的通用变换（含 flex→varlen 与 ComplexRoPE 覆盖），
 而 debugmodel_moe 自带布局跑我们的 recipe 是绿的。**TA-1 挡住的是那两个用例的具体组合，
 不是「MoE + 并行」这个能力。** 这两件事之前被我混在一起说了。
+
+## 追加：TA-1 的三个红格全部转绿（2026-09-02 重测）
+
+9-01 那轮 qwen3.5 有三格红、归因 TA-1，我一度据此说「qwen3.5 的 MoE + TP/EP/PP
+在昇腾上不通」。用矩阵工具重测，**三格全绿**：
+
+| 用例 | 9-01 | 现在 |
+|---|:--:|:--:|
+| `qwen3_5_fsdp+tp+varlen_attn+per_op_sac` | 🔴 TA-1 | 🟢 53s |
+| `qwen3_5_moe_fsdp+tp+ep` | 🔴 TA-1 | 🟢 72s |
+| `qwen3_5_moe_fsdp+tp+ep+pp` | 🔴 TA-1 | 🟢 59s |
+
+原因说得通：TA-1 是**编译**掩码构建时 autotune 走进 SIMT 路径才触发的。今天把
+`flex_block_mask_eager` 的门从「确定性模式」放宽到硬件探测之后，掩码构建不再进
+inductor，那条路径就不存在了。
+
+同一轮还跑了 stock 对照（`__stock`，零 override），`qwen35_debugmodel_varlen_attn_fsdp2_tp2_sac`
+与 `qwen35_debugmodel_moe_fsdp4_tp2_ep4` 也都绿——**两条路径依然逐格一致**。
+
+**TA-1 因此不是阻塞**：它挡住的矩阵格子现在是 0 个。重新界定见
+`docs/issues/triton-ascend.md`。

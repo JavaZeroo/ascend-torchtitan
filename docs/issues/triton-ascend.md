@@ -104,5 +104,18 @@ python -m torchtitan.train --module torchtitan.models.qwen3_5.config_registry \
 bishengir-compile，要么 Python 侧在这些参数不被支持时给出可操作的报错
 （而不是让 `CalledProcessError` 冒到用户面前），并说明 `simt_only` 在该版本不可用。
 
-**影响**：910B2 上模型级 FlexAttention 编不出来 → 上游要求 CP 必须配 flex，所以
-`torch.compile` + flex 与 CP 这两条路都停在这里。
+**影响（2026-09-02 重新界定，比我们最初判断的小）**：TA-1 只挡**编译版**的
+`create_block_mask`。把掩码构建改走 eager 之后，能力矩阵里被它挡住的格子是 **0 个**：
+
+| 用例 | 9-01 | 9-02 重测 |
+|---|:--:|:--:|
+| `qwen3_5_fsdp+tp+varlen_attn+per_op_sac` | 🔴 TA-1 | 🟢 53s |
+| `qwen3_5_moe_fsdp+tp+ep` | 🔴 TA-1 | 🟢 72s |
+| `qwen3_5_moe_fsdp+tp+ep+pp` | 🔴 TA-1 | 🟢 59s |
+
+所以这条**不是阻塞**，是一条正确性/可用性缺陷：它让 `simt_only` 这个声明为受支持的
+compile_mode 实际不可执行，并且把失败暴露成一条指向 CANN 版本的误导性报错
+（`Unknown command line argument`，会让人去升级 toolkit，而升级不解决任何问题）。
+
+它会重新变成阻塞的场景：换到能 lower 间接寻址的芯片（Ascend950）之后，掩码构建与
+flex 都该走编译路径，那时 SIMT 是真要用的。
