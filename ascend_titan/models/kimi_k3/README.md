@@ -1,14 +1,47 @@
 # Kimi K3 on Ascend
 
-**状态 🟢** —— 多模态 + KDA + MoE，2026-08-30 在 910B2 上跑通 10 步。**性能极低**（flex 走 eager，是 910B2 的硬件门），不要拿它做性能结论。
+> 结论速查（2026-09-02，910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 + torch_npu master）
 
-| | |
-|---|---|
-| 上游模型包 | `torchtitan.models.kimi_k3` |
-| 我们的 recipe | `ascend_titan/models/kimi_k3/recipes.py` |
-| 昇腾算子 | `kernels/kda.py`（KDA + causal conv1d）、`kernels/situ_glu.py`（ops-nn `aclnnSituGlu`） |
-| 额外依赖 | `nvidia-cutlass-dsl`（有 aarch64 wheel；只 import 不执行） |
-| 实测 | 单卡 10 步 `loss 4.10312 / grad_norm 4.5312`，显存 12.88 GiB，**tps 47**（LM 走昇腾融合 varlen 注意力，视觉塔保留 flex） |
+**多模态 + KDA + MoE 能跑**，单卡 10 步 `loss 4.10312 / grad_norm 4.5312`，显存 12.88 GiB。
+**性能极低（tps 47），不要拿它做性能结论**，原因见「性能」一节。
+
+## 能跑什么
+
+| 场景 | 状态 | 证据 |
+|---|:--:|---|
+| 单卡 debugmodel（多模态，视觉塔 + LM） | 🟢 | 10 步，golden 已冻结并逐位复现 |
+| 融合变体（+ ops-nn SiTU-GLU） | 🟢 | `loss 4.29434`，tps 48 |
+| 确定性模式（录 golden） | 🟢 | 需要 `flex_block_mask_eager` shim |
+
+## 不能跑什么
+
+| 场景 | 状态 | 谁的限制 |
+|---|:--:|---|
+| `kimi_k3_mm_fsdp`（矩阵用例） | ⚪ | **上游写死要 CUDA capability 10.0 / 10.3**，不是昇腾能绕的 |
+| 并行组合（TP / PP / EP / CP） | ⚪ | 没测。只有 debugmodel，R1–R8 一条都没取 |
+| 性能基线 | ⚫ | 按 P13 拒绝记录：三个瓶颈没解决之前数字会误导 |
+
+## 能换哪些模块
+
+| 上游节点 | 换成 | 为什么必须换 | 什么时候能删 |
+|---|---|---|---|
+| 语言塔 6 个 `FlexAttention`（layers 3/7/11/15/19/23） | `VarlenAttention` → 昇腾融合注意力 | 编译版 flex 编不出 document mask；stock varlen 要 `aten::_flash_attention_forward`（NPU-1） | 换到能 lower 间接寻址的芯片后自动失效（特性探测） |
+| 整棵 KDA 子树 | `kernels/kda.py`（attn_gym reference + torch 短卷积） | 上游 `KDAKernel.forward` 显式要求 CUDA + Blackwell SM100/SM103，否则 raise | 有昇腾 KDA 融合算子后换实现，override 仍在 |
+| `checkpoint.enable` | `False` | 冒烟运行不做 DCP I/O | 这是便利，不是限制（`--checkpoint.no-enable` 可控） |
+
+可选加速：
+
+| 模块 | recipe | 收益 |
+|---|---|---|
+| ops-nn SiTU-GLU | `kimi_k3_debugmodel_npu_fused` | `loss 4.29434`，tps 48（**不改变吞吐**：瓶颈不在这） |
+
+**没有动的**（同样是结论）：视觉塔的 `FlexAttention` 保持原样（它吃 `BlockMask`，转成 varlen
+只会在塔内部炸一个更难懂的类型错误）、RoPE 走上游实现、MoE 路由、`_apply_attention_residual`、
+loss、并行策略、优化器全是上游默认。
+
+---
+
+## 以下是使用与实现细节
 
 ## 1. 跑
 

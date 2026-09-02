@@ -1,15 +1,68 @@
 # Qwen3 on Ascend
 
-**状态 🟢 release 级** · 参考模型：NIGHTLY 门禁跑的就是它，golden loss 曲线逐位冻结。
-`docs/model-release-criteria.md` 的 R1–R8 每条都有记录下来的命令与输出，见下面第 6 节。
+> 结论速查（2026-09-02，910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 + torch_npu master）
 
-| | |
-|---|---|
-| 上游模型包 | `torchtitan.models.qwen3`（`../torchtitan/torchtitan/models/qwen3/`） |
-| 我们的 recipe | `ascend_titan/models/qwen3/recipes.py` |
-| 矩阵探针 | `ascend_titan/models/qwen3/probes.py`（只用于测量，别拿来训练） |
-| golden | `tests/assets/losses/npu/qwen3_debugmodel_npu*__torch<v>_npu<v>.txt`；四条曲线（参考 / FSDP2 / fused / fused_fsdp2）在 NIGHTLY 上均已录制，且与 torch 2.13 的曲线逐位一致 |
-| 最近验证 | torch 2.15.0.dev20260812 + torch_npu 2.15.0（master 源码构建 + `patches/`），CANN 9.1.0，2026-08-30 |
+**参考模型，release 级**：R1–R8 每条都有记录下来的命令与输出（第 6 节），golden 逐位冻结。
+
+## 能跑什么
+
+上游 `torchtitan.models.qwen3` 的每个 flavor 都有两个入口——裸名 = 原味上游，
+`_npu` 后缀 = 叠加昇腾增量。**加一个新尺寸不需要写函数。**
+
+| 场景 | 状态 | 证据 |
+|---|:--:|---|
+| 单卡 | 🟢 | golden 逐位 |
+| FSDP2 × 8 | 🟢 | golden 逐位 |
+| TP2 × FSDP2-4 | 🟢 | 矩阵 |
+| PP2 × FSDP2-4（8B 真实尺寸） | 🟢 | `qwen3_8b_npu_pp2`，tps 1,409 |
+| **Context Parallel**（TP+CP、MoE TP+CP+EP、非融合 QKV TP+CP） | 🟢 | 矩阵 3 格，2026-09-02 |
+| 真实尺寸 0.6B（真 tokenizer + 真 C4 + 4096） | 🟢 | 500 步 12.12 → 6.28 |
+| DCP 续训 / HF 权重往返 | 🟢 | 逐位一致 |
+| 长稳 500 步 | 🟢 | rc=0，显存自第 51 步起恒定，无 NaN |
+
+**CP 是 2026-09-02 才转绿的**：此前 12 个 CP 格全红，归因写的是硬件，实际是我们自己
+把 flex 转成了 varlen 才撞上上游的 CP 护栏。修复见 `recipes/deltas.py::flex_to_varlen`。
+
+## 不能跑什么
+
+| 场景 | 状态 | 谁的限制 |
+|---|:--:|---|
+| `fused_qkv + TP + CP + compile + helion_rope` | 🔴 | **依赖**。`helion` 是 CUDA-only 的内核 DSL，昇腾无替代 |
+| CP + 低 CP 度的布局（`fsdp+cp`、`hsdp+cp_*`） | 🔴 OOM | CP 下注意力只能走 eager flex（见下），它实体化 O(T²) 分数矩阵。CP 度高的布局装得下 |
+
+## 能换哪些模块
+
+全部通过 `--override.imports` 控制，**不改代码**。
+
+| 上游节点 | 换成 | override 目标 | 何时必须 |
+|---|---|---|---|
+| `FlexAttention` | 昇腾融合注意力 | `...kernels.attention.npu_fusion_attention_from_flex` | 非 CP 场景。编译版 flex 在 910B2 上编不出 document mask，eager 版会 OOM |
+| `VarlenAttention` | 同上 | `...kernels.attention.npu_fusion_attention` | stock varlen 要 `aten::_flash_attention_forward`（NPU-1） |
+
+**CP 场景下这两条不生效**（`flex_to_varlen` 会跳过）：torch 只给 flex 和 SDPA 实现了 CP，
+换成融合算子会撞上上游 `decoder.py:186` 的 `NotImplementedError`。代价是 eager flex 的显存。
+
+可选加速（opt-in，bf16 舍入级差异，带自己的 golden）：
+
+| 模块 | override 目标 | 收益 |
+|---|---|---|
+| RMSNorm | `...kernels.rms_norm.npu_rms_norm` | 三者合计 tps 77k（+40%），显存 2.38 → 1.89 GiB |
+| SwiGLU | `...kernels.swiglu.npu_swiglu` | 同上 |
+| RoPE cos/sin | `...kernels.rope.npu_rotary_mul_cossin` | 同上 |
+
+一行开全部：`--config qwen3_debugmodel_npu_fused`。
+
+### 只换其中一个
+
+```bash
+python -m ascend_titan.train --module ascend_titan.models.qwen3 \
+  --config qwen3_debugmodel \
+  --override.imports ascend_titan.kernels.attention.npu_fusion_attention_from_flex
+```
+
+---
+
+## 以下是使用与实现细节
 
 ## 1. 五分钟跑起来
 

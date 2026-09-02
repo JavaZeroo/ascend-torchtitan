@@ -1,32 +1,76 @@
 # models —— 每个模型一个包（L3）
 
-`ascend_titan/models/<model>/` 放一个模型族的全部内容；跨模型的机制（`deltas.py` 原语、矩阵解析器与它的 `npu_minimal` / `npu_fused`）
-留在 `ascend_titan/recipes/`。**内容在 `models/`，机制在 `recipes/`。**
+> **上游 torchtitan 模型在昇腾上能不能跑？**（2026-09-02 实测，910B2 / CANN 9.1.0 /
+> torch 2.15.0.dev20260812 + torch_npu master + `patches/`）
 
+全量能力矩阵 = 上游 `tests/integration_tests` 的 features + models 两套用例，**61 格**：
+
+| | 数量 |
+|---|--:|
+| 🟢 能跑 | **43** |
+| 🔴 不能跑 | 13 |
+| ⚪ 未评估 / 上游禁用 | 5 |
+
+按模型族：
+
+| 上游模型 | 🟢 | 🔴 | 一句话 | 细节 |
+|---|--:|--:|---|---|
+| **Llama 3**（features 全套跑在它上面） | 28 | 6 | **零 override 原样训练**，本项目最强的结论 | [llama3/README](llama3/README.md) |
+| **Qwen3** | 3 | 1 | release 级参考模型，R1–R8 全绿 | [qwen3/README](qwen3/README.md) |
+| **Qwen3.5** | 3 | 0 | 原味与融合两条路径**能力边界完全一样** | [qwen3_5/README](qwen3_5/README.md) |
+| **DeepSeek-V3** | 3 | 2 | MoE + EP 通；树内 Triton 内核与 helion 不通 | 矩阵覆盖，无专属 recipe |
+| **GPT-OSS** | 2 | 2 | PP+FSDP+EP+SAC 通；compile 与 CP+PP 待查 | 矩阵覆盖 |
+| **Muse Glimmer** | 2 | 0 | text 与多模态都通 | 矩阵覆盖 |
+| **Kimi K2.5** | 0 | 2 | DistMuon 写死 CUDA，上游按设计如此 | 矩阵覆盖 |
+| **Kimi K3** | 0 | 1⚪ | debugmodel 单卡通；矩阵那格上游写死要 CUDA cap 10.0 | [kimi_k3/README](kimi_k3/README.md) |
+
+## 13 个红格，按谁来修分类
+
+| 谁的限制 | 数量 | 是什么 |
+|---|--:|---|
+| **上游按设计 CUDA-only** | 5 | 树内 Triton 内核（`fused_swiglu`、`fused_grouped_experts`、`deepseek_v3_fused_mla_swiglu`）、DistMuon ×2 |
+| **CUDA-only 依赖缺失** | 2 | `helion` 内核 DSL（`deepseek_v3_mtp`、`qwen3_fused_qkv...helion_rope`） |
+| **910B2 硬件** | 1 | float8 没有 cast 内核，要 Ascend950 |
+| **显存**（CP + eager flex 的 O(T²) 分数矩阵） | 3 | `fsdp+cp`、`hsdp+cp_with_dp_shard`、`hsdp+cp_without_dp_shard` |
+| **待查** | 2 | `gpt_oss_fsdp+tp+ep+compile`、`gpt_oss_pp+fsdp+cp+ep+sacop` |
+
+**注意这张表里没有「torch_npu 缺陷」和「我们的缺陷」这两类**——它们曾经有，都已修掉或
+被证伪。历史与推翻过程见 `docs/matrix/`。
+
+## 三个通用限制（跨模型，不是某个模型的问题）
+
+| 限制 | 影响 | 现在怎么处理 | 什么时候消失 |
+|---|---|---|---|
+| 编译版 FlexAttention 的 document mask 在 910B2 上 lower 不了（间接寻址只有 Ascend950 有） | 所有用 flex 的模型 | 掩码构建与 flex 都走 eager（shim，硬件探测） | 换到 Ascend950 自动让路 |
+| eager flex 实体化 O(T²) 分数矩阵 | 非 CP 场景 → 换成昇腾融合注意力；CP 场景 → 只能忍，显存不够就 OOM | `flex_to_varlen`（CP 下自动跳过） | 让 CP 走融合算子（新增能力，见 `docs/capability-matrix.md`） |
+| stock `VarlenAttention` 要 `aten::_flash_attention_forward`，torch_npu 没有 | 所有 varlen flavor | 换成昇腾融合注意力 | NPU-1 合入后可换回 |
+
+## 每个模型能换哪些模块
+
+**统一规则**：上游每个 flavor 都有两个入口——裸名 = 原味上游零 override，`_npu` 后缀 =
+叠加该模型族的昇腾增量。想只换其中一个模块，用 `--override.imports`，**不需要改代码**：
+
+```bash
+python -m ascend_titan.train --module ascend_titan.models.qwen3_5 \
+  --config qwen35_122b_a10b \
+  --override.imports ascend_titan.kernels.attention.npu_fusion_attention_from_flex
 ```
-ascend_titan/models/
-├── README.md          ← 你在这里：总览 + 新增模型的流程
-├── registry.py        ← 模型元数据（状态、阻塞、golden），纯数据，不 import torch
-├── _template/         ← 新模型骨架，复制即用
-└── <model>/
-    ├── __init__.py    ← 重导出 recipe，使 `--module ascend_titan.models.<model>` 可用
-    ├── recipes.py     ← 支持的入口：`<model>_<flavor>_npu[_<variant>]`
-    ├── probes.py      ← 可选：只用于矩阵测量的配置（不是给人跑的）
-    └── README.md      ← 必需：该模型的完整使用指南
-```
+
+各模型换了什么、没换什么，见上表里对应的 README——每个都有「能换哪些模块」一节，
+并且明确列出**没有动的**部分（那同样是结论）。
 
 ## 支持状态
 
 | 模型 | 状态 | 我们的 recipe | 说明 / 阻塞 |
 |---|:--:|---|---|
 | **Qwen3** (`qwen3`) | 🟢 | `qwen3` | 参考模型，release 级：0.6B 真实尺寸 + 真实 tokenizer/C4，单卡 / FSDP2×8 / TP2 / PP2 全绿，golden 逐位冻结，500 步长稳、checkpoint 续训逐位一致、HF 权重往返、性能基线带 provenance。 |
-| **Qwen3.5** (`qwen3_5`) | 🟡 | `qwen3_5` | 语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。多模态 debugmodel 也能跑，golden 已冻结（确定性模式需要 TT-12 那条 shim）；DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）；GDN 没有融合算子，性能是主要缺口。 |
+| **Qwen3.5** (`qwen3_5`) | 🟡 | `qwen3_5` | 语言侧 0.8B 路径打通（gated delta net 与 causal conv1d 走 `kernels/gdn.py` 的 override，逐项对上游/参考实现对拍），0.8B 20 步 12.88826 → 8.14589、FSDP2×8 12.90316 → 8.06005。多模态 debugmodel 也能跑，golden 已冻结。TP2 / PP2 / MoE dp2×tp2×pp2×ep4 已实测，且与原味上游逐格一致。CP 上游按设计不支持（gated delta net 要整条序列，CUDA 上也一样）。**阻塞：**DCP 续训 🔴（纯文本增量让视觉塔没有优化器状态）。 |
 | **Llama 3** (`llama3`) | 🟡 | `llama3` | 零 override 的 stock 参考路径：复数 RoPE + ChunkedLoss + spmd_types 全部走上游默认实现。只有 debugmodel：R1–R8 一条都没取，按新判据是 🟡 而不是 🟢。 |
 | **Kimi K3** (`kimi_k3`) | 🟡 | `kimi_k3` | 多模态 + KDA + MoE，单卡 10 步 loss 4.56418，golden 已冻结并逐位复现。只有 debugmodel：R1–R8 一条都没取。 |
-| **DeepSeek-V3** (`deepseek_v3`) | 🟡 | —（矩阵覆盖） | MoE + EP 在矩阵扫描里通过（fsdp+ep、hsdp+ep）；没有专属 recipe，通过矩阵 runner 跑上游配置。 **阻塞：**fused_mla_swiglu：OURS-9（override 节点冲突）；MTP + helion_rope：DEP-HELION。 |
-| **GPT-OSS** (`gpt_oss`) | 🟡 | —（矩阵覆盖） | pp+fsdp+ep+sacop 在矩阵里 🟢（attention sinks 的 LSE 尾部已实现）。 **阻塞：**fsdp+tp+ep：OURS-10（TP2+EP4 下路由 softmax backward 形状不匹配），待查。 |
-| **Kimi K2.7** (`kimi_k2_7`) | 🟡 | —（矩阵覆盖） | muon / MoE 用例在矩阵里覆盖；无专属 recipe。 **阻塞：**DistMuon 是 CUDA-only（TT-CUDA）。 |
-| **Muse Glimmer** (`muse_glimmer`) | 🟡 | —（矩阵覆盖） | text 变体在矩阵里覆盖；多模态变体依赖 CP。 **阻塞：**mm 变体走 CP，停在 CANN/硬件（document mask 的间接寻址）。 |
+| **DeepSeek-V3** (`deepseek_v3`) | 🟡 | —（矩阵覆盖） | MoE + EP 在矩阵扫描里通过（fsdp+ep、hsdp+ep）；没有专属 recipe，通过矩阵 runner 跑上游配置。 **阻塞：**`fused_mla_swiglu`：TT-KERNEL（上游树内 Triton 内核，按设计 CUDA-only）；MTP + compile：缺 `helion`。 |
+| **GPT-OSS** (`gpt_oss`) | 🟡 | —（矩阵覆盖） | `fsdp+tp+ep` 与 `pp+fsdp+ep+sacop` 均 🟢（attention sinks 的 LSE 尾部已实现；OURS-10 已修）。 **阻塞：**`fsdp+tp+ep+compile`（COMPILE）与 `pp+fsdp+cp+ep+sacop`（CANN error code），两条都待查。 |
+| **Kimi K2.7** (`kimi_k2_7`) | 🟡 | —（矩阵覆盖） | muon / MoE 用例在矩阵里覆盖；无专属 recipe。 **阻塞：**DistMuon 写死 CUDA（TT-CUDA），上游按设计如此。 |
+| **Muse Glimmer** (`muse_glimmer`) | 🟡 | —（矩阵覆盖） | text 与多模态两个变体在矩阵里**都已通过**（`muse_glimmer_text_fsdp`、`muse_glimmer_mm_fsdp+tp+sp`）。无阻塞。 |
 | **Flux** (`flux`) | ⚪ | —（矩阵覆盖） | 扩散模型，尚未评估。 |
 
 🟢 只给 release 级——`docs/model-release-criteria.md` 的 R1–R8 每一条都有记录下来的命令与输出。
@@ -36,7 +80,7 @@ ascend_titan/models/
 | 模型 | R1 | R2 | R3 | R4 | R5 | R6 | R7 | R8 | 证据 |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
 | **Qwen3** | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | docs/release/qwen3_torch2.15.0.dev20260812_npu2.15.0.md |
-| **Qwen3.5** | 🟢 | 🟡 | 🟡 | 🔴 | 🔴 | ⚪ | 🟢 | 🟢 | — |
+| **Qwen3.5** | 🟢 | 🟢 | 🟡 | 🔴 | 🟢 | ⚪ | 🟢 | 🟢 | docs/release/qwen3_5_torch2.15.0.dev20260812_npu2.15.0.md |
 
 ⚪ 表示没测过，不表示坏（P2）。逐条判据的定义见 `docs/model-release-criteria.md`，
 一次跑完 R1 / R2 / R4：
