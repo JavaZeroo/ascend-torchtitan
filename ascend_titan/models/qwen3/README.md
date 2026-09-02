@@ -1,58 +1,45 @@
 # Qwen3 on Ascend
 
-> 结论速查（2026-09-02，910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 + torch_npu master）
+> 910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 + torch_npu master + `patches/`。
+> ✅ 实测通过 ｜ ❌ 实测失败 ｜ ❓ 没测过（不代表坏）
+>
+> **参考模型，release 级**：R1–R8 每条都有记录下来的命令与输出（见后面第 6 节）。
 
-**参考模型，release 级**：R1–R8 每条都有记录下来的命令与输出（第 6 节），golden 逐位冻结。
+## 场景总表
 
-## 能跑什么
+| 模型 | 场景 | 状况 | 限制 |
+|---|---|:--:|---|
+| **`qwen3_debugmodel`**<br>原生上游，零 override | 单卡 | ✅ | flex 只能走 eager；**非 CP 场景下不要这么跑**：eager flex 实体化 O(T²) 分数矩阵，实测一次要 20 GiB 而 OOM |
+| | 并行组合 | ❓ | 同上，没单独测；矩阵测的是 `_npu` 路径 |
+| **`qwen3_debugmodel_npu`**<br>+ 昇腾融合 attn | 单卡 | ✅ | 无（golden 逐位） |
+| | FSDP2 × 8 | ✅ | 无（golden 逐位） |
+| | TP2 × FSDP2-4 | ✅ | 无 |
+| | PP2 × FSDP2-4 | ✅ | 无 |
+| | MoE + TP + CP + EP | ✅ | 无（2026-09-02 转绿） |
+| | TP + CP（含非融合 QKV） | ✅ | CP 下注意力**不会**换成融合算子，只能走 eager flex |
+| | `fsdp+cp` / `hsdp+cp_*`（低 CP 度） | ❌ | **显存**：CP 度低 → 每卡序列长 → eager flex 的 O(T²) 装不下 |
+| | `fused_qkv + TP + CP + compile + helion_rope` | ❌ | **依赖**：`helion` 是 CUDA-only 内核 DSL |
+| | torch.compile（1d/2d/3d） | ✅ | 需要 Triton-Ascend 在基线里 |
+| | DCP 续训 / HF 权重往返 | ✅ | 逐位一致 |
+| **`qwen3_debugmodel_npu_fused`**<br>+ RMSNorm / SwiGLU / RoPE | 单卡、FSDP2 | ✅ | 数值与 golden 在 bf16 舍入级不同，带自己的 golden |
+| **`qwen3_0_6b_npu`**<br>真实尺寸，真 tokenizer + 真 C4 + 4096 | 单卡 | ✅ | 500 步 `12.12 → 6.28`，无 NaN，显存自第 51 步起恒定 |
+| **`qwen3_8b_npu_pp2`**<br>8B × PP2 × FSDP2-4 | 8 卡 | ✅ | tps 1,409。不用 14B：8×910B2 装不下 |
 
-上游 `torchtitan.models.qwen3` 的每个 flavor 都有两个入口——裸名 = 原味上游，
-`_npu` 后缀 = 叠加昇腾增量。**加一个新尺寸不需要写函数。**
-
-| 场景 | 状态 | 证据 |
-|---|:--:|---|
-| 单卡 | 🟢 | golden 逐位 |
-| FSDP2 × 8 | 🟢 | golden 逐位 |
-| TP2 × FSDP2-4 | 🟢 | 矩阵 |
-| PP2 × FSDP2-4（8B 真实尺寸） | 🟢 | `qwen3_8b_npu_pp2`，tps 1,409 |
-| **Context Parallel**（TP+CP、MoE TP+CP+EP、非融合 QKV TP+CP） | 🟢 | 矩阵 3 格，2026-09-02 |
-| 真实尺寸 0.6B（真 tokenizer + 真 C4 + 4096） | 🟢 | 500 步 12.12 → 6.28 |
-| DCP 续训 / HF 权重往返 | 🟢 | 逐位一致 |
-| 长稳 500 步 | 🟢 | rc=0，显存自第 51 步起恒定，无 NaN |
-
-**CP 是 2026-09-02 才转绿的**：此前 12 个 CP 格全红，归因写的是硬件，实际是我们自己
-把 flex 转成了 varlen 才撞上上游的 CP 护栏。修复见 `recipes/deltas.py::flex_to_varlen`。
-
-## 不能跑什么
-
-| 场景 | 状态 | 谁的限制 |
-|---|:--:|---|
-| `fused_qkv + TP + CP + compile + helion_rope` | 🔴 | **依赖**。`helion` 是 CUDA-only 的内核 DSL，昇腾无替代 |
-| CP + 低 CP 度的布局（`fsdp+cp`、`hsdp+cp_*`） | 🔴 OOM | CP 下注意力只能走 eager flex（见下），它实体化 O(T²) 分数矩阵。CP 度高的布局装得下 |
-
-## 能换哪些模块
-
-全部通过 `--override.imports` 控制，**不改代码**。
+## 能替换哪些模块
 
 | 上游节点 | 换成 | override 目标 | 何时必须 |
 |---|---|---|---|
-| `FlexAttention` | 昇腾融合注意力 | `...kernels.attention.npu_fusion_attention_from_flex` | 非 CP 场景。编译版 flex 在 910B2 上编不出 document mask，eager 版会 OOM |
+| `FlexAttention` | 昇腾融合注意力 | `...kernels.attention.npu_fusion_attention_from_flex` | 非 CP 场景（CP 下自动跳过） |
 | `VarlenAttention` | 同上 | `...kernels.attention.npu_fusion_attention` | stock varlen 要 `aten::_flash_attention_forward`（NPU-1） |
+| `RMSNorm`（可选） | `npu_rms_norm` | `...kernels.rms_norm.npu_rms_norm` | 性能 |
+| `FusedSwiGLU`（可选） | `npu_swiglu` | `...kernels.swiglu.npu_swiglu` | 性能 |
+| RoPE cos/sin（可选） | `npu_rotary_mul` | `...kernels.rope.npu_rotary_mul_cossin` | 性能 |
 
-**CP 场景下这两条不生效**（`flex_to_varlen` 会跳过）：torch 只给 flex 和 SDPA 实现了 CP，
-换成融合算子会撞上上游 `decoder.py:186` 的 `NotImplementedError`。代价是 eager flex 的显存。
+三个可选项合计 tps 77k（+40%），显存 2.38 → 1.89 GiB。一行开全部：`--config qwen3_debugmodel_npu_fused`。
 
-可选加速（opt-in，bf16 舍入级差异，带自己的 golden）：
+**没有替换的**：loss（`ChunkedLossWrapper`）、spmd 后端、MoE 路由、优化器、并行策略——全是上游默认。
 
-| 模块 | override 目标 | 收益 |
-|---|---|---|
-| RMSNorm | `...kernels.rms_norm.npu_rms_norm` | 三者合计 tps 77k（+40%），显存 2.38 → 1.89 GiB |
-| SwiGLU | `...kernels.swiglu.npu_swiglu` | 同上 |
-| RoPE cos/sin | `...kernels.rope.npu_rotary_mul_cossin` | 同上 |
-
-一行开全部：`--config qwen3_debugmodel_npu_fused`。
-
-### 只换其中一个
+只换其中一个：
 
 ```bash
 python -m ascend_titan.train --module ascend_titan.models.qwen3 \

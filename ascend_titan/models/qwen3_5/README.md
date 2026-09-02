@@ -1,66 +1,60 @@
 # Qwen3.5 on Ascend
 
-> 结论速查（2026-09-02 实测，910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 + torch_npu master）
+> 910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 + torch_npu master + `patches/`，2026-09-02 实测。
+> ✅ 实测通过 ｜ ❌ 实测失败 ｜ ❓ 没测过（不代表坏）
 
-## 能跑什么
+## 场景总表
 
-**上游 `torchtitan.models.qwen3_5` 的每个 flavor 都有两个入口**，两条路径能力边界**完全一样**：
+| 模型 | 场景 | 状况 | 限制 |
+|---|---|:--:|---|
+| **`qwen35_debugmodel`**<br>原生上游，零 override | 单卡 | ✅ | flex 只能走 eager：编译版在 910B2 上编不出 document mask |
+| | FSDP2 × 8 | ✅ | 同上 |
+| | TP2 × FSDP2-4 | ✅ | 同上 |
+| | PP2 × FSDP2-4 | ✅ | 同上 |
+| | EP（MoE dp2×tp2×pp2×ep4） | ✅ | 同上 |
+| | varlen_attn + per-op SAC | ✅ | 同上 |
+| | CP | ❌ | **上游不支持**：GDN 占 75% 的层，要整条序列。代码无设备判断，CUDA 上一样 |
+| | torch.compile | ❓ | 没测 |
+| | DCP 续训 | ❓ | 没测 |
+| **`qwen35_debugmodel_npu`**<br>+ 昇腾融合 attn + GDN override | 单卡 | ✅ | 无（golden 逐位冻结） |
+| | FSDP2 × 8 | ✅ | 无 |
+| | TP2 × FSDP2-4 | ✅ | 无 |
+| | PP2 × FSDP2-4 | ✅ | 无 |
+| | EP（MoE dp2×tp2×pp2×ep4） | ✅ | 无 |
+| | varlen_attn + per-op SAC | ✅ | 无 |
+| | CP | ❌ | 同原生那条，与我们的替换无关 |
+| | torch.compile | ❓ | 没测 |
+| | DCP 续训 | ❌ | **我们的取舍**：纯文本增量让视觉塔没有优化器状态，续训对不上 |
+| | 长稳 500 步 | ❓ | 一步约 2 分钟，没跑 |
+| **`qwen35_0_8b_npu`**<br>真实尺寸，真 tokenizer + 真 C4 + 4096 | 单卡 | ✅ | 20 步 `12.88826 → 8.14589` |
+| | FSDP2 × 8 | ✅ | 20 步 `12.90316 → 8.06005` |
+| | 其它并行 | ❓ | 没测 |
+| **`qwen35_0_8b_npu_fused`**<br>+ fla-npu 融合 GDN（需 `fla_npu`） | 单卡 | ✅ | tps 1,420 vs 纯 torch 244（≈5.8×）；AscendC 内核 run-to-run 非确定，无逐位 golden |
+| | 其它并行 | ❓ | 没测 |
 
-```bash
---config qwen35_122b_a10b        # 原味上游，零 override
---config qwen35_122b_a10b_npu    # 同一个，叠加昇腾增量
-```
+**原生与融合两条路径逐格一致**——能力边界一样，差别只在性能。
+明细与 loss：`docs/matrix/2026-09-02_qwen35_parallel.md`。
 
-| 场景 | 原味上游 | 换我们的模块 |
-|---|:--:|:--:|
-| 单卡 | 🟢 | 🟢 |
-| FSDP2 × 8 | 🟢 | 🟢 |
-| TP2 × FSDP2-4 | 🟢 | 🟢 |
-| PP2 × FSDP2-4 | 🟢 | 🟢 |
-| MoE dp2×tp2×pp2×ep4 | 🟢 | 🟢 |
-| varlen_attn + per-op SAC | 🟢 | 🟢 |
-| 真实尺寸 0.8B（真 tokenizer + 真 C4，4096 上下文） | — | 🟢 20 步 12.88826 → 8.14589 |
+## 能替换哪些模块
 
-明细与 loss 数字：`docs/matrix/2026-09-02_qwen35_parallel.md`。
-
-## 不能跑什么
-
-| 场景 | 状态 | 谁的限制 |
-|---|:--:|---|
-| Context Parallel | 🔴 | **上游**。`models/qwen3_5/parallelize.py:59` 无条件 raise：gated delta net 占 75% 的层，要整条序列。代码里没有设备判断，**CUDA 上一样跑不了** |
-| DCP 断点续训 | 🔴 | **我们**。纯文本增量让视觉塔没有优化器状态，续训对不上 |
-| 长稳 500 步 | ⚪ | 没测。一步约 2 分钟，500 步要十几小时 |
-
-多模态 debugmodel 本身**能跑**（golden 已冻结）；`qwen35_debugmodel_npu_text` 是纯文本变体，
-用于单独回归 GDN。
-
-## 能换哪些模块
-
-全部通过 `--override.imports` 控制，**不改代码**。裸 flavor 一个都不换，`_npu` 后缀换下面三条：
-
-| 上游节点 | 换成 | override 目标 | 为什么必须换 |
-|---|---|---|---|
-| `FlexAttention` | 昇腾融合注意力 | `ascend_titan.kernels.attention.npu_fusion_attention_from_flex` | 编译版 flex 在 910B2 上编不出 document mask（间接寻址要 Ascend950）；eager 版会实体化 O(T²) 分数矩阵 |
-| `VarlenAttention` | 同上 | `ascend_titan.kernels.attention.npu_fusion_attention` | stock varlen 要 `aten::_flash_attention_forward`，torch_npu 没有（NPU-1） |
-| `InnerGatedDeltaNet`（整棵子树） | `kernels/gdn.py` 纯 torch chunk delta rule | `ascend_titan.kernels.gdn.npu_gated_delta_net` | fla 的内核是给 CUDA 写的 Triton，`bishengir-compile` 不收 |
-
-**没有动的**（同样是结论）：视觉塔的 `FlexAttention` 保持原样（它吃 `BlockMask`）、
-MoE 路由、RoPE、loss、优化器、并行策略全是上游默认。
-
-可选加速（opt-in，数值在 bf16 舍入级不同，带自己的 golden）：
-
-| 模块 | override 目标 | 收益 |
-|---|---|---|
-| 融合 GDN（需 `fla_npu`） | `ascend_titan.kernels.gdn.npu_gated_delta_net_fused` | 0.8B 单卡 tps 1,420 vs 纯 torch 244（≈5.8×） |
-
-### 只换其中一个
+上游每个 flavor 两个入口：裸名 = 原样，`_npu` = 叠加下面三条。
+只想换其中一个？用 `--override.imports`，**不改代码**：
 
 ```bash
-# 上游 flavor 一个字不改，只挂注意力算子
 python -m ascend_titan.train --module ascend_titan.models.qwen3_5 \
   --config qwen35_122b_a10b \
   --override.imports ascend_titan.kernels.attention.npu_fusion_attention_from_flex
 ```
+
+| 上游节点 | 换成 | override 目标 | 为什么 |
+|---|---|---|---|
+| `FlexAttention` | 昇腾融合注意力 | `ascend_titan.kernels.attention.npu_fusion_attention_from_flex` | 编译版 flex 编不出 document mask；eager 版实体化 O(T²) 分数矩阵 |
+| `VarlenAttention` | 同上 | `ascend_titan.kernels.attention.npu_fusion_attention` | stock varlen 要 `aten::_flash_attention_forward`，torch_npu 没有（NPU-1） |
+| `InnerGatedDeltaNet`（整棵子树） | 纯 torch chunk delta rule | `ascend_titan.kernels.gdn.npu_gated_delta_net` | fla 的内核是给 CUDA 写的 Triton |
+| 同上（可选，需 `fla_npu`） | 融合 GDN | `ascend_titan.kernels.gdn.npu_gated_delta_net_fused` | 性能：≈5.8× |
+
+**没有替换的**（同样是结论）：视觉塔的 `FlexAttention`（它吃 `BlockMask`）、MoE 路由、
+RoPE、loss、优化器、并行策略——全是上游默认。
 
 ---
 

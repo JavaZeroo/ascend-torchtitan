@@ -1,54 +1,46 @@
 # models —— 每个模型一个包（L3）
 
-> **上游 torchtitan 模型在昇腾上能不能跑？**（2026-09-02 实测，910B2 / CANN 9.1.0 /
-> torch 2.15.0.dev20260812 + torch_npu master + `patches/`）
+> **上游 torchtitan 模型在昇腾上能不能跑？** 910B2 / CANN 9.1.0 /
+> torch 2.15.0.dev20260812 + torch_npu master + `patches/`，2026-09-02 实测。
+> ✅ 能跑 ｜ ❌ 不能跑 ｜ ❓ 没测过（不代表坏）
 
-全量能力矩阵 = 上游 `tests/integration_tests` 的 features + models 两套用例，**61 格**：
+能力矩阵 = 上游 `tests/integration_tests` 的 features + models 两套用例，**61 格：43 ✅ / 13 ❌ / 5 ❓**。
 
-| | 数量 |
-|---|--:|
-| 🟢 能跑 | **43** |
-| 🔴 不能跑 | 13 |
-| ⚪ 未评估 / 上游禁用 | 5 |
-
-按模型族：
-
-| 上游模型 | 🟢 | 🔴 | 一句话 | 细节 |
+| 上游模型 | ✅ | ❌ | 一句话 | 场景总表 |
 |---|--:|--:|---|---|
-| **Llama 3**（features 全套跑在它上面） | 28 | 6 | **零 override 原样训练**，本项目最强的结论 | [llama3/README](llama3/README.md) |
+| **Llama 3**（features 全套跑在它上面） | 28 | 6 | **零 override 原样训练** | [llama3/README](llama3/README.md) |
 | **Qwen3** | 3 | 1 | release 级参考模型，R1–R8 全绿 | [qwen3/README](qwen3/README.md) |
-| **Qwen3.5** | 3 | 0 | 原味与融合两条路径**能力边界完全一样** | [qwen3_5/README](qwen3_5/README.md) |
-| **DeepSeek-V3** | 3 | 2 | MoE + EP 通；树内 Triton 内核与 helion 不通 | 矩阵覆盖，无专属 recipe |
-| **GPT-OSS** | 2 | 2 | PP+FSDP+EP+SAC 通；compile 与 CP+PP 待查 | 矩阵覆盖 |
-| **Muse Glimmer** | 2 | 0 | text 与多模态都通 | 矩阵覆盖 |
-| **Kimi K2.5** | 0 | 2 | DistMuon 写死 CUDA，上游按设计如此 | 矩阵覆盖 |
-| **Kimi K3** | 0 | 1⚪ | debugmodel 单卡通；矩阵那格上游写死要 CUDA cap 10.0 | [kimi_k3/README](kimi_k3/README.md) |
+| **Qwen3.5** | 3 | 0 | 原生与融合两条路径能力边界一样 | [qwen3_5/README](qwen3_5/README.md) |
+| **DeepSeek-V3** | 3 | 2 | MoE + EP 通 | 矩阵覆盖，无专属 recipe |
+| **GPT-OSS** | 2 | 2 | PP+FSDP+EP+SAC 通 | 矩阵覆盖 |
+| **Muse Glimmer** | 2 | 0 | text 与多模态都通，无阻塞 | 矩阵覆盖 |
+| **Kimi K2.5** | 0 | 2 | DistMuon 写死 CUDA | 矩阵覆盖 |
+| **Kimi K3** | 0 | 1❓ | debugmodel 单卡通 | [kimi_k3/README](kimi_k3/README.md) |
 
-## 13 个红格，按谁来修分类
+## 13 个不能跑的，按谁的限制
 
 | 谁的限制 | 数量 | 是什么 |
 |---|--:|---|
-| **上游按设计 CUDA-only** | 5 | 树内 Triton 内核（`fused_swiglu`、`fused_grouped_experts`、`deepseek_v3_fused_mla_swiglu`）、DistMuon ×2 |
-| **CUDA-only 依赖缺失** | 2 | `helion` 内核 DSL（`deepseek_v3_mtp`、`qwen3_fused_qkv...helion_rope`） |
-| **910B2 硬件** | 1 | float8 没有 cast 内核，要 Ascend950 |
-| **显存**（CP + eager flex 的 O(T²) 分数矩阵） | 3 | `fsdp+cp`、`hsdp+cp_with_dp_shard`、`hsdp+cp_without_dp_shard` |
-| **待查** | 2 | `gpt_oss_fsdp+tp+ep+compile`、`gpt_oss_pp+fsdp+cp+ep+sacop` |
+| 上游按设计 CUDA-only | 5 | 树内 Triton 内核 ×3、DistMuon ×2 |
+| CUDA-only 依赖缺失 | 2 | `helion` 内核 DSL |
+| 910B2 硬件 | 1 | float8 没有 cast 内核，要 Ascend950 |
+| 显存（CP + eager flex 的 O(T²)） | 3 | `fsdp+cp`、`hsdp+cp_with_dp_shard`、`hsdp+cp_without_dp_shard` |
+| 待查 | 2 | `gpt_oss_fsdp+tp+ep+compile`、`gpt_oss_pp+fsdp+cp+ep+sacop` |
 
-**注意这张表里没有「torch_npu 缺陷」和「我们的缺陷」这两类**——它们曾经有，都已修掉或
-被证伪。历史与推翻过程见 `docs/matrix/`。
+**没有「torch_npu 缺陷」和「我们的缺陷」两类**——曾经有，都已修掉或被证伪。
 
 ## 三个通用限制（跨模型，不是某个模型的问题）
 
-| 限制 | 影响 | 现在怎么处理 | 什么时候消失 |
-|---|---|---|---|
-| 编译版 FlexAttention 的 document mask 在 910B2 上 lower 不了（间接寻址只有 Ascend950 有） | 所有用 flex 的模型 | 掩码构建与 flex 都走 eager（shim，硬件探测） | 换到 Ascend950 自动让路 |
-| eager flex 实体化 O(T²) 分数矩阵 | 非 CP 场景 → 换成昇腾融合注意力；CP 场景 → 只能忍，显存不够就 OOM | `flex_to_varlen`（CP 下自动跳过） | 让 CP 走融合算子（新增能力，见 `docs/capability-matrix.md`） |
-| stock `VarlenAttention` 要 `aten::_flash_attention_forward`，torch_npu 没有 | 所有 varlen flavor | 换成昇腾融合注意力 | NPU-1 合入后可换回 |
+| 限制 | 现在怎么处理 | 什么时候消失 |
+|---|---|---|
+| 编译版 flex 的 document mask 在 910B2 上 lower 不了（间接寻址只有 Ascend950 有） | 掩码构建与 flex 都走 eager（shim，硬件探测） | 换到 Ascend950 自动让路 |
+| eager flex 实体化 O(T²) 分数矩阵 | 非 CP → 换昇腾融合注意力；CP → 只能忍，显存不够就 OOM | 让 CP 走融合算子（新增能力） |
+| stock `VarlenAttention` 要 `aten::_flash_attention_forward`，torch_npu 没有 | 换昇腾融合注意力 | NPU-1 合入后可换回 |
 
-## 每个模型能换哪些模块
+## 怎么挑模块
 
-**统一规则**：上游每个 flavor 都有两个入口——裸名 = 原味上游零 override，`_npu` 后缀 =
-叠加该模型族的昇腾增量。想只换其中一个模块，用 `--override.imports`，**不需要改代码**：
+上游每个 flavor 两个入口：裸名 = 原样零 override，`_npu` = 叠加该模型族的增量。
+只换其中一个用 `--override.imports`，**不改代码**：
 
 ```bash
 python -m ascend_titan.train --module ascend_titan.models.qwen3_5 \
@@ -56,8 +48,7 @@ python -m ascend_titan.train --module ascend_titan.models.qwen3_5 \
   --override.imports ascend_titan.kernels.attention.npu_fusion_attention_from_flex
 ```
 
-各模型换了什么、没换什么，见上表里对应的 README——每个都有「能换哪些模块」一节，
-并且明确列出**没有动的**部分（那同样是结论）。
+各模型换了什么、**没换什么**，见上表里对应的 README。
 
 ## 支持状态
 
