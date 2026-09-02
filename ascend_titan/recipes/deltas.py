@@ -96,7 +96,20 @@ def flex_to_varlen(config: Trainer.Config, *, keep: Sequence[str] = ()) -> list[
     ``isinstance(attention_masks, VarlenMetadata)`` -- so converting that node
     swaps a clear failure ("flex needs inductor") for a confusing one deep inside
     the tower ("must be VarlenMetadata but got BlockMask").
+
+    **Never converts under Context Parallel.** Upstream implements CP's mask
+    sharding for ``BlockMask`` only and raises ``NotImplementedError: Context
+    Parallel is not supported with ScaledDotProductAttention or VarlenAttention``
+    (``models/common/decoder.py:186``); torch's CP hooks reach flex (all-gather
+    K/V, ``_cp_custom_ops.flex_cp_allgather``) and SDPA (ring attention), and
+    nothing else. Converting therefore turns a CP run that *works* into a hard
+    stop. Eager flex is the expensive choice, but under CP the sequence is already
+    sharded, so the O(T^2) scores it materialises are O(T^2/cp) per rank.
+    Measured 2026-09-02 on 910B2: ``llama3_debugmodel_cp4`` on 4 cards,
+    ``step 2 loss 7.74610``, 33.10 GiB, rc=0.
     """
+    if config.parallelism.context_parallel_degree > 1:
+        return []
     if _flex_attention_is_usable():
         return []
     converted: list[str] = []

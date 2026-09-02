@@ -165,3 +165,24 @@ def test_c4_subset_is_real_text_not_the_toy_file(tmp_path, monkeypatch):
     assert len(rows) == 4
     assert rows[0]["text"] == "document 0"
     assert assets.c4_subset(docs=4) == path  # cached, not rebuilt
+
+
+def test_flex_is_never_converted_under_context_parallel():
+    """CP + varlen is a hard stop upstream; CP + flex runs. Converting breaks it.
+
+    ``models/common/decoder.py`` raises NotImplementedError when a CP config holds
+    a VarlenAttention node, and torch's CP hooks only reach flex and SDPA. So the
+    conversion that rescues a non-CP run destroys a CP one. Measured on 910B2:
+    llama3_debugmodel_cp4 runs (step 2 loss 7.74610) with flex left alone.
+    """
+    from torchtitan.models.common.attention import FlexAttention
+    from torchtitan.models.llama3.config_registry import llama3_debugmodel
+
+    from ascend_titan.recipes.deltas import flex_to_varlen
+
+    config = llama3_debugmodel()
+    config.parallelism.context_parallel_degree = 4
+    before = len(list(config.traverse(FlexAttention.Config)))
+    assert before, "fixture must actually hold flex nodes for this test to mean anything"
+    assert flex_to_varlen(config) == []
+    assert len(list(config.traverse(FlexAttention.Config))) == before
