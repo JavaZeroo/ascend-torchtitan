@@ -37,7 +37,9 @@ $B --help | grep -i 'triton-ir-compile'        # -> 空；它只有 --enable-tri
 ```
 
 即 `compile_mode="simt_only"`（`compiler.py:1015-1017` 列为受支持的取值之一）
-在 3.2.2 里是**声明了但无法执行**的。
+在 3.2.2 里是**声明了但无法执行**的。二进制里连隐藏选项都没有：
+`strings bishengir-compile | grep -ci simt` 与 `--help-hidden | grep -ci simt` 都是 0，
+SIMT 根本没编进去。
 
 **不是"我们的 CANN 太旧"**：这台机器上三个 `bishengir-compile` 副本全是 1.2.0，
 SIMT 参数都是 0 个——
@@ -50,9 +52,38 @@ SIMT 参数都是 0 个——
 
 也就是说 `simt_only` 需要一个比任何已发布组件都新的 bishengir，而它没有随包发出来。
 
-**触发路径**（不是我们主动选的）：torch_npu 的 inductor 对 "indirect load + sum" 模式会选
-`simt_only`（`torch_npu/_inductor/codegen/ir.py:1717 define_npu_kernel_type`，
-取值表在 `torch_npu/_inductor/config.py:319`）。FlexAttention 的 document mask 正是这个模式。
+**触发路径**（实测，不是我们主动选的）：910B2 上 `torch_npu/_inductor/codegen/triton.py:931`
+在 `NPUTritonKernel.add_npu_inductor_meta` 里**无条件**写
+
+```python
+inductor_meta["npu_kernel_type"] = str(NPUKernelType.SIMD_SIMT_MIX)
+```
+
+它忽略了构造函数刚按芯片算好的 `self.npu_kernel_type`（`triton.py:1018-1020`：非 A5 是
+`SIMD`），也没有像同项目其它四处那样带 `is_ascend950` / `inductor_indirect_memory_mode`
+门（`triton.py:1018`、`ir.py:1566`、`ir.py:1858`、`config.py:319`）。同文件里
+`NPUIndexTritonKernel` 走的是 `triton.py:1885` 的 `str(self.npu_kernel_type)`，是对的——
+**931 这一处是唯一的漏网**。
+
+`SIMD_SIMT_MIX` 一旦进 `inductor_meta`，autotune 就会生成 SIMT_ONLY 候选
+（`runtime/triton_heuristics.py:3360`、`runtime/fasta_autotune.py:407`），于是
+`compile_mode="simt_only"` 传到 triton-ascend，`--pure-simt` 就发出去了。
+实测抓到的候选串带着 `--num-warps=64/32/16/8`，正是 autotune 在扫。
+
+走到 `NPUTritonKernel` 的是 `NPUNoLinearTritonScheduling`（`codegen/scheduling.py:56`），
+即内存访问线性化失败后的回退路径——FlexAttention 的 document mask 正好落在这里。
+
+**修了这一行会怎样（已实测）**：SIMT 参数确实消失，改走 SIMD
+（`--enable-triton-kernel-compile=true`），然后停在更深的一层：
+
+```
+[ConvertLinalgRToBinary] encounters error:
+LLVM ERROR: Failed to obtain op buffer shape size which should be static.
+```
+
+也就是说 **910B2 上这个 kernel 本来就没有能走通的编译路径**：indirect load + sum 需要
+SIMT，而 SIMT 只在 A5 上开。修 931 不能让它跑起来，只能把报错从"参数不认识"变成诚实的
+"这条路 lower 不了"。这条仍然值得修——现在的报错把人引向 CANN 版本，是错的方向。
 
 **最小复现**（不需要模型，两行）：
 

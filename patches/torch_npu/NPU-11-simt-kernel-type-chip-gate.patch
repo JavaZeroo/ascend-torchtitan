@@ -1,0 +1,78 @@
+From 92f3e1346fc5fddd94e6067853cae6da941b4852 Mon Sep 17 00:00:00 2001
+From: JavaZeroo <2487163254@qq.com>
+Date: Wed, 2 Sep 2026 10:11:34 +0800
+Subject: [PATCH] fix: gate the SIMT kernel type on Ascend950 in
+ NPUTritonKernel
+
+NPUTritonKernel.add_npu_inductor_meta writes
+
+    inductor_meta["npu_kernel_type"] = str(NPUKernelType.SIMD_SIMT_MIX)
+
+unconditionally. Every other place that picks a kernel type gates on the
+chip -- NPUIndexTritonKernel.__init__ (triton.py:1017), ir.py:1566,
+ir.py:1858 and config.py:319 all check is_ascend950 or
+inductor_indirect_memory_mode, which is None off Ascend950 -- so this one
+line is the only path that asks for a SIMT mode on 910B2.
+
+The consequence is not a slow kernel but a hard failure. Once
+"simd_simt_mix" reaches inductor_meta, the autotuner adds SIMT_ONLY
+candidates (runtime/triton_heuristics.py:3360,
+runtime/fasta_autotune.py:407), compile_mode="simt_only" reaches the
+Triton-Ascend backend, and it appends --enable-triton-ir-compile and
+--pure-simt (triton/backends/ascend/compiler.py:1076-1077). No released
+bishengir-compile implements those: 1.2.0 as shipped by triton-ascend
+3.2.2 and by CANN 9.1.0 has zero SIMT options, hidden ones included. The
+user sees
+
+  bishengir-compile: Unknown command line argument '--pure-simt'.
+  triton.compiler.errors.MLIRCompilationError:
+    [ConvertLinalgRToBinary] encounters error
+
+which reads like a stale CANN and sends people to upgrade the toolkit,
+where nothing changes.
+
+Reproduced on 910B2 / CANN 9.1.0 / torch 2.15.0.dev20260812 with
+torch.compile over a FlexAttention document mask, which reaches
+NPUTritonKernel through NPUNoLinearTritonScheduling
+(codegen/scheduling.py:56) after memory-access linearization fails. The
+autotune candidates were captured at the subprocess boundary and carry
+--num-warps=64/32/16/8, confirming the autotuner as the source.
+
+With this change the SIMT flags are gone and the same kernel fails
+further down, in the SIMD path, with
+
+  LLVM ERROR: Failed to obtain op buffer shape size which should be static.
+
+That is the honest limit: indirect load + sum has no lowering on 910B2.
+This commit does not claim to make such kernels compile. It stops
+torch_npu from requesting a compile mode the platform does not have, so
+the reported error points at the real constraint.
+
+Claude-Session: https://claude.ai/code/session_01WNpsCvjYc85YP4XZkwuAzj
+---
+ torch_npu/_inductor/codegen/triton.py | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/torch_npu/_inductor/codegen/triton.py b/torch_npu/_inductor/codegen/triton.py
+index 6fcfe151d..614ea2303 100644
+--- a/torch_npu/_inductor/codegen/triton.py
++++ b/torch_npu/_inductor/codegen/triton.py
+@@ -928,7 +928,14 @@ class NPUTritonKernel(TritonKernel):
+             axis_names += [tree.prefix for tree in reduction_range_trees]
+ 
+         inductor_meta["requires_no_linear_block_remap"] = True
+-        inductor_meta["npu_kernel_type"] = str(NPUKernelType.SIMD_SIMT_MIX)
++        # SIMT compile modes exist only on Ascend950; asking for simd_simt_mix
++        # elsewhere makes the autotuner emit simt_only candidates, whose
++        # --pure-simt / --enable-triton-ir-compile flags no released
++        # bishengir-compile accepts. Mirror the chip gate used everywhere else
++        # (see __init__ of NPUIndexTritonKernel, ir.py, config.py).
++        inductor_meta["npu_kernel_type"] = str(
++            NPUKernelType.SIMD_SIMT_MIX if npu_config.is_ascend950 else NPUKernelType.SIMD
++        )
+         inductor_meta["split_axis"] = split_axis
+         inductor_meta["tiling_axis"] = tiling_axis
+         inductor_meta["low_dims"] = [tiling_axis[-1]]
+-- 
+2.43.0
+

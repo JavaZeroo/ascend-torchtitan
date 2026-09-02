@@ -58,3 +58,43 @@
 `is_*_template()` 在 NPU 上都返回 False，调度行为不变。
 
 issue [#4447](https://gitcode.com/Ascend/pytorch/issues/4447) · PR [!45534](https://gitcode.com/Ascend/pytorch/merge_requests/45534)
+
+## NPU-11：`NPUTritonKernel` 在非 Ascend950 上也请求 SIMT 编译模式
+
+`torch_npu/_inductor/codegen/triton.py:931`（`NPUTritonKernel.add_npu_inductor_meta`）无条件写
+
+```python
+inductor_meta["npu_kernel_type"] = str(NPUKernelType.SIMD_SIMT_MIX)
+```
+
+项目里其它四处选内核类型的地方全都带芯片门——`triton.py:1017`（`NPUIndexTritonKernel.__init__`）、
+`ir.py:1566`、`ir.py:1858`、`config.py:319`，非 A5 时 `inductor_indirect_memory_mode` 是 `None`。
+**931 是唯一的漏网**，也是 910B2 上唯一会请求 SIMT 的路径。
+
+后果不是慢，是编译直接失败。`simd_simt_mix` 进了 `inductor_meta`，autotune 就生成 SIMT_ONLY
+候选（`runtime/triton_heuristics.py:3360`、`runtime/fasta_autotune.py:407`），
+`compile_mode="simt_only"` 传到 Triton-Ascend 后端，后者追加 `--enable-triton-ir-compile`
+与 `--pure-simt`（`triton/backends/ascend/compiler.py:1076-1077`）。已发布的
+`bishengir-compile` 没有一个实现这些参数（见 TA-1），于是用户看到
+
+```
+bishengir-compile: Unknown command line argument '--pure-simt'.
+MLIRCompilationError: [ConvertLinalgRToBinary] encounters error
+```
+
+这看起来像 CANN 太旧，会把人引去升级 toolkit，而升级不解决任何问题。
+
+**触发路径**：内存访问线性化失败后回退到 `NPUNoLinearTritonScheduling`
+（`codegen/scheduling.py:56`，它的 `kernel_type` 就是 `NPUTritonKernel`）。
+FlexAttention 的 document mask 正落在这里。抓到的 autotune 候选带
+`--num-warps=64/32/16/8`，坐实来源是 autotune。
+
+修复：`patches/torch_npu/NPU-11-simt-kernel-type-chip-gate.patch`——按 `is_ascend950` 分流，
+非 A5 用 `SIMD`。
+
+**修完不代表能跑**（已实测）：SIMT 参数消失，改走 SIMD，然后停在
+`LLVM ERROR: Failed to obtain op buffer shape size which should be static.`。
+indirect load + sum 在 910B2 上本来就没有可 lower 的路径。这条补丁的价值是**把报错变诚实**，
+不是解锁功能。P13：不要拿它当"flex 能编了"的证据。
+
+未提交（等 TA-1 一起）。
