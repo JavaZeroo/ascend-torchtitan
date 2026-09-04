@@ -25,7 +25,11 @@ case "${1:-}" in
     bash build.sh --pkg --soc="$SOC" --ops=situ_glu,situ_glu_grad --vendor_name=ascend_titan -j"$JOBS"
     ls build_out/*.run
     echo "install the run package, then the python side:"
-    echo "  ./build_out/cann-ops-nn-*linux*.run && source \$ASCEND_HOME_PATH/opp/vendors/ascend_titan/bin/set_env.bash"
+    echo "  ./build_out/cann-ops-nn-*linux*.run"
+    # run 包把 vendor 装成 <vendor_name>_nn，而 ops-nn 的 aclnn 加载器只从
+    # ASCEND_CUSTOM_OPP_PATH / LD_LIBRARY_PATH 找 libcust_opapi.so，两处都没有时会退回按
+    # soname dlopen，抓到别的 vendor 的同名库 —— 表现为运行时 aclnnSituGlu 找不到。
+    echo "  export ASCEND_CUSTOM_OPP_PATH=\$ASCEND_HOME_PATH/opp/vendors/ascend_titan_nn:\$ASCEND_CUSTOM_OPP_PATH"
     echo "  pip install ninja && TORCH_EXTENSION_OPS=situ_glu,situ_glu_grad TORCH_EXTENSION_VENDOR=ascend_titan pip install ./torch_extension"
     ;;
   ops-transformer)

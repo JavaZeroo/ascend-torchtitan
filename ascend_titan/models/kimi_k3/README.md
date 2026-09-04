@@ -21,7 +21,7 @@
 | | DCP 续训 | ❓ | 没测。recipe 里 `checkpoint.enable = False`（冒烟配置） |
 | | 长稳 500 步 | ❓ | 一步约 5 秒，没跑 |
 | | 真实尺寸 | ❌ | **上游只有 `kimi_k3_debugmodel` 一个 flavor**，没有真实尺寸配置可跑 |
-| **`kimi_k3_debugmodel_npu_fused`**<br>+ ops-nn SiTU-GLU | 单卡 | ✅ | 10 步 `loss 4.16782`，tps 48。**必须先设 `ASCEND_CUSTOM_OPP_PATH`**，否则运行时 `aclnnSituGlu ... not found`（见第 3 节） |
+| **`kimi_k3_debugmodel_npu_fused`**<br>+ ops-nn SiTU-GLU（需 ops-nn run 包） | 单卡 | ✅ | 10 步 `loss 4.46498`，显存 12.88 GiB，tps 49——**与参考路径同一量级**，说明瓶颈不在 MoE 的激活 |
 | | 其它场景 | ❓ | 与参考路径同族，没有逐格测 |
 | **`kimi_k3_mm_fsdp`**（矩阵用例） | 2 卡 | ❌ | **上游写死要 CUDA capability 10.0 / 10.3**，不是昇腾能绕的 |
 
@@ -73,11 +73,22 @@ MODULE=ascend_titan.models.kimi_k3 ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
 ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPU=8 \
 MODULE=ascend_titan.models.kimi_k3 CONFIG=kimi_k3_debugmodel_npu ./scripts/run_train.sh \
     --parallelism.data_parallel_shard_degree 8
+
+# 融合 SiTU-GLU（需先装 ops-nn 的 run 包与 torch extension：./scripts/build_kernels.sh ops-nn）
+ASCEND_RT_VISIBLE_DEVICES=0 NPU=1 \
+MODULE=ascend_titan.models.kimi_k3 CONFIG=kimi_k3_debugmodel_npu_fused ./scripts/run_train.sh
 ```
 
-`check_golden.sh` 的版本元组用的是 **PATH 上的 `python`**，不是 `PYTHON=` 指的那个。
-在 venv 外面调它会把元组算成系统解释器的版本，于是"找不到 golden"，然后**把当次输出写成新
-golden 并 exit 0**——看起来全绿，实际一条都没比对。跑之前把 venv 放进 PATH。
+没装 ops-nn 时 `kimi_k3_debugmodel_npu_fused` **直接失败**，不是退回参考路径：
+
+```
+ValueError: override.imports target 'ascend_titan.kernels.situ_glu.ops_nn_situ_glu'
+names no registered @override.
+```
+
+`kernels/situ_glu.py` 那条 ADR-004 的 WARNING 会照常打（"situ_glu unavailable …;
+KimiFeedForward stays on upstream eager"），但 recipe 仍然把 override 目标写进
+`config.override.imports`，上游拒绝未注册的目标。要参考路径就用 `kimi_k3_debugmodel_npu`。
 
 ## 2. 上游为什么在昇腾上跑不了，以及我们做了什么
 
@@ -95,34 +106,7 @@ golden 并 exit 0**——看起来全绿，实际一条都没比对。跑之前�
 torchtitan 拒绝"祖先已被别的 override 认领"的嵌套 override，所以嵌套的 kernel 配置在
 工厂里用 `derive` 就地换掉。
 
-## 3. 融合 SiTU-GLU 要先把 OPP 路径指对
-
-`kimi_k3_debugmodel_npu_fused` 直接跑会在第一次前向炸：
-
-```
-RuntimeError: aclnnSituGlu or aclnnSituGluGetWorkspaceSize not found in
-libcust_opapi.so or libopapi_nn.so.
-```
-
-符号没丢。`nm -D` 在 `$ASCEND_HOME_PATH/opp/vendors/ascend_titan_nn/op_api/lib/libcust_opapi.so`
-里能看到 `aclnnSituGlu` / `aclnnSituGluGetWorkspaceSize` 以及对应的 Grad 两个。问题在加载器：
-ops-nn 的 `aclnn_common.h::GetCustOpApiHandlers` 只从 `ASCEND_CUSTOM_OPP_PATH` 和
-`LD_LIBRARY_PATH` 两处拼 `/op_api/lib/libcust_opapi.so`，两处都没有 ops-nn 的 vendor 目录时
-退回按 soname `dlopen`，抓到的是别的 vendor 的同名库，里面没有 SituGlu。
-
-```bash
-export ASCEND_CUSTOM_OPP_PATH=$ASCEND_HOME_PATH/opp/vendors/ascend_titan_nn
-```
-
-加上之后 `tests/npu/test_kernel_situ_glu.py` 2 passed、融合训练 10 步 rc=0。
-`scripts/build_kernels.sh` 里那句 `source .../ascend_titan/bin/set_env.bash` 是过期的，
-那个文件三个 vendor 目录下都不存在。
-
-两个 vendor 现在共用这一个环境变量：`_bootstrap.setup()` 无条件 import `fla_npu`，
-而它的 `__init__` 会把自己的两个路径 **prepend** 进去。prepend 不是覆盖，所以预先设好的值
-能活下来；但谁先 import 谁排前面，这条路以后还会咬人。
-
-## 4. 性能
+## 3. 性能
 
 tps 47 / MFU 0.05%。三个原因，按影响排序：
 
@@ -131,10 +115,10 @@ tps 47 / MFU 0.05%。三个原因，按影响排序：
 2. **KDA 走 attn_gym 的 reference 实现**，FP32 逐块 python 循环。
 3. MoE 的 grouped experts 未启用融合算子。
 
-按 P13，在这三条解决之前不记性能基线：数字会误导。融合 SiTU-GLU 实测把 tps 从 47 抬到 48,
-说明瓶颈不在 MoE 的激活。
+按 P13，在这三条解决之前不记性能基线：数字会误导。融合 SiTU-GLU 实测与参考路径同一量级
+（47 vs 49），这本身是个结论：瓶颈不在 MoE 的激活。
 
-## 5. 已知缺口（离 🟢 还差什么）
+## 4. 已知缺口（离 🟢 还差什么）
 
 | 判据 | 状态 | 缺什么 |
 |---|:--:|---|
@@ -142,7 +126,7 @@ tps 47 / MFU 0.05%。三个原因，按影响排序：
 | R2 并行覆盖 | 🟡 | 单卡 🟢、FSDP2×2 🟢、FSDP2×8 🟢、HSDP 2×4 🟢；TP / PP / EP / CP 上游按设计不支持（见场景总表）。上游 main 已落地 EP（#4314），升 pin 后重测 |
 | R3 数值可信 | 🟡 | golden 逐位冻结并复现 🟢；算子级对拍只有 **CPU** 的 `tests/unit/test_kernel_kda.py`（覆盖我们自己写的 depthwise causal conv1d，含 packed 边界），**缺 910B2 上的 NPU 对拍**，也缺真实尺寸下的长步数下降曲线（被 R1 卡住） |
 | R4 checkpoint | ⚪ | DCP 存取 / 续训 / HF 互操作三件事一件都没测 |
-| R5 性能 | 🔴 | 见第 4 节。融合 SiTU-GLU 已跑通但不改变吞吐；瓶颈是 eager flex 与 reference KDA |
+| R5 性能 | 🔴 | 见第 3 节。融合 SiTU-GLU 已跑通但不改变吞吐；瓶颈是 eager flex 与 reference KDA |
 | R6 长稳 | ⚪ | 没跑。debugmodel 跑 500 步不算数（判据要求真实尺寸），而真实尺寸被 R1 卡住 |
 | R7 文档 | 🟢 | 本文 + `docs/matrix/2026-09-04_kimi_k3_parallel.md` |
 | R8 无隐藏降级 | 🟢 | `ascend-titan-provenance --module ascend_titan.models.kimi_k3 --config kimi_k3_debugmodel_npu`：`AscendFusionAttention` ×6、`AscendInnerKDA` ×18、`AscendKDAKernel` ×18，共 42 个 ascend 节点；视觉塔那 1 个 `FlexAttention` 按设计留在上游实现 |
@@ -151,11 +135,11 @@ tps 47 / MFU 0.05%。三个原因，按影响排序：
 R5 也没有值得优化的目标。等上游给出真实尺寸的 flavor，或者我们自己按 model_registry
 拼一个——后者要先确认权重规模能在 8×910B2 上装下。
 
-## 6. 待办
+## 5. 待办
 
 - **KDA 融合算子**替换 reference 实现。`../flash-linear-attention-npu` 的 `fla/ops/ascendc/`
   下有 `kda`，和 qwen3.5 用的 `gdn` 是同一个库；qwen3.5 那条路已经跑通（≈5.8×），
-  kimi_k3 这条还没接。接的时候注意 `fla_npu` 的导入时机是硬约束（见第 3 节）。
+  kimi_k3 这条还没接。接的时候注意 `fla_npu` 必须在第一个 NPU 算子执行之前 import。
 - **补 910B2 上的 KDA 算子对拍**（`tests/npu/test_kernel_kda.py`），补上 R3 的缺口。
 - **`attn_res`**：ops-transformer 的 `block_attn_res_update` 缺反向，只能用于推理；
   要么等它补反向（gitcode 提 issue，P9），要么自己写反向。
@@ -163,6 +147,6 @@ R5 也没有值得优化的目标。等上游给出真实尺寸的 flavor，或�
   `[Kimi K3] Expert Parallelism support`（#4314），`kda.py` 同时改了 117 行，
   override 的四个类名还在，语义有没有漂要真跑才知道。
 
-## 7. 上游还有什么
+## 6. 上游还有什么
 
 只有 `kimi_k3_debugmodel`。真实尺寸的 flavor 上游还没给。
