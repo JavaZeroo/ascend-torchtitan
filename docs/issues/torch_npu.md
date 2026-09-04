@@ -130,3 +130,42 @@ TypeError: _create_block_mask_streaming() got an unexpected keyword argument 'se
 torch nightly 走。**诉求还是那一条：以 nightly 为 CI 基线。**
 
 未提交。
+
+## NPU-13：flex 降级层写死 `get_float32_precision`，torch 换成 setter 后 `torch_npu._inductor` 直接 import 失败
+
+`torch_npu/_inductor/kernel/flex_attention.py` 在 post-split 的 `flex/` 包那一段
+bulk import 里带上了 `get_float32_precision`。torch 在 `2.15.0.dev20260903` 那版把这个
+getter 换成了 setter `set_float32_precision(kernel_options, dtype)`（同一个文件同一个位置，
+新增了 getter 表达不了的 bfx9 fp32 模式）。少了这一个符号，整段 bulk import 就失败：
+
+```
+ImportError: cannot import name 'get_float32_precision' from
+'torch._inductor.kernel.flex.flex_attention'
+
+During handling of the above exception, another exception occurred:
+
+ModuleNotFoundError: No module named 'torch._inductor.kernel.flex_attention'
+```
+
+第二条才是真正难查的地方：`except ImportError` 兜底去 `torch._inductor.kernel.flex_attention`
+——**这个 pre-split 路径在本仓构建的任何 torch 线上都不存在**（实测 torch 2.13.0 与 2.15 nightly
+都只有 `torch/_inductor/kernel/flex/` 包）。所以兜底分支永远不可能生效，唯一的作用是把
+「某个符号没了」翻译成「模块不存在」，把排查方向带偏。
+
+影响：`import torch_npu._inductor` 整个失败。任何探测 inductor 的代码（我们探
+`inductor_indirect_memory_mode` 的 flex shim 就是）在 import 阶段就崩，训练起不来。
+
+复现（本仓，910B2 / CANN 9.1.0）：torch_npu master 配 torch `2.15.0.dev20260903+cpu`，
+六条 golden 全部拿不到 loss 行；换 `dev20260902` 全绿。用 nightly wheel 单文件二分定位到
+`dev20260902` PRESENT、`dev20260903` GONE。
+
+修复：`patches/torch_npu/pending/NPU-13-inductor-flex-float32-precision.patch`
+——把 `get_float32_precision` 从两段 bulk import 里摘出来，按「新 API 优先」绑定
+`_set_float32_precision`：有 setter 用 setter，没有就包一层 getter；三个降级调用点改为传
+`query.get_dtype()`，与上游自己的调用点一致。UT `test/_inductor/test_flex_float32_precision.py`。
+
+已提交：issue [#4606](https://gitcode.com/Ascend/pytorch/issues/4606) · PR [!45789](https://gitcode.com/Ascend/pytorch/merge_requests/45789)。
+
+和 NPU-7（`make_reduction` 签名漂移）、NPU-12（`create_block_mask` 新关键字）同一类：
+torch_npu 的 inductor 覆盖层必须跟着 torch nightly 走。**诉求还是那一条：以 nightly 为 CI 基线**，
+否则每次 torch 动一个内部符号，torch_npu 就要等有人从外面撞上来才知道。
