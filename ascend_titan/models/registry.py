@@ -186,19 +186,32 @@ MODELS: dict[str, ModelEntry] = {
         title="Kimi K3",
         status="🟡",
         summary=(
-            "多模态 + KDA + MoE，单卡 10 步 loss 4.56418，golden 已冻结并逐位复现。"
-            "只有 debugmodel：R1–R8 一条都没取。"
+            "多模态 + KDA + MoE，单卡 10 步 loss 4.56418，golden 已冻结并逐位复现；"
+            "FSDP2×2 / ×8 与 HSDP 2×4 已测通。TP/PP/EP/CP 上游按设计不支持，"
+            "真实尺寸 flavor 上游还没给（R1 因此卡住）。"
         ),
         recipes="ascend_titan.models.kimi_k3.recipes",
         flavors=("kimi_k3_debugmodel_npu", "kimi_k3_debugmodel_npu_fused"),
         golden=("kimi_k3_debugmodel_npu",),
         notes=(
             "需要 `nvidia-cutlass-dsl`（有 aarch64 wheel，只 import 不执行）；"
-            "KDA 走 `kernels/kda.py` 的 override；确定性模式下 flex 靠 "
-            "`flex_attention_eager` shim 走 eager（TT-12）。"
-            "融合变体（ops-nn SiTU-GLU）实测 loss 4.29434 / tps 48。"
-            "性能极低（flex 走 eager，910B2 硬件门），不做性能基线。"
+            "KDA 走 `kernels/kda.py` 的 override；flex 靠 `flex_attention_eager` shim 走 "
+            "eager，它挂在 `set_determinism` 上，对每一次运行都生效（TT-12）。"
+            "融合变体（ops-nn SiTU-GLU）实测 loss 4.16782 / tps 48，"
+            "**要先 export ASCEND_CUSTOM_OPP_PATH 指到 ascend_titan_nn vendor**，否则运行时 "
+            "aclnnSituGlu 找不到。性能极低（flex 走 eager，910B2 硬件门），不做性能基线。"
         ),
+        criteria={
+            "R1": "🔴",  # 上游只有 debugmodel，没有真实尺寸 flavor
+            "R2": "🟡",  # 单卡/FSDP2×2/×8/HSDP 🟢；TP/PP/EP/CP 上游按设计不支持
+            "R3": "🟡",  # golden 逐位冻结；算子对拍只有 CPU，缺 910B2 的 KDA 对拍
+            "R4": "⚪",  # DCP / 续训 / HF 互操作一件都没测
+            "R5": "🔴",  # 瓶颈是 eager flex 与 reference KDA
+            "R6": "⚪",  # 长稳没跑，被 R1 卡住
+            "R7": "🟢",  # README + docs/matrix/2026-09-04_kimi_k3_parallel.md
+            "R8": "🟢",  # provenance 42 个 ascend 节点
+        },
+        evidence="docs/matrix/2026-09-04_kimi_k3_parallel.md",
     ),
     "deepseek_v3": ModelEntry(
         name="deepseek_v3",
